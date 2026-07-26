@@ -46,14 +46,64 @@ CPS Access Control เป็นระบบจัดการสิทธิ์�
 
 ### 2.2 Project Structure
 ```
-src/
-├── modules/           # Feature modules (auth, users, roles, etc.)
-├── entities/iam/      # TypeORM entities for 11 database tables
-├── database/          # Migrations, seeds, reset scripts
-├── config/            # Centralized app/database/env configuration
-├── common/            # Guards, decorators, enums, exceptions, pipes, interceptors
-├── main.ts            # Application bootstrap
-└── app.module.ts      # Root module
+cps-api/
+├── src/
+│   ├── modules/                    # Feature modules
+│   │   ├── access-control/         # Cross-cutting permission calculation
+│   │   ├── audit-logs/             # Audit logging
+│   │   ├── auth/                   # Authentication & session management
+│   │   ├── departments/            # Department management
+│   │   ├── menus/                  # Menu hierarchy management
+│   │   ├── permissions/            # Permission read-only
+│   │   ├── roles/                  # Role management
+│   │   ├── sessions/               # Session management
+│   │   └── users/                  # User management
+│   ├── entities/iam/               # TypeORM entities (11 tables)
+│   │   ├── actions.entity.ts
+│   │   ├── audit-log.entity.ts
+│   │   ├── auth-session.entity.ts
+│   │   ├── department.entity.ts
+│   │   ├── menu.entity.ts
+│   │   ├── permission.entity.ts
+│   │   ├── role-action.entity.ts
+│   │   ├── role.entity.ts
+│   │   ├── user-department-permission.entity.ts
+│   │   ├── user-department-role.entity.ts
+│   │   └── user.entity.ts
+│   ├── database/                   # Database operations
+│   │   ├── migrations/             # TypeORM migrations
+│   │   ├── seeds/                  # Seed scripts
+│   │   │   ├── create-super-admin.ts
+│   │   │   └── seed.ts
+│   │   ├── data-source.ts          # TypeORM DataSource config
+│   │   └── reset-database.ts       # Development reset script
+│   ├── config/                     # Configuration
+│   │   ├── app.config.ts           # App-level config
+│   │   ├── database.config.ts      # Database config
+│   │   └── env.utils.ts            # Environment variable utilities
+│   ├── common/                     # Shared utilities
+│   │   ├── constants/              # Application constants
+│   │   ├── decorators/             # Custom decorators (@Public, @Roles, etc.)
+│   │   ├── dto/                    # Common DTOs
+│   │   ├── enums/                  # Application enums
+│   │   ├── exceptions/             # Custom exceptions
+│   │   ├── guards/                 # Auth guards (JwtAuthGuard, RolesGuard, etc.)
+│   │   ├── interceptors/           # Logging interceptor
+│   │   ├── interfaces/             # TypeScript interfaces
+│   │   └── pipes/                  # Validation pipes
+│   ├── main.ts                     # Application bootstrap
+│   └── app.module.ts               # Root module
+├── dist/                           # Compiled output
+├── node_modules/                   # Dependencies
+├── .env.example                    # Environment variables template
+├── .env                            # Actual environment variables (not committed)
+├── .gitignore
+├── nest-cli.json
+├── package.json
+├── pnpm-lock.yaml
+├── tsconfig.json
+├── PROJECT-WIKI.md                 # This file
+└── API_ENDPOINTS.md                # API documentation
 ```
 
 ## 3. โมเดลข้อมูล (Data Model)
