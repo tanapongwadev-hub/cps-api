@@ -4,14 +4,16 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import * as argon2 from 'argon2';
 import { User } from '../../entities/iam/user.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
 import { UserDepartmentPermission } from '../../entities/iam/user-department-permission.entity';
+import { Permission } from '../../entities/iam/permission.entity';
 import { CreateUserDto, CreateAssignmentDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
 
 @Injectable()
@@ -255,7 +257,40 @@ export class UsersService {
       .orderBy('udr.createdAt', 'DESC')
       .getMany();
 
-    return assignments;
+    if (assignments.length === 0) {
+      return [];
+    }
+
+    const assignmentIds = assignments.map((assignment) => assignment.id);
+    const assignmentPermissions = await this.userDepartmentPermissionRepository
+      .createQueryBuilder('udp')
+      .leftJoinAndSelect('udp.permission', 'permission')
+      .where('udp.userDepartmentRoleId IN (:...assignmentIds)', {
+        assignmentIds,
+      })
+      .andWhere('udp.isActive = :isActive', { isActive: true })
+      .getMany();
+    const permissionsByAssignment = new Map<string, Permission[]>();
+
+    for (const assignmentPermission of assignmentPermissions) {
+      if (!assignmentPermission.permission) {
+        continue;
+      }
+
+      const permissions = permissionsByAssignment.get(
+        assignmentPermission.userDepartmentRoleId,
+      ) ?? [];
+      permissions.push(assignmentPermission.permission);
+      permissionsByAssignment.set(
+        assignmentPermission.userDepartmentRoleId,
+        permissions,
+      );
+    }
+
+    return assignments.map((assignment) => ({
+      ...assignment,
+      permissions: permissionsByAssignment.get(assignment.id) ?? [],
+    }));
   }
 
   async createAssignment(userId: string, assignmentDto: CreateAssignmentDto) {
@@ -304,5 +339,163 @@ export class UsersService {
     }
 
     return this.getAssignments(userId);
+  }
+
+  async updateAssignment(
+    userId: string,
+    assignmentId: string,
+    updateAssignmentDto: UpdateAssignmentDto,
+  ) {
+    const assignment = await this.userDepartmentRoleRepository.findOne({
+      where: { id: assignmentId, userId },
+    });
+
+    if (!assignment) {
+      throw new NotFoundException('User assignment not found');
+    }
+
+    await this.userRepository.manager.transaction(async (manager) => {
+      const assignmentRepository = manager.getRepository(UserDepartmentRole);
+      const permissionRepository = manager.getRepository(
+        UserDepartmentPermission,
+      );
+      const duplicateAssignment = await assignmentRepository.findOne({
+        where: {
+          userId,
+          departmentId: updateAssignmentDto.departmentId,
+        },
+      });
+
+      if (duplicateAssignment && duplicateAssignment.id !== assignmentId) {
+        throw new BadRequestException(
+          'User already has this department assignment',
+        );
+      }
+
+      if (assignment.roleId !== updateAssignmentDto.roleId) {
+        await this.assertAssignmentCanStopBeingSuperAdmin(
+          userId,
+          assignmentId,
+        );
+      }
+
+      assignment.departmentId = updateAssignmentDto.departmentId;
+      assignment.roleId = updateAssignmentDto.roleId;
+      await assignmentRepository.save(assignment);
+
+      await permissionRepository.delete({
+        userDepartmentRoleId: assignmentId,
+      });
+
+      for (const permissionId of updateAssignmentDto.permissionIds ?? []) {
+        await permissionRepository.save(
+          permissionRepository.create({
+            userDepartmentRoleId: assignmentId,
+            permissionId,
+            isActive: true,
+            grantedAt: new Date(),
+          }),
+        );
+      }
+    });
+
+    const updatedAssignment = (await this.getAssignments(userId)).find(
+      (item) => item.id === assignmentId,
+    );
+
+    if (!updatedAssignment) {
+      throw new NotFoundException('User assignment not found');
+    }
+
+    return updatedAssignment;
+  }
+
+  async removeAssignment(userId: string, assignmentId: string) {
+    const assignment = await this.userDepartmentRoleRepository.findOne({
+      where: { id: assignmentId, userId },
+    });
+
+    if (!assignment) {
+      throw new NotFoundException('User assignment not found');
+    }
+
+    await this.assertAssignmentCanStopBeingSuperAdmin(userId, assignmentId);
+
+    await this.userRepository.manager.transaction(async (manager) => {
+      const assignmentRepository = manager.getRepository(UserDepartmentRole);
+      const permissionRepository = manager.getRepository(
+        UserDepartmentPermission,
+      );
+
+      await permissionRepository.delete({ userDepartmentRoleId: assignmentId });
+      await assignmentRepository.delete({ id: assignmentId, userId });
+    });
+
+    return { message: 'User assignment deleted successfully' };
+  }
+
+  async remove(id: string) {
+    const user = await this.findOne(id);
+
+    await this.assertAssignmentCanStopBeingSuperAdmin(id);
+
+    await this.userRepository.manager.transaction(async (manager) => {
+      const userRepository = manager.getRepository(User);
+      const assignmentRepository = manager.getRepository(UserDepartmentRole);
+      const permissionRepository = manager.getRepository(
+        UserDepartmentPermission,
+      );
+      const assignments = await assignmentRepository.find({
+        where: { userId: id },
+        select: ['id'],
+      });
+      const assignmentIds = assignments.map((assignment) => assignment.id);
+
+      if (assignmentIds.length > 0) {
+        await permissionRepository.delete({
+          userDepartmentRoleId: In(assignmentIds),
+        });
+      }
+
+      await assignmentRepository.delete({ userId: id });
+      await userRepository.remove(user);
+    });
+
+    return { message: 'User deleted successfully' };
+  }
+
+  private async assertAssignmentCanStopBeingSuperAdmin(
+    userId: string,
+    assignmentId?: string,
+  ) {
+    const activeSuperAdminCount = await this.userDepartmentRoleRepository
+      .createQueryBuilder('udr')
+      .leftJoin('udr.role', 'role')
+      .leftJoin('udr.user', 'user')
+      .where('role.code = :code', { code: 'SUPER_ADMIN' })
+      .andWhere('udr.isActive = :isActive', { isActive: true })
+      .andWhere('user.isActive = :userIsActive', { userIsActive: true })
+      .getCount();
+
+    if (activeSuperAdminCount > 1) {
+      return;
+    }
+
+    const assignmentQuery = this.userDepartmentRoleRepository
+      .createQueryBuilder('udr')
+      .leftJoin('udr.role', 'role')
+      .leftJoin('udr.user', 'user')
+      .where('udr.userId = :userId', { userId })
+      .andWhere('role.code = :code', { code: 'SUPER_ADMIN' })
+      .andWhere('udr.isActive = :isActive', { isActive: true })
+      .andWhere('user.isActive = :userIsActive', { userIsActive: true });
+
+    if (assignmentId) {
+      assignmentQuery.andWhere('udr.id = :assignmentId', { assignmentId });
+    }
+
+    if (await assignmentQuery.getOne()) {
+      throw new BadRequestException('Cannot remove the last super admin');
+    }
   }
 }

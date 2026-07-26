@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -17,6 +18,7 @@ import { RoleCode } from '../../common/enums/role-code.enum';
 import { CreateUserDto, CreateAssignmentDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -79,5 +81,31 @@ export class UsersController {
     @Body() assignmentDto: CreateAssignmentDto,
   ) {
     return this.usersService.createAssignment(id, assignmentDto);
+  }
+
+  @Patch(':id/assignments/:assignmentId')
+  updateAssignment(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+    @Body() updateAssignmentDto: UpdateAssignmentDto,
+  ) {
+    return this.usersService.updateAssignment(
+      id,
+      assignmentId,
+      updateAssignmentDto,
+    );
+  }
+
+  @Delete(':id/assignments/:assignmentId')
+  removeAssignment(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+  ) {
+    return this.usersService.removeAssignment(id, assignmentId);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.usersService.remove(id);
   }
 }
