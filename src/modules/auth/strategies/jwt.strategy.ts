@@ -73,7 +73,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           new Date(assignment.expiredAt).getTime() <= now) ||
         !assignment.role ||
         assignment.departmentId !== payload.departmentId ||
-        assignment.role.code !== payload.roleCode
+        assignment.role.code !== String(payload.roleCode)
       ) {
         throw new UnauthorizedException('Assignment is no longer valid');
       }

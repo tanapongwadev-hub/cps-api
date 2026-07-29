@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddUserAssignmentUniqueness1700000000004
-  implements MigrationInterface
-{
+export class AddUserAssignmentUniqueness1700000000004 implements MigrationInterface {
   name = 'AddUserAssignmentUniqueness1700000000004';
 
   async up(queryRunner: QueryRunner): Promise<void> {

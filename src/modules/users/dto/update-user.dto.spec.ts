@@ -31,9 +31,11 @@ describe('UpdateUserDto', () => {
     const errors = await validate(dto);
 
     expect(errors[0]?.property).toBe('assignments');
-    expect(errors[0]?.children?.[0]?.children?.some(
-      (child) => child.property === 'roleId',
-    )).toBe(true);
+    expect(
+      errors[0]?.children?.[0]?.children?.some(
+        (child) => child.property === 'roleId',
+      ),
+    ).toBe(true);
   });
 
   it('rejects an assignment whose department is omitted', async () => {
@@ -44,8 +46,10 @@ describe('UpdateUserDto', () => {
     const errors = await validate(dto);
 
     expect(errors[0]?.property).toBe('assignments');
-    expect(errors[0]?.children?.[0]?.children?.some(
-      (child) => child.property === 'departmentId',
-    )).toBe(true);
+    expect(
+      errors[0]?.children?.[0]?.children?.some(
+        (child) => child.property === 'departmentId',
+      ),
+    ).toBe(true);
   });
 });

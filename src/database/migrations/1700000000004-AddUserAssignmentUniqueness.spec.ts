@@ -14,15 +14,11 @@ describe('AddUserAssignmentUniqueness1700000000004', () => {
     expect(query.mock.calls[1]?.[0]).toContain(
       'CONSTRAINT uq_user_department_roles_user_department_role',
     );
-    expect(query.mock.calls[1]?.[0]).toContain(
-      'DEFERRABLE INITIALLY DEFERRED',
-    );
+    expect(query.mock.calls[1]?.[0]).toContain('DEFERRABLE INITIALLY DEFERRED');
     expect(query.mock.calls[2]?.[0]).toContain(
       'uq_user_department_roles_user_system_role',
     );
-    expect(query.mock.calls[2]?.[0]).toContain(
-      'WHERE department_id IS NULL',
-    );
+    expect(query.mock.calls[2]?.[0]).toContain('WHERE department_id IS NULL');
   });
 
   it('drops both uniqueness rules on rollback', async () => {
