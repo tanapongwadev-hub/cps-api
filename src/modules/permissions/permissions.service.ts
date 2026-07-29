@@ -1,12 +1,25 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { Permission } from '../../entities/iam/permission.entity';
 import { Menu } from '../../entities/iam/menu.entity';
 import { Action } from '../../entities/iam/action.entity';
+import { Department } from '../../entities/iam/department.entity';
+import { DepartmentPermission } from '../../entities/iam/department-permission.entity';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
+
+export interface DepartmentSummary {
+  id: string;
+  code: string;
+  nameTh: string;
+  nameEn: string;
+}
 
 @Injectable()
 export class PermissionsService {
@@ -17,6 +30,11 @@ export class PermissionsService {
     private menuRepository: Repository<Menu>,
     @InjectRepository(Action)
     private actionRepository: Repository<Action>,
+    @InjectRepository(Department)
+    private departmentRepository: Repository<Department>,
+    @InjectRepository(DepartmentPermission)
+    private departmentPermissionRepository: Repository<DepartmentPermission>,
+    private dataSource: DataSource,
   ) {}
 
   async findAll(page: number = 1, limit: number = 20, search?: string) {
@@ -52,8 +70,10 @@ export class PermissionsService {
       .orderBy('permission.createdAt', 'DESC')
       .getManyAndCount();
 
+    const itemsWithDepartments = await this.attachDepartments(items);
+
     return {
-      items,
+      items: itemsWithDepartments,
       meta: {
         page,
         limit,
@@ -71,7 +91,110 @@ export class PermissionsService {
     if (!permission) {
       throw new NotFoundException('Permission not found');
     }
-    return permission;
+    const [permissionWithDepartments] = await this.attachDepartments([
+      permission,
+    ]);
+    return permissionWithDepartments;
+  }
+
+  private async attachDepartments(permissions: Permission[]) {
+    if (permissions.length === 0) {
+      return [] as Array<Permission & { departments: DepartmentSummary[] }>;
+    }
+
+    const mappings = await this.departmentPermissionRepository.find({
+      where: {
+        permissionId: In(permissions.map((permission) => permission.id)),
+        isActive: true,
+      },
+      relations: ['department'],
+    });
+    const departmentsByPermission = new Map<string, DepartmentSummary[]>();
+
+    for (const mapping of mappings) {
+      if (!mapping.department) continue;
+      const departments = departmentsByPermission.get(mapping.permissionId) ?? [];
+      departments.push({
+        id: mapping.department.id,
+        code: mapping.department.code,
+        nameTh: mapping.department.nameTh,
+        nameEn: mapping.department.nameEn,
+      });
+      departmentsByPermission.set(mapping.permissionId, departments);
+    }
+
+    return permissions.map((permission) => ({
+      ...permission,
+      departments: (departmentsByPermission.get(permission.id) ?? []).sort(
+        (a, b) => a.code.localeCompare(b.code),
+      ),
+    }));
+  }
+
+  async updateDepartments(id: string, departmentIds: string[]) {
+    await this.dataSource.transaction(async (manager) => {
+      const permissionRepository = manager.getRepository(Permission);
+      const departmentRepository = manager.getRepository(Department);
+      const departmentPermissionRepository =
+        manager.getRepository(DepartmentPermission);
+      const permission = await permissionRepository.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!permission) {
+        throw new NotFoundException('Permission not found');
+      }
+
+      if (departmentIds.length > 0) {
+        const departments = await departmentRepository.find({
+          where: { id: In(departmentIds) },
+          select: ['id'],
+        });
+        const foundIds = new Set(
+          departments.map((department) => department.id),
+        );
+        const missingIds = departmentIds.filter(
+          (departmentId) => !foundIds.has(departmentId),
+        );
+
+        if (missingIds.length > 0) {
+          throw new BadRequestException({
+            message: 'Departments not found',
+            departmentIds: missingIds,
+          });
+        }
+      }
+
+      const existingMappings = await departmentPermissionRepository.find({
+        where: { permissionId: id },
+      });
+      const selectedIds = new Set(departmentIds);
+      const existingByDepartment = new Map(
+        existingMappings.map((mapping) => [mapping.departmentId, mapping]),
+      );
+
+      for (const mapping of existingMappings) {
+        mapping.isActive = selectedIds.has(mapping.departmentId);
+      }
+
+      for (const departmentId of selectedIds) {
+        if (existingByDepartment.has(departmentId)) continue;
+        existingMappings.push(
+          departmentPermissionRepository.create({
+            permissionId: id,
+            departmentId,
+            isActive: true,
+          }),
+        );
+      }
+
+      if (existingMappings.length > 0) {
+        await departmentPermissionRepository.save(existingMappings);
+      }
+    });
+
+    return this.findOne(id);
   }
 
   /** รายการ menus + actions สำหรับ dropdown ในฟอร์มสร้าง/แก้ไข permission */

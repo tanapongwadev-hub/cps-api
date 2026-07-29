@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -16,6 +17,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RoleCode } from '../../common/enums/role-code.enum';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
+import { UpdatePermissionDepartmentsDto } from './dto/update-permission-departments.dto';
 
 @Controller('permissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,6 +46,17 @@ export class PermissionsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.permissionsService.findOne(id);
+  }
+
+  @Put(':id/departments')
+  updateDepartments(
+    @Param('id') id: string,
+    @Body() updatePermissionDepartmentsDto: UpdatePermissionDepartmentsDto,
+  ) {
+    return this.permissionsService.updateDepartments(
+      id,
+      updatePermissionDepartmentsDto.departmentIds,
+    );
   }
 
   @Post()
