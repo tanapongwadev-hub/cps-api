@@ -137,11 +137,11 @@ describe('PermissionsService department restrictions', () => {
       },
     ]);
 
-    await expect(
-      service.updateDepartments('10', ['2']),
-    ).resolves.toMatchObject({
-      departments: [expect.objectContaining({ id: '2', code: 'PS' })],
-    });
+    await expect(service.updateDepartments('10', ['2'])).resolves.toMatchObject(
+      {
+        departments: [expect.objectContaining({ id: '2', code: 'PS' })],
+      },
+    );
     expect(transactionMappings.save).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({ departmentId: '1', isActive: false }),
@@ -156,7 +156,9 @@ describe('PermissionsService department restrictions', () => {
     const transactionMappings = repositoryStub<DepartmentPermission>();
 
     transactionPermissions.findOne!.mockResolvedValue(permission);
-    transactionDepartments.find!.mockResolvedValue([{ ...department, id: '1' }]);
+    transactionDepartments.find!.mockResolvedValue([
+      { ...department, id: '1' },
+    ]);
     dataSource.transaction.mockImplementation(
       async (callback: (manager: { getRepository: Function }) => unknown) =>
         callback({

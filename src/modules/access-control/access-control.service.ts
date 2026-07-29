@@ -90,8 +90,7 @@ export class AccessControlService {
     }
     const directByAssignment = new Map<string, UserDepartmentPermission[]>();
     for (const entry of direct) {
-      const entries =
-        directByAssignment.get(entry.userDepartmentRoleId) ?? [];
+      const entries = directByAssignment.get(entry.userDepartmentRoleId) ?? [];
       entries.push(entry);
       directByAssignment.set(entry.userDepartmentRoleId, entries);
     }
@@ -103,9 +102,7 @@ export class AccessControlService {
 
       for (const permission of rolePermissions) {
         if (!grantedActionIds.has(permission.actionId)) continue;
-        if (
-          !this.isAllowedInDepartment(permission, assignment.departmentId)
-        ) {
+        if (!this.isAllowedInDepartment(permission, assignment.departmentId)) {
           continue;
         }
         rows.push({
@@ -120,10 +117,7 @@ export class AccessControlService {
       for (const entry of directByAssignment.get(assignment.id) ?? []) {
         if (!entry.permission?.isActive) continue;
         if (
-          !this.isAllowedInDepartment(
-            entry.permission,
-            assignment.departmentId,
-          )
+          !this.isAllowedInDepartment(entry.permission, assignment.departmentId)
         ) {
           continue;
         }

@@ -57,9 +57,9 @@ describe('EffectivePermissionService', () => {
       ]),
     } as any);
 
-    await expect(
-      service.getEffectivePermissionCodes('u1'),
-    ).resolves.toEqual(['order.approve']);
+    await expect(service.getEffectivePermissionCodes('u1')).resolves.toEqual([
+      'order.approve',
+    ]);
   });
 
   it('removes a permission denied inside its only matching assignment', async () => {
@@ -82,8 +82,8 @@ describe('EffectivePermissionService', () => {
       ]),
     } as any);
 
-    await expect(
-      service.getEffectivePermissionCodes('u1'),
-    ).resolves.toEqual([]);
+    await expect(service.getEffectivePermissionCodes('u1')).resolves.toEqual(
+      [],
+    );
   });
 });

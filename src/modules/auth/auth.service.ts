@@ -490,10 +490,7 @@ export class AuthService {
     return { menus: rootMenus };
   }
 
-  async getMyPermissions(
-    userId: string,
-    roleCode: RoleCode,
-  ) {
+  async getMyPermissions(userId: string, roleCode: RoleCode) {
     const isSuperAdmin = roleCode === RoleCode.SUPER_ADMIN;
     const permissionCodes =
       await this.effectivePermissionService.getEffectivePermissionCodes(

@@ -36,9 +36,7 @@ export class EffectivePermissionService {
       );
       allowed.push(
         ...assignmentRows
-          .filter(
-            (row) => row.effect === 'ALLOW' && !denied.has(row.code),
-          )
+          .filter((row) => row.effect === 'ALLOW' && !denied.has(row.code))
           .map((row) => row.code),
       );
     }

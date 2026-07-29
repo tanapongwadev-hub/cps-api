@@ -35,11 +35,12 @@ export class PermissionGuard implements CanActivate {
       return true;
     }
 
-    const permissions = await this.effectivePermissionService.getEffectivePermissionCodes(
-      user.id,
-      undefined,
-      (user.activeRoleCode as string) === RoleCode.SUPER_ADMIN,
-    );
+    const permissions =
+      await this.effectivePermissionService.getEffectivePermissionCodes(
+        user.id,
+        undefined,
+        (user.activeRoleCode as string) === RoleCode.SUPER_ADMIN,
+      );
     const granted = new Set(permissions);
     if (requiredPermissions.every((permission) => granted.has(permission))) {
       return true;

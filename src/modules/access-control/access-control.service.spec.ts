@@ -75,15 +75,11 @@ describe('AccessControlService department restrictions', () => {
         actionId: 'approve',
         code: 'order.approve',
         isActive: true,
-        departmentPermissions: [
-          { departmentId: '2', isActive: true },
-        ],
+        departmentPermissions: [{ departmentId: '2', isActive: true }],
       },
     ]);
 
-    await expect(
-      service.getEffectivePermissionRows('u1'),
-    ).resolves.toEqual([]);
+    await expect(service.getEffectivePermissionRows('u1')).resolves.toEqual([]);
   });
 
   it('emits the grant with the identity of the matching assignment', async () => {
@@ -96,15 +92,11 @@ describe('AccessControlService department restrictions', () => {
         actionId: 'approve',
         code: 'order.approve',
         isActive: true,
-        departmentPermissions: [
-          { departmentId: '2', isActive: true },
-        ],
+        departmentPermissions: [{ departmentId: '2', isActive: true }],
       },
     ]);
 
-    await expect(
-      service.getEffectivePermissionRows('u1'),
-    ).resolves.toEqual([
+    await expect(service.getEffectivePermissionRows('u1')).resolves.toEqual([
       {
         assignmentId: 'b',
         departmentId: '2',
@@ -125,9 +117,7 @@ describe('AccessControlService department restrictions', () => {
         actionId: 'approve',
         code: 'order.approve',
         isActive: true,
-        departmentPermissions: [
-          { departmentId: '2', isActive: false },
-        ],
+        departmentPermissions: [{ departmentId: '2', isActive: false }],
       },
     ]);
 

@@ -113,7 +113,8 @@ export class PermissionsService {
 
     for (const mapping of mappings) {
       if (!mapping.department) continue;
-      const departments = departmentsByPermission.get(mapping.permissionId) ?? [];
+      const departments =
+        departmentsByPermission.get(mapping.permissionId) ?? [];
       departments.push({
         id: mapping.department.id,
         code: mapping.department.code,
@@ -243,7 +244,10 @@ export class PermissionsService {
       throw new DuplicateResourceException('Permission code');
     }
 
-    await this.assertRefsExist(createPermissionDto.menuId, createPermissionDto.actionId);
+    await this.assertRefsExist(
+      createPermissionDto.menuId,
+      createPermissionDto.actionId,
+    );
 
     const permission = this.permissionRepository.create(createPermissionDto);
     const saved = await this.permissionRepository.save(permission);
@@ -251,12 +255,17 @@ export class PermissionsService {
   }
 
   async update(id: string, updatePermissionDto: UpdatePermissionDto) {
-    const permission = await this.permissionRepository.findOne({ where: { id } });
+    const permission = await this.permissionRepository.findOne({
+      where: { id },
+    });
     if (!permission) {
       throw new NotFoundException('Permission not found');
     }
 
-    if (updatePermissionDto.code && updatePermissionDto.code !== permission.code) {
+    if (
+      updatePermissionDto.code &&
+      updatePermissionDto.code !== permission.code
+    ) {
       const existing = await this.permissionRepository.findOne({
         where: { code: updatePermissionDto.code },
       });
@@ -275,7 +284,9 @@ export class PermissionsService {
   }
 
   async remove(id: string) {
-    const permission = await this.permissionRepository.findOne({ where: { id } });
+    const permission = await this.permissionRepository.findOne({
+      where: { id },
+    });
     if (!permission) {
       throw new NotFoundException('Permission not found');
     }
