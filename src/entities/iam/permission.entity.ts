@@ -5,11 +5,13 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
   Index,
 } from 'typeorm';
 import { Menu } from './menu.entity';
 import { Action } from './action.entity';
+import { DepartmentPermission } from './department-permission.entity';
 
 @Entity('permissions', { schema: 'iam' })
 export class Permission {
@@ -53,4 +55,10 @@ export class Permission {
   @ManyToOne(() => Action)
   @JoinColumn({ name: 'action_id' })
   action: Action;
+
+  @OneToMany(
+    () => DepartmentPermission,
+    (departmentPermission) => departmentPermission.permission,
+  )
+  departmentPermissions: DepartmentPermission[];
 }

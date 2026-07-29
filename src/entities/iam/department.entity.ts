@@ -5,7 +5,9 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  OneToMany,
 } from 'typeorm';
+import { DepartmentPermission } from './department-permission.entity';
 
 @Entity('departments', { schema: 'iam' })
 export class Department {
@@ -39,4 +41,10 @@ export class Department {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
   updatedAt: Date;
+
+  @OneToMany(
+    () => DepartmentPermission,
+    (departmentPermission) => departmentPermission.department,
+  )
+  departmentPermissions: DepartmentPermission[];
 }
