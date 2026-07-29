@@ -4,14 +4,19 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import * as argon2 from 'argon2';
 import { User } from '../../entities/iam/user.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
 import { UserDepartmentPermission } from '../../entities/iam/user-department-permission.entity';
 import { Permission } from '../../entities/iam/permission.entity';
+import { Department } from '../../entities/iam/department.entity';
+import { Role } from '../../entities/iam/role.entity';
 import { CreateUserDto, CreateAssignmentDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import {
+  UpdateUserAssignmentInputDto,
+  UpdateUserDto,
+} from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
@@ -175,26 +180,258 @@ export class UsersService {
   }
 
   async update(id: string, updateUserDto: UpdateUserDto) {
-    const user = await this.findOne(id);
+    const { assignments, ...profileData } = updateUserDto;
 
-    if (updateUserDto.email) {
-      const existingEmail = await this.userRepository.findOne({
-        where: { email: updateUserDto.email.toLowerCase() },
+    if (assignments === undefined) {
+      const user = await this.findOne(id);
+      if (profileData.email) {
+        const existingEmail = await this.userRepository.findOne({
+          where: { email: profileData.email.toLowerCase() },
+        });
+        if (existingEmail && existingEmail.id !== id) {
+          throw new DuplicateResourceException('Email');
+        }
+      }
+      Object.assign(user, profileData);
+      if (profileData.email) {
+        user.email = profileData.email.toLowerCase();
+      }
+      await this.userRepository.save(user);
+      return this.findOne(id);
+    }
+
+    return this.userRepository.manager.transaction(async (manager) => {
+      const userRepository = manager.getRepository(User);
+      const assignmentRepository = manager.getRepository(UserDepartmentRole);
+      const user = await userRepository.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
       });
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
 
-      if (existingEmail && existingEmail.id !== id) {
-        throw new DuplicateResourceException('Email');
+      if (profileData.email) {
+        const existingEmail = await userRepository.findOne({
+          where: { email: profileData.email.toLowerCase() },
+        });
+        if (existingEmail && existingEmail.id !== id) {
+          throw new DuplicateResourceException('Email');
+        }
+      }
+
+      const current = await assignmentRepository.find({
+        where: { userId: id },
+      });
+      const roleMap = await this.validateAggregateAssignments(
+        manager,
+        current,
+        assignments,
+      );
+      await this.assertFinalSuperAdminState(
+        manager,
+        id,
+        current,
+        assignments,
+        roleMap,
+      );
+
+      const changed = this.assignmentsChanged(current, assignments);
+      Object.assign(user, profileData);
+      if (profileData.email) {
+        user.email = profileData.email.toLowerCase();
+      }
+      if (changed) {
+        user.permissionVersion += 1;
+      }
+      await userRepository.save(user);
+
+      const requestedIds = new Set(
+        assignments.flatMap((item) => (item.id ? [item.id] : [])),
+      );
+      const removedIds = current
+        .filter((item) => !requestedIds.has(item.id))
+        .map((item) => item.id);
+      if (removedIds.length > 0) {
+        await assignmentRepository.delete({
+          id: In(removedIds),
+          userId: id,
+        });
+      }
+
+      const currentById = new Map(current.map((item) => [item.id, item]));
+      for (const item of assignments) {
+        if (item.id) {
+          const existing = currentById.get(item.id);
+          if (!existing) {
+            throw new NotFoundException('User assignment not found');
+          }
+          existing.departmentId = item.departmentId;
+          existing.roleId = item.roleId;
+          await assignmentRepository.save(existing);
+          continue;
+        }
+        await assignmentRepository.save(
+          assignmentRepository.create({
+            userId: id,
+            departmentId: item.departmentId,
+            roleId: item.roleId,
+            isActive: true,
+            assignedAt: new Date(),
+          }),
+        );
+      }
+
+      return user;
+    });
+  }
+
+  private assignmentKey(departmentId: string | null, roleId: string): string {
+    return `${departmentId ?? 'SYSTEM'}:${roleId}`;
+  }
+
+  private assignmentsChanged(
+    current: UserDepartmentRole[],
+    requested: UpdateUserAssignmentInputDto[],
+  ): boolean {
+    if (current.length !== requested.length) {
+      return true;
+    }
+    const currentById = new Map(current.map((item) => [item.id, item]));
+    return requested.some((item) => {
+      if (!item.id) {
+        return true;
+      }
+      const existing = currentById.get(item.id);
+      return (
+        !existing ||
+        existing.departmentId !== item.departmentId ||
+        existing.roleId !== item.roleId
+      );
+    });
+  }
+
+  private async validateAggregateAssignments(
+    manager: EntityManager,
+    current: UserDepartmentRole[],
+    requested: UpdateUserAssignmentInputDto[],
+  ): Promise<Map<string, Role>> {
+    if (requested.length === 0) {
+      throw new BadRequestException('User must have at least one assignment');
+    }
+
+    const keys = requested.map((item) =>
+      this.assignmentKey(item.departmentId, item.roleId),
+    );
+    if (new Set(keys).size !== keys.length) {
+      throw new BadRequestException('Duplicate department and role assignment');
+    }
+
+    const requestedIds = requested.flatMap((item) =>
+      item.id ? [item.id] : [],
+    );
+    if (new Set(requestedIds).size !== requestedIds.length) {
+      throw new BadRequestException('Duplicate user assignment id');
+    }
+    const currentIds = new Set(current.map((item) => item.id));
+    if (requestedIds.some((assignmentId) => !currentIds.has(assignmentId))) {
+      throw new NotFoundException('User assignment not found');
+    }
+
+    const roleIds = Array.from(
+      new Set([
+        ...current.map((item) => item.roleId),
+        ...requested.map((item) => item.roleId),
+      ]),
+    );
+    const roleRepository = manager.getRepository(Role);
+    const roleRows = await roleRepository.find({
+      where: { id: In(roleIds) },
+    });
+    const roleMap = new Map(roleRows.map((role) => [role.id, role]));
+
+    const departmentIds = Array.from(
+      new Set(
+        requested.flatMap((item) =>
+          item.departmentId == null ? [] : [item.departmentId],
+        ),
+      ),
+    );
+    const departmentRepository = manager.getRepository(Department);
+    const departmentRows =
+      departmentIds.length === 0
+        ? []
+        : await departmentRepository.find({
+            where: { id: In(departmentIds) },
+          });
+    const departmentMap = new Map(
+      departmentRows.map((department) => [department.id, department]),
+    );
+
+    for (const item of requested) {
+      if (item.departmentId === undefined) {
+        throw new BadRequestException('Assignment department is required');
+      }
+      const role = roleMap.get(item.roleId);
+      if (!role) {
+        throw new NotFoundException('Role not found');
+      }
+      if (!role.isActive) {
+        throw new BadRequestException('Role is inactive');
+      }
+      if (role.scopeType === 'SYSTEM' && item.departmentId !== null) {
+        throw new BadRequestException('System role must not have a department');
+      }
+      if (role.scopeType !== 'SYSTEM' && item.departmentId === null) {
+        throw new BadRequestException('Department role requires a department');
+      }
+      if (item.departmentId !== null) {
+        const department = departmentMap.get(item.departmentId);
+        if (!department) {
+          throw new NotFoundException('Department not found');
+        }
+        if (!department.isActive) {
+          throw new BadRequestException('Department is inactive');
+        }
       }
     }
 
-    Object.assign(user, updateUserDto);
-    if (updateUserDto.email) {
-      user.email = updateUserDto.email.toLowerCase();
+    return roleMap;
+  }
+
+  private async assertFinalSuperAdminState(
+    manager: EntityManager,
+    userId: string,
+    current: UserDepartmentRole[],
+    requested: UpdateUserAssignmentInputDto[],
+    roleMap: Map<string, Role>,
+  ): Promise<void> {
+    const currentlySuperAdmin = current.some(
+      (item) => roleMap.get(item.roleId)?.code === 'SUPER_ADMIN',
+    );
+    const finallySuperAdmin = requested.some(
+      (item) => roleMap.get(item.roleId)?.code === 'SUPER_ADMIN',
+    );
+    if (!currentlySuperAdmin && !finallySuperAdmin) {
+      return;
     }
 
-    await this.userRepository.save(user);
-
-    return this.findOne(id);
+    const activeSuperAdmins = await manager
+      .getRepository(UserDepartmentRole)
+      .createQueryBuilder('udr')
+      .leftJoinAndSelect('udr.role', 'role')
+      .leftJoin('udr.user', 'user')
+      .where('role.code = :code', { code: 'SUPER_ADMIN' })
+      .andWhere('udr.isActive = :isActive', { isActive: true })
+      .andWhere('user.isActive = :userIsActive', { userIsActive: true })
+      .setLock('pessimistic_write')
+      .getMany();
+    const otherActiveSuperAdmins = activeSuperAdmins.filter(
+      (assignment) => assignment.userId !== userId,
+    ).length;
+    if (otherActiveSuperAdmins === 0 && !finallySuperAdmin) {
+      throw new BadRequestException('Cannot remove the last super admin');
+    }
   }
 
   async updateStatus(id: string, updateStatusDto: UpdateStatusDto) {
@@ -277,9 +514,10 @@ export class UsersService {
         continue;
       }
 
-      const permissions = permissionsByAssignment.get(
-        assignmentPermission.userDepartmentRoleId,
-      ) ?? [];
+      const permissions =
+        permissionsByAssignment.get(
+          assignmentPermission.userDepartmentRoleId,
+        ) ?? [];
       permissions.push(assignmentPermission.permission);
       permissionsByAssignment.set(
         assignmentPermission.userDepartmentRoleId,
@@ -373,10 +611,7 @@ export class UsersService {
       }
 
       if (assignment.roleId !== updateAssignmentDto.roleId) {
-        await this.assertAssignmentCanStopBeingSuperAdmin(
-          userId,
-          assignmentId,
-        );
+        await this.assertAssignmentCanStopBeingSuperAdmin(userId, assignmentId);
       }
 
       assignment.departmentId = updateAssignmentDto.departmentId;

@@ -407,7 +407,10 @@ export class AuthService {
           email: user.email,
           isSuperAdmin,
           departments: assignments
-            .filter((item) => item.department)
+            .filter(
+              (item): item is UserDepartmentRole & { department: Department } =>
+                item.department !== null,
+            )
             .map((item) => ({
               id: item.department.id,
               code: item.department.code,
