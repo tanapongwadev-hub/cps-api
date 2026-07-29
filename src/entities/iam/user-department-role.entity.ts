@@ -23,7 +23,7 @@ export class UserDepartmentRole {
 
   @Index()
   @Column({ name: 'department_id', type: 'bigint', nullable: true })
-  departmentId: string;
+  departmentId: string | null;
 
   @Index()
   @Column({ name: 'role_id', type: 'bigint' })
@@ -59,7 +59,7 @@ export class UserDepartmentRole {
 
   @ManyToOne(() => Department, { nullable: true })
   @JoinColumn({ name: 'department_id' })
-  department: Department;
+  department: Department | null;
 
   @ManyToOne(() => Role)
   @JoinColumn({ name: 'role_id' })
