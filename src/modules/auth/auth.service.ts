@@ -2,7 +2,7 @@ import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { User } from '../../entities/iam/user.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
 import { UserDepartmentPermission } from '../../entities/iam/user-department-permission.entity';
@@ -491,44 +491,23 @@ export class AuthService {
   }
 
   async getMyPermissions(
+    userId: string,
     roleCode: RoleCode,
-    userDepartmentRoleId: string | null,
   ) {
-    if (roleCode === RoleCode.SUPER_ADMIN) {
-      const permissions = await this.permissionRepository.find({
-        where: { isActive: true },
-        relations: ['menu', 'action'],
-      });
-      return { permissions };
-    }
-
-    // Get role actions
-    const roleActions = await this.roleActionRepository.find({
-      where: { role: { code: roleCode }, isActive: true },
-      relations: ['action'],
-    });
-
-    const actionIds = roleActions.map((ra) => ra.actionId);
-
-    // Get user-specific overrides
-    let userPermissionIds: string[] = [];
-    if (userDepartmentRoleId) {
-      const userDepartmentPermissions =
-        await this.userDepartmentPermissionRepository.find({
-          where: { userDepartmentRoleId, isActive: true },
-        });
-      userPermissionIds = userDepartmentPermissions.map(
-        (udp) => udp.permissionId,
+    const isSuperAdmin = roleCode === RoleCode.SUPER_ADMIN;
+    const permissionCodes =
+      await this.effectivePermissionService.getEffectivePermissionCodes(
+        userId,
+        undefined,
+        isSuperAdmin,
       );
-    }
-
-    const permissions = await this.permissionRepository.find({
-      where: [
-        { actionId: { $in: actionIds } as any },
-        { id: { $in: userPermissionIds } as any },
-      ],
-      relations: ['menu', 'action'],
-    });
+    const permissions =
+      permissionCodes.length === 0
+        ? []
+        : await this.permissionRepository.find({
+            where: { code: In(permissionCodes), isActive: true },
+            relations: ['menu', 'action'],
+          });
 
     return { permissions };
   }

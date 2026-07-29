@@ -64,8 +64,21 @@
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/permissions` | Bearer + SUPER_ADMIN | รายการ permission (รองรับ `page`, `limit`, `search`) |
-| GET | `/permissions/:id` | Bearer + SUPER_ADMIN | ข้อมูล permission |
+| GET | `/permissions` | Bearer + SUPER_ADMIN | รายการ permission (รองรับ `page`, `limit`, `search`) พร้อม `departments` |
+| GET | `/permissions/:id` | Bearer + SUPER_ADMIN | ข้อมูล permission พร้อม `departments` |
+| PUT | `/permissions/:id/departments` | Bearer + SUPER_ADMIN | กำหนดแผนกที่ใช้ permission ได้ |
+
+`departments: []` ใน permission response หมายถึงใช้งานได้ทุกแผนก ส่วนรายการที่มีค่าจะประกอบด้วย `id`, `code`, `nameTh` และ `nameEn`
+
+Request สำหรับกำหนดแผนก:
+
+```json
+{
+  "departmentIds": ["1", "2", "3"]
+}
+```
+
+`departmentIds` ต้องเป็น string array ที่ไม่มีค่าซ้ำและทุก ID ต้องมีอยู่จริง ส่ง array ว่างเพื่อกลับไปใช้งานได้ทุกแผนก ระบบคืน `404` เมื่อไม่พบ permission และ `400` พร้อม `departmentIds` ที่ผิดเมื่อไม่พบแผนก
 
 ## Sessions (ต้องเป็น SUPER_ADMIN)
 

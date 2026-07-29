@@ -111,8 +111,8 @@ export class AuthController {
   @Get('me/permissions')
   async getMyPermissions(@CurrentUser() user: CurrentUserWithAssignment) {
     return await this.authService.getMyPermissions(
+      user.id,
       user.activeRoleCode as RoleCode,
-      user.activeUserDepartmentRoleId,
     );
   }
 }

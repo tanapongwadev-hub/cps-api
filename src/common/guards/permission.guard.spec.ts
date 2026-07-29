@@ -15,6 +15,11 @@ describe('PermissionGuard', () => {
     const guard = new PermissionGuard(reflector, service);
 
     await expect(guard.canActivate(context({ id: '1', activeRoleCode: 'USER', activeUserDepartmentRoleId: '2' }))).resolves.toBe(true);
+    expect(service.getEffectivePermissionCodes).toHaveBeenCalledWith(
+      '1',
+      undefined,
+      false,
+    );
   });
 
   it('denies a user without the required permission', async () => {
@@ -23,5 +28,18 @@ describe('PermissionGuard', () => {
     const guard = new PermissionGuard(reflector, service);
 
     await expect(guard.canActivate(context({ id: '1', activeRoleCode: 'USER', activeUserDepartmentRoleId: '2' }))).rejects.toMatchObject({ response: { code: 'PERMISSION_DENIED' } });
+  });
+
+  it('bypasses effective permission lookup for a super admin', async () => {
+    const reflector = { getAllAndOverride: jest.fn().mockReturnValue(['user.delete']) } as unknown as Reflector;
+    const service = { getEffectivePermissionCodes: jest.fn() } as any;
+    const guard = new PermissionGuard(reflector, service);
+
+    await expect(
+      guard.canActivate(
+        context({ id: '1', activeRoleCode: 'SUPER_ADMIN' }),
+      ),
+    ).resolves.toBe(true);
+    expect(service.getEffectivePermissionCodes).not.toHaveBeenCalled();
   });
 });
