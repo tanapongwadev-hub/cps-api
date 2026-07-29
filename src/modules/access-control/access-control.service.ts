@@ -8,6 +8,8 @@ import { UserDepartmentPermission } from '../../entities/iam/user-department-per
 import { Menu } from '../../entities/iam/menu.entity';
 
 export interface EffectivePermissionRow {
+  assignmentId: string;
+  departmentId: string | null;
   code: string;
   effect: 'ALLOW' | 'DENY';
   source: 'ROLE' | 'USER';
@@ -40,12 +42,20 @@ export class AccessControlService {
     userId: string,
     assignmentId?: string,
   ): Promise<EffectivePermissionRow[]> {
-    const assignments = await this.assignmentRepository.find({
-      where: assignmentId
-        ? { id: assignmentId, userId, isActive: true }
-        : { userId, isActive: true },
-      select: ['id', 'roleId'],
-    });
+    const assignmentQuery = this.assignmentRepository
+      .createQueryBuilder('assignment')
+      .where('assignment.userId = :userId', { userId })
+      .andWhere('assignment.isActive = true')
+      .andWhere(
+        '(assignment.expiredAt IS NULL OR assignment.expiredAt > :now)',
+        { now: new Date() },
+      );
+    if (assignmentId) {
+      assignmentQuery.andWhere('assignment.id = :assignmentId', {
+        assignmentId,
+      });
+    }
+    const assignments = await assignmentQuery.getMany();
     const roleIds = assignments.map((assignment) => assignment.roleId);
     const roleActions = roleIds.length
       ? await this.roleActionRepository.find({
@@ -59,7 +69,7 @@ export class AccessControlService {
     const rolePermissions = actionIds.length
       ? await this.permissionRepository.find({
           where: actionIds.map((actionId) => ({ actionId, isActive: true })),
-          relations: ['action'],
+          relations: ['action', 'departmentPermissions'],
         })
       : [];
     const direct = assignments.length
@@ -68,24 +78,80 @@ export class AccessControlService {
             userDepartmentRoleId: assignment.id,
             isActive: true,
           })),
-          relations: ['permission'],
+          relations: ['permission', 'permission.departmentPermissions'],
         })
       : [];
 
-    return [
-      ...rolePermissions.map((permission) => ({
-        code: permission.code,
-        effect: 'ALLOW' as const,
-        source: 'ROLE' as const,
-      })),
-      ...direct
-        .filter((entry) => entry.permission?.isActive)
-        .map((entry) => ({
+    const actionIdsByRole = new Map<string, Set<string>>();
+    for (const roleAction of roleActions) {
+      const ids = actionIdsByRole.get(roleAction.roleId) ?? new Set<string>();
+      ids.add(roleAction.actionId);
+      actionIdsByRole.set(roleAction.roleId, ids);
+    }
+    const directByAssignment = new Map<string, UserDepartmentPermission[]>();
+    for (const entry of direct) {
+      const entries =
+        directByAssignment.get(entry.userDepartmentRoleId) ?? [];
+      entries.push(entry);
+      directByAssignment.set(entry.userDepartmentRoleId, entries);
+    }
+
+    const rows: EffectivePermissionRow[] = [];
+    for (const assignment of assignments) {
+      const grantedActionIds =
+        actionIdsByRole.get(assignment.roleId) ?? new Set<string>();
+
+      for (const permission of rolePermissions) {
+        if (!grantedActionIds.has(permission.actionId)) continue;
+        if (
+          !this.isAllowedInDepartment(permission, assignment.departmentId)
+        ) {
+          continue;
+        }
+        rows.push({
+          assignmentId: assignment.id,
+          departmentId: assignment.departmentId,
+          code: permission.code,
+          effect: 'ALLOW',
+          source: 'ROLE',
+        });
+      }
+
+      for (const entry of directByAssignment.get(assignment.id) ?? []) {
+        if (!entry.permission?.isActive) continue;
+        if (
+          !this.isAllowedInDepartment(
+            entry.permission,
+            assignment.departmentId,
+          )
+        ) {
+          continue;
+        }
+        rows.push({
+          assignmentId: assignment.id,
+          departmentId: assignment.departmentId,
           code: entry.permission.code,
-          effect: entry.effect ?? ('ALLOW' as const),
-          source: 'USER' as const,
-        })),
-    ];
+          effect: entry.effect ?? 'ALLOW',
+          source: 'USER',
+        });
+      }
+    }
+
+    return rows;
+  }
+
+  private isAllowedInDepartment(
+    permission: Permission,
+    departmentId: string | null,
+  ): boolean {
+    const restrictedIds = (permission.departmentPermissions ?? [])
+      .filter((mapping) => mapping.isActive)
+      .map((mapping) => mapping.departmentId);
+
+    return (
+      restrictedIds.length === 0 ||
+      (departmentId !== null && restrictedIds.includes(departmentId))
+    );
   }
 
   async getMenusWithPermissions(): Promise<

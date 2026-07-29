@@ -29,4 +29,61 @@ describe('EffectivePermissionService', () => {
       service.getEffectivePermissionCodes('1', undefined, true),
     ).resolves.toEqual(['menu.view', 'user.view']);
   });
+
+  it('applies deny inside one assignment without blocking another assignment', async () => {
+    const service = new EffectivePermissionService({
+      getEffectivePermissionRows: jest.fn().mockResolvedValue([
+        {
+          assignmentId: 'a',
+          departmentId: '1',
+          code: 'order.approve',
+          source: 'ROLE',
+          effect: 'ALLOW',
+        },
+        {
+          assignmentId: 'a',
+          departmentId: '1',
+          code: 'order.approve',
+          source: 'USER',
+          effect: 'DENY',
+        },
+        {
+          assignmentId: 'b',
+          departmentId: '2',
+          code: 'order.approve',
+          source: 'ROLE',
+          effect: 'ALLOW',
+        },
+      ]),
+    } as any);
+
+    await expect(
+      service.getEffectivePermissionCodes('u1'),
+    ).resolves.toEqual(['order.approve']);
+  });
+
+  it('removes a permission denied inside its only matching assignment', async () => {
+    const service = new EffectivePermissionService({
+      getEffectivePermissionRows: jest.fn().mockResolvedValue([
+        {
+          assignmentId: 'a',
+          departmentId: '1',
+          code: 'order.approve',
+          source: 'ROLE',
+          effect: 'ALLOW',
+        },
+        {
+          assignmentId: 'a',
+          departmentId: '1',
+          code: 'order.approve',
+          source: 'USER',
+          effect: 'DENY',
+        },
+      ]),
+    } as any);
+
+    await expect(
+      service.getEffectivePermissionCodes('u1'),
+    ).resolves.toEqual([]);
+  });
 });

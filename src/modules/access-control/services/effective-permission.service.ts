@@ -20,14 +20,30 @@ export class EffectivePermissionService {
       userId,
       assignmentId,
     );
-    const denied = new Set(
-      rows.filter((row) => row.effect === 'DENY').map((row) => row.code),
-    );
-    return this.sortedUnique(
-      rows
-        .filter((row) => row.effect === 'ALLOW' && !denied.has(row.code))
-        .map((row) => row.code),
-    );
+    const rowsByAssignment = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const assignmentRows = rowsByAssignment.get(row.assignmentId) ?? [];
+      assignmentRows.push(row);
+      rowsByAssignment.set(row.assignmentId, assignmentRows);
+    }
+
+    const allowed: string[] = [];
+    for (const assignmentRows of rowsByAssignment.values()) {
+      const denied = new Set(
+        assignmentRows
+          .filter((row) => row.effect === 'DENY')
+          .map((row) => row.code),
+      );
+      allowed.push(
+        ...assignmentRows
+          .filter(
+            (row) => row.effect === 'ALLOW' && !denied.has(row.code),
+          )
+          .map((row) => row.code),
+      );
+    }
+
+    return this.sortedUnique(allowed);
   }
 
   private sortedUnique(values: string[]): string[] {

@@ -8,6 +8,7 @@ import { RoleAction } from '../../entities/iam/role-action.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
 import { UserDepartmentPermission } from '../../entities/iam/user-department-permission.entity';
 import { Menu } from '../../entities/iam/menu.entity';
+import { DepartmentPermission } from '../../entities/iam/department-permission.entity';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { Menu } from '../../entities/iam/menu.entity';
       RoleAction,
       UserDepartmentRole,
       UserDepartmentPermission,
+      DepartmentPermission,
       Menu,
     ]),
   ],
