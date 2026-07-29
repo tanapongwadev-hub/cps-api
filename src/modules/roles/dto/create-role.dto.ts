@@ -1,7 +1,12 @@
-import { IsString, IsNotEmpty, IsEnum, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsEnum, IsOptional, IsArray } from 'class-validator';
 import { ScopeType } from '../../../common/enums/scope-type.enum';
 
 export class CreateRoleDto {
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  actionCodes?: string[];
+
   @IsString()
   @IsNotEmpty()
   code: string;

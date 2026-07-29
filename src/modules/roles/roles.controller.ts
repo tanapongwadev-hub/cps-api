@@ -28,11 +28,13 @@ export class RolesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('status') status?: string,
   ) {
     return this.rolesService.findAll(
       page ? parseInt(page) : 1,
       limit ? parseInt(limit) : 20,
       search,
+      status,
     );
   }
 
