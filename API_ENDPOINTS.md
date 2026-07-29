@@ -29,6 +29,30 @@
 | GET | `/users/:id/assignments` | Bearer + SUPER_ADMIN | ดึง assignments ของผู้ใช้ |
 | POST | `/users/:id/assignments` | Bearer + SUPER_ADMIN | สร้าง assignment ใหม่ |
 
+### PATCH `/users/:id` — Aggregate Assignment Update
+
+ส่งข้อมูลส่วนตัวพร้อม `assignments` ซึ่งเป็นสถานะปลายทางทั้งหมดของผู้ใช้ใน request เดียว:
+
+```json
+{
+  "firstName": "Somchai",
+  "lastName": "Jaidee",
+  "email": "somchai@example.com",
+  "telephone": "0812345678",
+  "assignments": [
+    { "id": "12", "departmentId": "3", "roleId": "5" },
+    { "departmentId": null, "roleId": "1" }
+  ]
+}
+```
+
+- Assignment เดิมที่ต้องการคงไว้หรือแก้ไขให้ส่ง `id`; รายการใหม่ไม่ต้องส่ง `id`
+- Assignment เดิมที่ไม่อยู่ใน array จะถูกลบ โดยผู้ใช้ต้องเหลืออย่างน้อย 1 รายการ
+- ห้ามมีคู่ `(departmentId, roleId)` ซ้ำกัน
+- System role ใช้ `departmentId: null`; department role ต้องระบุ `departmentId`
+- Backend ตรวจสอบและเพิ่ม/แก้ไข/ลบ Assignment พร้อมข้อมูลส่วนตัวภายใน transaction เดียว
+- เมื่อชุด Assignment เปลี่ยน `permissionVersion` จะเพิ่มขึ้น ทำให้ access token เดิมใช้ไม่ได้และต้อง login ใหม่
+
 ## Departments (ต้องเป็น SUPER_ADMIN)
 
 | Method | Endpoint | Auth | Description |
