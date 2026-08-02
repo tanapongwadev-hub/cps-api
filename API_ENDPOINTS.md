@@ -26,8 +26,53 @@
 | PATCH | `/users/:id` | Bearer + SUPER_ADMIN | แก้ไขข้อมูลผู้ใช้ |
 | PATCH | `/users/:id/status` | Bearer + SUPER_ADMIN | อัปเดตสถานะผู้ใช้ (active/locked) |
 | POST | `/users/:id/reset-password` | Bearer + SUPER_ADMIN | รีเซ็ตรหัสผ่าน |
+| GET | `/users/:id/access-summary` | Bearer + SUPER_ADMIN | Effective menu access grouped by assignment |
 | GET | `/users/:id/assignments` | Bearer + SUPER_ADMIN | ดึง assignments ของผู้ใช้ |
 | POST | `/users/:id/assignments` | Bearer + SUPER_ADMIN | สร้าง assignment ใหม่ |
+
+### GET `/users/:id/access-summary`
+
+Returns persisted, effective menu access grouped by assignment. Inactive or expired assignments are returned with empty `permissions`, `menus`, and `menuCount: 0`. System assignments have `department: null`.
+
+```json
+{
+  "userId": "7",
+  "assignments": [
+    {
+      "assignmentId": "76",
+      "department": {
+        "id": "3",
+        "code": "PROD",
+        "name": "ฝ่ายผลิต"
+      },
+      "role": {
+        "id": "4",
+        "code": "OPERATOR",
+        "name": "พนักงานผลิต",
+        "scopeType": "DEPARTMENT"
+      },
+      "isActive": true,
+      "expiredAt": null,
+      "permissions": ["production.read"],
+      "menus": [
+        {
+          "id": "menu-production",
+          "code": "production",
+          "name": "การผลิต",
+          "nameEn": "Production",
+          "path": "/production",
+          "icon": null,
+          "menuType": "GROUP",
+          "sortOrder": 1,
+          "permissions": [],
+          "children": []
+        }
+      ],
+      "menuCount": 1
+    }
+  ]
+}
+```
 
 ### PATCH `/users/:id` — Aggregate Assignment Update
 

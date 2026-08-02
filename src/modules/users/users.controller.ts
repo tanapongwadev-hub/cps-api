@@ -19,12 +19,16 @@ import { CreateUserDto, CreateAssignmentDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
+import { UserAccessSummaryService } from './user-access-summary.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(RoleCode.SUPER_ADMIN)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly userAccessSummaryService: UserAccessSummaryService,
+  ) {}
 
   @Get()
   findAll(
@@ -68,6 +72,11 @@ export class UsersController {
     @Body('newPassword') newPassword: string,
   ) {
     return this.usersService.resetPassword(id, newPassword);
+  }
+
+  @Get(':id/access-summary')
+  getAccessSummary(@Param('id') id: string) {
+    return this.userAccessSummaryService.getForUser(id);
   }
 
   @Get(':id/assignments')
