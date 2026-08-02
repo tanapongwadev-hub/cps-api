@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, ILike, In, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
@@ -55,75 +55,71 @@ export class MaterialsService {
     userId: string,
   ): Promise<MaterialWithSuppliers> {
     this.assertUniqueSupplierIds(dto.supplierIds);
-    const materialId = await this.getDataSource().transaction(
-      async (manager) => {
-        const materialRepository = manager.getRepository(Material);
-        const unitRepository = manager.getRepository(Unit);
-        const supplierRepository = manager.getRepository(Supplier);
-        const modelRepository = manager.getRepository(MaterialModel);
-        const deliveryTypeRepository = manager.getRepository(DeliveryType);
-        const loadingPointRepository = manager.getRepository(LoadingPoint);
-        const supplierMaterialRepository =
-          manager.getRepository(SupplierMaterial);
-        const normalizedCode = this.normalizeCode(dto.code);
+    return this.getDataSource().transaction(async (manager) => {
+      const materialRepository = manager.getRepository(Material);
+      const unitRepository = manager.getRepository(Unit);
+      const supplierRepository = manager.getRepository(Supplier);
+      const modelRepository = manager.getRepository(MaterialModel);
+      const deliveryTypeRepository = manager.getRepository(DeliveryType);
+      const loadingPointRepository = manager.getRepository(LoadingPoint);
+      const supplierMaterialRepository =
+        manager.getRepository(SupplierMaterial);
+      const normalizedCode = this.normalizeCode(dto.code);
 
-        await this.assertCodeAvailable(materialRepository, normalizedCode);
-        await this.validateReferences(
-          {
-            unitId: dto.unitId,
-            deliveryTypeId: dto.deliveryTypeId ?? null,
-            modelId: dto.modelId ?? null,
-            loadingPointId: dto.loadingPointId ?? null,
-            supplierIds: dto.supplierIds,
-          },
-          {
-            unitRepository,
-            supplierRepository,
-            modelRepository,
-            deliveryTypeRepository,
-            loadingPointRepository,
-          },
-        );
-
-        const material = materialRepository.create({
-          code: normalizedCode,
-          name: dto.name,
+      await this.assertCodeAvailable(materialRepository, normalizedCode);
+      await this.validateReferences(
+        {
           unitId: dto.unitId,
           deliveryTypeId: dto.deliveryTypeId ?? null,
           modelId: dto.modelId ?? null,
           loadingPointId: dto.loadingPointId ?? null,
-          processLineName: dto.processLineName ?? null,
-          scale: dto.scale ?? null,
-          imagePath: dto.imagePath ?? null,
-          specification: dto.specification ?? null,
-          description: dto.description ?? null,
-          isActive: dto.isActive ?? true,
+          supplierIds: dto.supplierIds,
+        },
+        {
+          unitRepository,
+          supplierRepository,
+          modelRepository,
+          deliveryTypeRepository,
+          loadingPointRepository,
+        },
+      );
+
+      const material = materialRepository.create({
+        code: normalizedCode,
+        name: dto.name,
+        unitId: dto.unitId,
+        deliveryTypeId: dto.deliveryTypeId ?? null,
+        modelId: dto.modelId ?? null,
+        loadingPointId: dto.loadingPointId ?? null,
+        processLineName: dto.processLineName ?? null,
+        scale: dto.scale ?? null,
+        imagePath: dto.imagePath ?? null,
+        specification: dto.specification ?? null,
+        description: dto.description ?? null,
+        isActive: dto.isActive ?? true,
+        createdBy: userId,
+        updatedBy: userId,
+      });
+      const savedMaterial = await this.saveMaterial(
+        materialRepository,
+        material,
+      );
+
+      const mappings = (dto.supplierIds ?? []).map((supplierId) =>
+        supplierMaterialRepository.create({
+          materialId: savedMaterial.id,
+          supplierId,
+          isActive: true,
           createdBy: userId,
           updatedBy: userId,
-        });
-        const savedMaterial = await this.saveMaterial(
-          materialRepository,
-          material,
-        );
+        }),
+      );
+      if (mappings.length > 0) {
+        await supplierMaterialRepository.save(mappings);
+      }
 
-        const mappings = (dto.supplierIds ?? []).map((supplierId) =>
-          supplierMaterialRepository.create({
-            materialId: savedMaterial.id,
-            supplierId,
-            isActive: true,
-            createdBy: userId,
-            updatedBy: userId,
-          }),
-        );
-        if (mappings.length > 0) {
-          await supplierMaterialRepository.save(mappings);
-        }
-
-        return savedMaterial.id;
-      },
-    );
-
-    return this.findOne(materialId);
+      return this.findOneUsing(materialRepository, savedMaterial.id);
+    });
   }
 
   async update(
@@ -132,7 +128,7 @@ export class MaterialsService {
     userId: string,
   ): Promise<MaterialWithSuppliers> {
     this.assertUniqueSupplierIds(dto.supplierIds);
-    await this.getDataSource().transaction(async (manager) => {
+    return this.getDataSource().transaction(async (manager) => {
       const materialRepository = manager.getRepository(Material);
       const unitRepository = manager.getRepository(Unit);
       const supplierRepository = manager.getRepository(Supplier);
@@ -199,9 +195,8 @@ export class MaterialsService {
           userId,
         );
       }
+      return this.findOneUsing(materialRepository, material.id);
     });
-
-    return this.findOne(id);
   }
 
   async deactivate(id: string, userId: string): Promise<MaterialWithSuppliers> {
@@ -286,7 +281,14 @@ export class MaterialsService {
   }
 
   async findOne(id: string): Promise<MaterialWithSuppliers> {
-    const material = await this.createReadQuery()
+    return this.findOneUsing(this.materialRepository, id);
+  }
+
+  private async findOneUsing(
+    repository: Repository<Material>,
+    id: string,
+  ): Promise<MaterialWithSuppliers> {
+    const material = await this.createReadQuery(repository)
       .where('material.id = :id', { id })
       .getOne();
 
@@ -314,8 +316,10 @@ export class MaterialsService {
     return { units, suppliers, models, deliveryTypes, loadingPoints };
   }
 
-  private createReadQuery(): SelectQueryBuilder<Material> {
-    return this.materialRepository
+  private createReadQuery(
+    repository: Repository<Material> = this.materialRepository,
+  ): SelectQueryBuilder<Material> {
+    return repository
       .createQueryBuilder('material')
       .leftJoinAndSelect('material.unit', 'unit')
       .leftJoinAndSelect('material.model', 'model')
@@ -372,10 +376,13 @@ export class MaterialsService {
     code: string,
     currentId?: string,
   ): Promise<void> {
-    const existing = await repository.findOne({
-      where: { code: ILike(code) },
-    });
-    if (existing && existing.id !== currentId) {
+    const query = repository
+      .createQueryBuilder('material')
+      .where('LOWER(material.code) = LOWER(:code)', { code });
+    if (currentId) {
+      query.andWhere('material.id <> :currentId', { currentId });
+    }
+    if (await query.getOne()) {
       throw new ConflictException('Material code already exists');
     }
   }
@@ -433,7 +440,10 @@ export class MaterialsService {
   private async assertActiveReference<
     T extends { id: string; isActive: boolean },
   >(repository: Repository<T>, id: string, label: string): Promise<void> {
-    const reference = await repository.findOne({ where: { id } as never });
+    const reference = await repository.findOne({
+      where: { id } as never,
+      lock: { mode: 'pessimistic_read' },
+    });
     if (!reference) {
       throw new NotFoundException(`${label} not found`);
     }
@@ -447,9 +457,17 @@ export class MaterialsService {
     supplierIds: string[],
   ): Promise<void> {
     if (supplierIds.length === 0) return;
-    const found = await repository.find({
-      where: { id: In(supplierIds) },
+    const orderedIds = [...supplierIds].sort((first, second) => {
+      const firstId = BigInt(first);
+      const secondId = BigInt(second);
+      return firstId < secondId ? -1 : firstId > secondId ? 1 : 0;
     });
+    const found = await repository
+      .createQueryBuilder('supplier')
+      .where('supplier.id IN (:...supplierIds)', { supplierIds: orderedIds })
+      .orderBy('supplier.id', 'ASC')
+      .setLock('pessimistic_read')
+      .getMany();
     const foundById = new Map(found.map((supplier) => [supplier.id, supplier]));
     const missingId = supplierIds.find((id) => !foundById.has(id));
     if (missingId) {
@@ -553,7 +571,7 @@ export class MaterialsService {
     isActive: boolean,
     userId: string,
   ): Promise<MaterialWithSuppliers> {
-    await this.getDataSource().transaction(async (manager) => {
+    return this.getDataSource().transaction(async (manager) => {
       const repository = manager.getRepository(Material);
       const material = await repository.findOne({
         where: { id },
@@ -565,7 +583,7 @@ export class MaterialsService {
       material.isActive = isActive;
       material.updatedBy = userId;
       await repository.save(material);
+      return this.findOneUsing(repository, material.id);
     });
-    return this.findOne(id);
   }
 }

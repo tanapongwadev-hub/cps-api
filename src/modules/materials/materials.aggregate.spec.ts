@@ -36,6 +36,23 @@ function detailBuilder(material: Material) {
   };
 }
 
+function singleRowBuilder(material: Material | null) {
+  return {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(material),
+  };
+}
+
+function multiRowBuilder<T>(rows: T[]) {
+  return {
+    where: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    setLock: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(rows),
+  };
+}
+
 describe('MaterialsService aggregate commands', () => {
   let rootMaterials: RepositoryStub<Material>;
   let rootUnits: RepositoryStub<Unit>;
@@ -50,6 +67,9 @@ describe('MaterialsService aggregate commands', () => {
   let deliveryTypes: RepositoryStub<DeliveryType>;
   let loadingPoints: RepositoryStub<LoadingPoint>;
   let supplierMaterials: RepositoryStub<SupplierMaterial>;
+  let transactionManager: {
+    getRepository: (entity: unknown) => RepositoryStub<object>;
+  };
   let transaction: jest.Mock;
   let service: MaterialsService;
   let savedMaterialWrites: Material[];
@@ -87,20 +107,26 @@ describe('MaterialsService aggregate commands', () => {
     savedMaterialWrites = [];
     savedMappingBatches = [];
 
-    const manager = {
+    transactionManager = {
       getRepository: (entity: unknown) => {
         if (entity === Material) return materials;
         if (entity === Unit) return units;
         if (entity === Supplier) return suppliers;
         if (entity === MaterialModel) return models;
-        if (entity === DeliveryType) return deliveryTypes;
-        if (entity === LoadingPoint) return loadingPoints;
-        if (entity === SupplierMaterial) return supplierMaterials;
+        if (entity === DeliveryType) {
+          return deliveryTypes;
+        }
+        if (entity === LoadingPoint) {
+          return loadingPoints;
+        }
+        if (entity === SupplierMaterial) {
+          return supplierMaterials;
+        }
         throw new Error('Unexpected repository');
       },
     };
     transaction = jest.fn((callback: (value: unknown) => Promise<unknown>) =>
-      callback(manager),
+      callback(transactionManager),
     );
     service = new MaterialsService(
       rootMaterials as unknown as Repository<Material>,
@@ -113,11 +139,11 @@ describe('MaterialsService aggregate commands', () => {
     );
 
     units.findOne!.mockResolvedValue(activeUnit);
-    suppliers.find!.mockResolvedValue([
-      activeSupplier('10'),
-      activeSupplier('11'),
-    ]);
+    suppliers.createQueryBuilder!.mockReturnValue(
+      multiRowBuilder([activeSupplier('10'), activeSupplier('11')]),
+    );
     materials.findOne!.mockResolvedValue(null);
+    materials.createQueryBuilder!.mockReturnValue(singleRowBuilder(null));
     materials.save!.mockImplementation((value: Material) => {
       value.id ??= '20';
       value.updatedAt ??= timestamp;
@@ -150,7 +176,9 @@ describe('MaterialsService aggregate commands', () => {
         } as SupplierMaterial,
       ],
     } as Material;
-    rootMaterials.createQueryBuilder!.mockReturnValue(detailBuilder(returned));
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(detailBuilder(returned));
 
     const result = await service.create(createDto(), '7');
 
@@ -185,6 +213,72 @@ describe('MaterialsService aggregate commands', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
   });
 
+  it('returns the detailed state read inside the create transaction', async () => {
+    const transactionalState = {
+      id: '20',
+      code: 'MAT-001',
+      name: 'Committed command state',
+      isActive: true,
+      supplierMaterials: [],
+    } as Material;
+    const concurrentlyChangedState = {
+      ...transactionalState,
+      name: 'Concurrent later state',
+    };
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(detailBuilder(transactionalState));
+    rootMaterials.createQueryBuilder!.mockReturnValue(
+      detailBuilder(concurrentlyChangedState),
+    );
+
+    await expect(service.create(createDto(), '7')).resolves.toMatchObject({
+      name: 'Committed command state',
+    });
+  });
+
+  it('keeps update detail-read failure inside the transaction boundary', async () => {
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      updatedAt: timestamp,
+    } as Material;
+    let transactionRejected = false;
+    materials.findOne!.mockResolvedValueOnce(locked);
+    materials.createQueryBuilder!.mockReturnValue({
+      ...detailBuilder(locked),
+      getOne: jest.fn().mockRejectedValue(new Error('detail read failed')),
+    });
+    rootMaterials.createQueryBuilder!.mockReturnValue({
+      ...detailBuilder(locked),
+      getOne: jest.fn().mockRejectedValue(new Error('detail read failed')),
+    });
+    transaction.mockImplementation(
+      async (callback: (value: unknown) => Promise<unknown>) => {
+        try {
+          return await callback(transactionManager);
+        } catch (error) {
+          transactionRejected = true;
+          throw error;
+        }
+      },
+    );
+
+    await expect(
+      service.update(
+        '20',
+        { name: 'Changed', updatedAt: timestamp.toISOString() },
+        '7',
+      ),
+    ).rejects.toThrow('detail read failed');
+    expect(transactionRejected).toBe(true);
+    expect(rootMaterials.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
   it('rejects a missing required lookup and an inactive optional lookup', async () => {
     units.findOne!.mockResolvedValueOnce(null);
 
@@ -203,12 +297,68 @@ describe('MaterialsService aggregate commands', () => {
     expect(materials.save).not.toHaveBeenCalled();
   });
 
+  it('share-locks active references in deterministic table and ID order', async () => {
+    const supplierBuilder = multiRowBuilder([
+      activeSupplier('10'),
+      activeSupplier('11'),
+    ]);
+    deliveryTypes.findOne!.mockResolvedValue({ id: '2', isActive: true });
+    models.findOne!.mockResolvedValue({ id: '3', isActive: true });
+    loadingPoints.findOne!.mockResolvedValue({ id: '4', isActive: true });
+    suppliers.createQueryBuilder!.mockReturnValue(supplierBuilder);
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(
+        detailBuilder({
+          id: '20',
+          code: 'MAT-001',
+          isActive: true,
+          supplierMaterials: [],
+        } as Material),
+      );
+
+    await service.create(
+      {
+        ...createDto(),
+        deliveryTypeId: '2',
+        modelId: '3',
+        loadingPointId: '4',
+        supplierIds: ['11', '10'],
+      },
+      '7',
+    );
+
+    for (const [repository, id] of [
+      [units, '1'],
+      [deliveryTypes, '2'],
+      [models, '3'],
+      [loadingPoints, '4'],
+    ] as const) {
+      expect(repository.findOne).toHaveBeenCalledWith({
+        where: { id },
+        lock: { mode: 'pessimistic_read' },
+      });
+    }
+    const lockCallOrder = [units, deliveryTypes, models, loadingPoints].map(
+      (repository) => repository.findOne!.mock.invocationCallOrder[0],
+    );
+    expect(lockCallOrder).toEqual([...lockCallOrder].sort((a, b) => a - b));
+    expect(supplierBuilder.where).toHaveBeenCalledWith(
+      'supplier.id IN (:...supplierIds)',
+      { supplierIds: ['10', '11'] },
+    );
+    expect(supplierBuilder.orderBy).toHaveBeenCalledWith('supplier.id', 'ASC');
+    expect(supplierBuilder.setLock).toHaveBeenCalledWith('pessimistic_read');
+  });
+
   it('defends against duplicate and invalid supplier IDs before writing', async () => {
     await expect(
       service.create({ ...createDto(), supplierIds: ['10', '10'] }, '7'),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    suppliers.find!.mockResolvedValueOnce([activeSupplier('10')]);
+    suppliers.createQueryBuilder!.mockReturnValueOnce(
+      multiRowBuilder([activeSupplier('10')]),
+    );
     await expect(
       service.create({ ...createDto(), supplierIds: ['10', '999'] }, '7'),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -216,15 +366,68 @@ describe('MaterialsService aggregate commands', () => {
   });
 
   it('rejects an existing code without regard to case', async () => {
-    materials.findOne!.mockResolvedValueOnce({
-      id: '99',
-      code: 'MAT-001',
-    });
+    materials.createQueryBuilder!.mockReturnValueOnce(
+      singleRowBuilder({ id: '99', code: 'MAT-001' } as Material),
+    );
 
     await expect(service.create(createDto(), '7')).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(materials.save).not.toHaveBeenCalled();
+  });
+
+  it('treats percent and underscore in a code as literals, not wildcards', async () => {
+    const codeBuilder = singleRowBuilder(null);
+    const returned = {
+      id: '20',
+      code: 'MAT%_01',
+      name: 'Steel coil',
+      isActive: true,
+      supplierMaterials: [],
+    } as Material;
+    materials.findOne!.mockResolvedValueOnce({
+      id: '99',
+      code: 'MATXX01',
+    });
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(codeBuilder)
+      .mockReturnValueOnce(detailBuilder(returned));
+
+    await expect(
+      service.create({ ...createDto(), code: 'mat%_01' }, '7'),
+    ).resolves.toMatchObject({ code: 'MAT%_01' });
+    expect(codeBuilder.where).toHaveBeenCalledWith(
+      'LOWER(material.code) = LOWER(:code)',
+      { code: 'MAT%_01' },
+    );
+  });
+
+  it('excludes the locked material ID in the exact code conflict query', async () => {
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      updatedAt: timestamp,
+    } as Material;
+    const codeBuilder = singleRowBuilder(null);
+    materials.findOne!.mockResolvedValueOnce(locked);
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(codeBuilder)
+      .mockReturnValueOnce(detailBuilder({ ...locked, supplierMaterials: [] }));
+
+    await service.update(
+      '20',
+      { code: 'mat-001', updatedAt: timestamp.toISOString() },
+      '7',
+    );
+
+    expect(codeBuilder.andWhere).toHaveBeenCalledWith(
+      'material.id <> :currentId',
+      { currentId: '20' },
+    );
   });
 
   it('maps a database material-code unique violation to conflict', async () => {
@@ -272,20 +475,24 @@ describe('MaterialsService aggregate commands', () => {
     materials
       .findOne!.mockResolvedValueOnce(locked)
       .mockResolvedValueOnce(null);
-    suppliers.find!.mockResolvedValue([
-      activeSupplier('10'),
-      activeSupplier('11'),
-      activeSupplier('13'),
-    ]);
-    supplierMaterials.find!.mockResolvedValue([kept, reactivated, removed]);
-    rootMaterials.createQueryBuilder!.mockReturnValue(
-      detailBuilder({
-        ...locked,
-        code: 'MAT-002',
-        name: 'New name',
-        supplierMaterials: [],
-      }),
+    suppliers.createQueryBuilder!.mockReturnValue(
+      multiRowBuilder([
+        activeSupplier('10'),
+        activeSupplier('11'),
+        activeSupplier('13'),
+      ]),
     );
+    supplierMaterials.find!.mockResolvedValue([kept, reactivated, removed]);
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(
+        detailBuilder({
+          ...locked,
+          code: 'MAT-002',
+          name: 'New name',
+          supplierMaterials: [],
+        }),
+      );
 
     const result = await service.update(
       '20',
@@ -309,9 +516,27 @@ describe('MaterialsService aggregate commands', () => {
     expect(removed).toMatchObject({ isActive: false, updatedBy: '7' });
     expect(savedMappingBatches[0]).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ supplierId: '13', isActive: true }),
+        expect.objectContaining({
+          id: '101',
+          supplierId: '11',
+          isActive: true,
+          updatedBy: '7',
+        }),
+        expect.objectContaining({
+          id: '102',
+          supplierId: '12',
+          isActive: false,
+          updatedBy: '7',
+        }),
+        expect.objectContaining({
+          supplierId: '13',
+          isActive: true,
+          createdBy: '7',
+          updatedBy: '7',
+        }),
       ]),
     );
+    expect(savedMappingBatches[0]).toHaveLength(3);
   });
 
   it('rejects a stale update before validating or changing aggregate state', async () => {
@@ -339,6 +564,66 @@ describe('MaterialsService aggregate commands', () => {
     expect(supplierMaterials.save).not.toHaveBeenCalled();
   });
 
+  it('allows only the first of two serialized updates with the same timestamp', async () => {
+    const firstUpdatedAt = new Date('2026-08-01T10:01:00.000Z');
+    const sharedMaterial = {
+      id: '20',
+      code: 'MAT-001',
+      name: 'Original',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      updatedAt: timestamp,
+    } as Material;
+    let transactionTail: Promise<unknown> = Promise.resolve();
+    materials.findOne!.mockImplementation(() =>
+      Promise.resolve(sharedMaterial),
+    );
+    materials.save!.mockImplementation((value: Material) => {
+      value.updatedAt = firstUpdatedAt;
+      savedMaterialWrites.push(value);
+      return Promise.resolve(value);
+    });
+    materials.createQueryBuilder!.mockReturnValue(
+      detailBuilder({ ...sharedMaterial, supplierMaterials: [] }),
+    );
+    transaction.mockImplementation(
+      (callback: (value: unknown) => Promise<unknown>) => {
+        const command = transactionTail.then(() =>
+          callback(transactionManager),
+        );
+        transactionTail = command.catch(() => undefined);
+        return command;
+      },
+    );
+
+    const [first, second] = await Promise.allSettled([
+      service.update(
+        '20',
+        { name: 'First', updatedAt: timestamp.toISOString() },
+        '7',
+      ),
+      service.update(
+        '20',
+        { name: 'Second', updatedAt: timestamp.toISOString() },
+        '8',
+      ),
+    ]);
+
+    expect(first.status).toBe('fulfilled');
+    expect(second.status).toBe('rejected');
+    if (second.status === 'rejected') {
+      expect(second.reason).toBeInstanceOf(ConflictException);
+    }
+    expect(savedMaterialWrites).toHaveLength(1);
+    expect(sharedMaterial).toMatchObject({
+      name: 'First',
+      updatedBy: '7',
+      updatedAt: firstUpdatedAt,
+    });
+  });
+
   it('locks updates and propagates a supplier write failure through the transaction', async () => {
     const locked = {
       id: '20',
@@ -350,7 +635,9 @@ describe('MaterialsService aggregate commands', () => {
       updatedAt: timestamp,
     } as Material;
     materials.findOne!.mockResolvedValueOnce(locked);
-    suppliers.find!.mockResolvedValueOnce([activeSupplier('10')]);
+    suppliers.createQueryBuilder!.mockReturnValueOnce(
+      multiRowBuilder([activeSupplier('10')]),
+    );
     supplierMaterials.find!.mockResolvedValueOnce([]);
     supplierMaterials.save!.mockRejectedValueOnce(new Error('mapping failed'));
 
@@ -376,7 +663,7 @@ describe('MaterialsService aggregate commands', () => {
       updatedAt: timestamp,
     } as Material;
     materials.findOne!.mockResolvedValue(material);
-    rootMaterials.createQueryBuilder!.mockReturnValue(
+    materials.createQueryBuilder!.mockReturnValue(
       detailBuilder({ ...material, supplierMaterials: [] }),
     );
 
