@@ -376,7 +376,7 @@ export class AuthService {
     const permissionCodes =
       await this.effectivePermissionService.getEffectivePermissionCodes(
         user.id,
-        undefined,
+        assignment?.id,
         isSuperAdmin,
       );
     const menus = await this.accessControlService.getMenusWithPermissions();
@@ -385,6 +385,22 @@ export class AuthService {
       permissionCodes,
       isSuperAdmin,
     );
+    const currentDepartmentRole = assignment
+      ? {
+          id: assignment.id,
+          userId: assignment.userId,
+          departmentId: assignment.departmentId,
+          departmentName: assignment.department?.nameTh ?? null,
+          departmentCode: assignment.department?.code ?? null,
+          roleId: assignment.roleId,
+          roleName: assignment.role.nameTh,
+          roleCode: assignment.role.code,
+          isPrimary: false,
+          isActive: assignment.isActive,
+          createdAt: assignment.createdAt,
+          updatedAt: assignment.updatedAt,
+        }
+      : null;
 
     return {
       success: true,
@@ -432,7 +448,14 @@ export class AuthService {
                 all.findIndex((other) => other.id === item.id) === index,
             ),
         },
-        accessControl: { menus: menuTree, permissions: permissionCodes },
+        currentDepartmentRole,
+        accessControl: {
+          menus: menuTree,
+          permissions: permissionCodes,
+          userDepartmentRoleId: assignment?.id ?? null,
+          departmentId: assignment?.departmentId ?? null,
+          roleId: assignment?.roleId ?? null,
+        },
       },
       timestamp: new Date().toISOString(),
     };
