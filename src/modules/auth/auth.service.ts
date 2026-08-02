@@ -461,17 +461,22 @@ export class AuthService {
     };
   }
 
-  async getMe(userId: string) {
+  async getMe(userId: string, userDepartmentRoleId: string | null) {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
 
-    const assignment = await this.userDepartmentRoleRepository.findOne({
-      where: { userId, isActive: true },
-      relations: ['department', 'role'],
-      order: { id: 'ASC' },
-    });
+    const assignment = userDepartmentRoleId
+      ? await this.userDepartmentRoleRepository.findOne({
+          where: {
+            id: userDepartmentRoleId,
+            userId,
+            isActive: true,
+          },
+          relations: ['department', 'role'],
+        })
+      : null;
     const response = await this.buildAuthenticationResponse(
       user,
       assignment,

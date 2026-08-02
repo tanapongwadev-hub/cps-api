@@ -98,7 +98,10 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   async getMe(@CurrentUser() user: CurrentUserWithAssignment) {
-    return await this.authService.getMe(user.id);
+    return await this.authService.getMe(
+      user.id,
+      user.activeUserDepartmentRoleId,
+    );
   }
 
   @UseGuards(JwtAuthGuard)

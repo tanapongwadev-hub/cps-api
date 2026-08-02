@@ -134,4 +134,54 @@ describe('AuthService permission details', () => {
       roleId: '3',
     });
   });
+
+  it('hydrates auth me from the assignment selected in the JWT context', async () => {
+    const user = {
+      id: '53',
+      username: 'user-we-ps',
+    } as User;
+    const pcAssignment = {
+      id: '92',
+      userId: '53',
+      departmentId: '6',
+      roleId: '3',
+      isActive: true,
+      department: { id: '6', code: 'PC', nameTh: 'แผนก PC' },
+      role: { id: '3', code: 'USER', nameTh: 'ผู้ใช้งาน' },
+    } as unknown as UserDepartmentRole;
+    const response = {
+      data: {
+        authentication: { refreshToken: 'refresh-token' },
+        currentDepartmentRole: { id: '92', departmentId: '6' },
+        accessControl: { userDepartmentRoleId: '92', menus: [] },
+      },
+    };
+    const service = Object.create(AuthService.prototype) as AuthService & {
+      userRepository: { findOne: jest.Mock };
+      userDepartmentRoleRepository: { findOne: jest.Mock };
+      buildAuthenticationResponse: jest.Mock;
+    };
+    service.userRepository = { findOne: jest.fn().mockResolvedValue(user) };
+    service.userDepartmentRoleRepository = {
+      findOne: jest.fn().mockResolvedValue(pcAssignment),
+    };
+    service.buildAuthenticationResponse = jest.fn().mockResolvedValue(response);
+
+    await expect(service.getMe('53', '92')).resolves.toMatchObject({
+      data: {
+        currentDepartmentRole: { id: '92', departmentId: '6' },
+        accessControl: { userDepartmentRoleId: '92' },
+      },
+    });
+    expect(service.userDepartmentRoleRepository.findOne).toHaveBeenCalledWith({
+      where: { id: '92', userId: '53', isActive: true },
+      relations: ['department', 'role'],
+    });
+    expect(service.buildAuthenticationResponse).toHaveBeenCalledWith(
+      user,
+      pcAssignment,
+      '',
+      '',
+    );
+  });
 });
