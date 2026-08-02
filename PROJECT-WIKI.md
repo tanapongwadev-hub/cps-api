@@ -31,6 +31,10 @@
 
 CPS Access Control เป็นระบบจัดการสิทธิ์ผู้ใช้งาน (RBAC) บน NestJS + PostgreSQL รองรับการจัดการผู้ใช้ แผนก บทบาท เมนู สิทธิ์ เซสชัน และบันทึกการใช้งาน
 
+### 1.1 Domain Requirement Documents
+
+- [Material Master Requirements](docs/wiki/material-master.md) — ข้อมูลหลักวัตถุดิบ, Supplier และ Master Data ที่เกี่ยวข้อง
+
 ## 2. สถาปัตยกรรม (Architecture)
 
 ### 2.1 Tech Stack
