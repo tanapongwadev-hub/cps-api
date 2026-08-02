@@ -50,9 +50,14 @@ describe('MenuTreeService', () => {
     expect(service.buildMenuTree(menus, ['user.view'])).toEqual([
       expect.objectContaining({
         id: '1',
+        menuType: 'MAIN',
         permissions: [],
         children: [
-          expect.objectContaining({ id: '2', permissions: ['user.view'] }),
+          expect.objectContaining({
+            id: '2',
+            menuType: 'SUB',
+            permissions: ['user.view'],
+          }),
         ],
       }),
     ]);

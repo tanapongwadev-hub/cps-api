@@ -32,7 +32,7 @@
 
 ### GET `/users/:id/access-summary`
 
-Returns persisted, effective menu access grouped by assignment. Inactive or expired assignments are returned with empty `permissions`, `menus`, and `menuCount: 0`. System assignments have `department: null`.
+Returns persisted, effective menu access grouped by assignment. Inactive or expired assignments are returned with empty `permissions`, `menus`, and `menuCount: 0`. System assignments have `department: null`. Menu-tree nodes serialize `menuType` as `MAIN | SUB`, matching the persisted menu discriminator.
 
 ```json
 {
@@ -62,7 +62,7 @@ Returns persisted, effective menu access grouped by assignment. Inactive or expi
           "nameEn": "Production",
           "path": "/production",
           "icon": null,
-          "menuType": "GROUP",
+          "menuType": "MAIN",
           "sortOrder": 1,
           "permissions": [],
           "children": []

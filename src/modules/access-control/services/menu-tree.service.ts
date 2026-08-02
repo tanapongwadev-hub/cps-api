@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
+export type MenuTreeType = 'MAIN' | 'SUB';
+
 export interface MenuResponse {
   id: string;
   code: string;
@@ -7,7 +9,7 @@ export interface MenuResponse {
   nameEn: string;
   path: string | null;
   icon: string | null;
-  menuType: string;
+  menuType: MenuTreeType;
   sortOrder: number;
   permissions: string[];
   children: MenuResponse[];
@@ -21,7 +23,7 @@ type MenuInput = {
   nameEn: string;
   path?: string | null;
   icon?: string | null;
-  menuType: string;
+  menuType: MenuTreeType;
   sortOrder: number;
   isActive: boolean;
   isVisible: boolean;
