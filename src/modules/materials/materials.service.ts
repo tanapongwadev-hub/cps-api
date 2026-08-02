@@ -99,6 +99,7 @@ export class MaterialsService {
     const sortOrder = query.sortOrder === 'desc' ? 'DESC' : 'ASC';
     const [materials, totalItems] = await queryBuilder
       .orderBy(sortColumn, sortOrder)
+      .addOrderBy('material.id', 'ASC')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();

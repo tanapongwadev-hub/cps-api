@@ -23,13 +23,27 @@ export const MATERIAL_SORT_FIELDS = [
 export type MaterialSortBy = (typeof MATERIAL_SORT_FIELDS)[number];
 export type MaterialSortOrder = 'asc' | 'desc';
 
-function nullableTrimmedString({ value }: TransformFnParams): unknown {
+function sourceValue(params: TransformFnParams): unknown {
+  const source: unknown = params.obj;
+  if (
+    source !== null &&
+    typeof source === 'object' &&
+    Object.prototype.hasOwnProperty.call(source, params.key)
+  ) {
+    return Reflect.get(source, params.key);
+  }
+  return params.value;
+}
+
+function nullableTrimmedString(params: TransformFnParams): unknown {
+  const value = sourceValue(params);
   if (typeof value !== 'string') return value;
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
 }
 
-function queryBoolean({ value }: TransformFnParams): unknown {
+function queryBoolean(params: TransformFnParams): unknown {
+  const value = sourceValue(params);
   if (value === 'true') return true;
   if (value === 'false') return false;
   return value;

@@ -26,6 +26,7 @@ function queryBuilderStub() {
     andWhere: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
     skip: jest.fn().mockReturnThis(),
     take: jest.fn().mockReturnThis(),
     getManyAndCount: jest.fn(),
@@ -144,6 +145,7 @@ describe('MaterialsService read operations', () => {
       { supplierId: '5' },
     );
     expect(builder.orderBy).toHaveBeenCalledWith('material.name', 'DESC');
+    expect(builder.addOrderBy).toHaveBeenCalledWith('material.id', 'ASC');
     expect(builder.skip).toHaveBeenCalledWith(10);
     expect(builder.take).toHaveBeenCalledWith(10);
   });

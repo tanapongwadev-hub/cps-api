@@ -1,11 +1,23 @@
 import 'reflect-metadata';
+import { ArgumentMetadata, BadRequestException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { CustomValidationPipe } from '../../../common/pipes/validation.pipe';
 import { CreateMaterialDto } from './create-material.dto';
 import { ListMaterialsQueryDto } from './list-materials-query.dto';
 import { UpdateMaterialDto } from './update-material.dto';
 
 describe('Material DTOs', () => {
+  const pipe = new CustomValidationPipe();
+
+  function transformThroughProductionPipe<T>(
+    value: unknown,
+    metatype: new () => T,
+    type: ArgumentMetadata['type'],
+  ): Promise<T> {
+    return pipe.transform(value, { metatype, type });
+  }
+
   it('normalizes and accepts a valid create payload', async () => {
     const dto = plainToInstance(CreateMaterialDto, {
       code: '  MAT-001  ',
@@ -132,6 +144,60 @@ describe('Material DTOs', () => {
       sortOrder: 'desc',
     });
   });
+
+  it('parses false and rejects malformed booleans through the production pipe', async () => {
+    await expect(
+      transformThroughProductionPipe(
+        { isActive: 'false' },
+        ListMaterialsQueryDto,
+        'query',
+      ),
+    ).resolves.toMatchObject({ isActive: false });
+
+    await expect(
+      transformThroughProductionPipe(
+        { isActive: 'yes' },
+        ListMaterialsQueryDto,
+        'query',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it.each([
+    {
+      dto: CreateMaterialDto,
+      valid: { code: 'MAT-001', name: 'Steel', unitId: '7' },
+      numericId: { code: 'MAT-001', name: 'Steel', unitId: 7 },
+      stringBoolean: {
+        code: 'MAT-001',
+        name: 'Steel',
+        unitId: '7',
+        isActive: 'false',
+      },
+    },
+    {
+      dto: UpdateMaterialDto,
+      valid: { unitId: '7', updatedAt: '2026-08-02T14:30:00.000Z' },
+      numericId: { unitId: 7, updatedAt: '2026-08-02T14:30:00.000Z' },
+      stringBoolean: {
+        isActive: 'false',
+        updatedAt: '2026-08-02T14:30:00.000Z',
+      },
+    },
+  ])(
+    'preserves raw body types for $dto.name under the production pipe',
+    async ({ dto, valid, numericId, stringBoolean }) => {
+      await expect(
+        transformThroughProductionPipe(valid, dto, 'body'),
+      ).resolves.toBeInstanceOf(dto);
+      await expect(
+        transformThroughProductionPipe(numericId, dto, 'body'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        transformThroughProductionPipe(stringBoolean, dto, 'body'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    },
+  );
 
   it('rejects oversized pages, malformed filters, and unsupported sorting', async () => {
     const dto = plainToInstance(ListMaterialsQueryDto, {
