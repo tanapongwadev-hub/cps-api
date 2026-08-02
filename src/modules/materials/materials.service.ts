@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, ILike, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
@@ -8,10 +13,12 @@ import { Material } from '../../entities/master/material.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
+import { CreateMaterialDto } from './dto/create-material.dto';
 import {
   ListMaterialsQueryDto,
   MaterialSortBy,
 } from './dto/list-materials-query.dto';
+import { UpdateMaterialDto } from './dto/update-material.dto';
 
 const MATERIAL_SORT_COLUMNS: Record<MaterialSortBy, string> = {
   code: 'material.code',
@@ -40,7 +47,170 @@ export class MaterialsService {
     private deliveryTypeRepository: Repository<DeliveryType>,
     @InjectRepository(LoadingPoint)
     private loadingPointRepository: Repository<LoadingPoint>,
+    private dataSource?: DataSource,
   ) {}
+
+  async create(
+    dto: CreateMaterialDto,
+    userId: string,
+  ): Promise<MaterialWithSuppliers> {
+    this.assertUniqueSupplierIds(dto.supplierIds);
+    const materialId = await this.getDataSource().transaction(
+      async (manager) => {
+        const materialRepository = manager.getRepository(Material);
+        const unitRepository = manager.getRepository(Unit);
+        const supplierRepository = manager.getRepository(Supplier);
+        const modelRepository = manager.getRepository(MaterialModel);
+        const deliveryTypeRepository = manager.getRepository(DeliveryType);
+        const loadingPointRepository = manager.getRepository(LoadingPoint);
+        const supplierMaterialRepository =
+          manager.getRepository(SupplierMaterial);
+        const normalizedCode = this.normalizeCode(dto.code);
+
+        await this.assertCodeAvailable(materialRepository, normalizedCode);
+        await this.validateReferences(
+          {
+            unitId: dto.unitId,
+            deliveryTypeId: dto.deliveryTypeId ?? null,
+            modelId: dto.modelId ?? null,
+            loadingPointId: dto.loadingPointId ?? null,
+            supplierIds: dto.supplierIds,
+          },
+          {
+            unitRepository,
+            supplierRepository,
+            modelRepository,
+            deliveryTypeRepository,
+            loadingPointRepository,
+          },
+        );
+
+        const material = materialRepository.create({
+          code: normalizedCode,
+          name: dto.name,
+          unitId: dto.unitId,
+          deliveryTypeId: dto.deliveryTypeId ?? null,
+          modelId: dto.modelId ?? null,
+          loadingPointId: dto.loadingPointId ?? null,
+          processLineName: dto.processLineName ?? null,
+          scale: dto.scale ?? null,
+          imagePath: dto.imagePath ?? null,
+          specification: dto.specification ?? null,
+          description: dto.description ?? null,
+          isActive: dto.isActive ?? true,
+          createdBy: userId,
+          updatedBy: userId,
+        });
+        const savedMaterial = await this.saveMaterial(
+          materialRepository,
+          material,
+        );
+
+        const mappings = (dto.supplierIds ?? []).map((supplierId) =>
+          supplierMaterialRepository.create({
+            materialId: savedMaterial.id,
+            supplierId,
+            isActive: true,
+            createdBy: userId,
+            updatedBy: userId,
+          }),
+        );
+        if (mappings.length > 0) {
+          await supplierMaterialRepository.save(mappings);
+        }
+
+        return savedMaterial.id;
+      },
+    );
+
+    return this.findOne(materialId);
+  }
+
+  async update(
+    id: string,
+    dto: UpdateMaterialDto,
+    userId: string,
+  ): Promise<MaterialWithSuppliers> {
+    this.assertUniqueSupplierIds(dto.supplierIds);
+    await this.getDataSource().transaction(async (manager) => {
+      const materialRepository = manager.getRepository(Material);
+      const unitRepository = manager.getRepository(Unit);
+      const supplierRepository = manager.getRepository(Supplier);
+      const modelRepository = manager.getRepository(MaterialModel);
+      const deliveryTypeRepository = manager.getRepository(DeliveryType);
+      const loadingPointRepository = manager.getRepository(LoadingPoint);
+      const supplierMaterialRepository =
+        manager.getRepository(SupplierMaterial);
+      const material = await materialRepository.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!material) {
+        throw new NotFoundException('Material not found');
+      }
+      if (
+        new Date(dto.updatedAt).getTime() !==
+        new Date(material.updatedAt).getTime()
+      ) {
+        throw new ConflictException('Material has been updated');
+      }
+
+      const normalizedCode = dto.code
+        ? this.normalizeCode(dto.code)
+        : material.code;
+      if (dto.code) {
+        await this.assertCodeAvailable(
+          materialRepository,
+          normalizedCode,
+          material.id,
+        );
+      }
+      await this.validateReferences(
+        {
+          unitId: dto.unitId ?? material.unitId,
+          deliveryTypeId:
+            dto.deliveryTypeId === undefined
+              ? material.deliveryTypeId
+              : dto.deliveryTypeId,
+          modelId: dto.modelId === undefined ? material.modelId : dto.modelId,
+          loadingPointId:
+            dto.loadingPointId === undefined
+              ? material.loadingPointId
+              : dto.loadingPointId,
+          supplierIds: dto.supplierIds,
+        },
+        {
+          unitRepository,
+          supplierRepository,
+          modelRepository,
+          deliveryTypeRepository,
+          loadingPointRepository,
+        },
+      );
+
+      this.applyUpdate(material, dto, normalizedCode, userId);
+      await this.saveMaterial(materialRepository, material);
+      if (dto.supplierIds !== undefined) {
+        await this.synchronizeSuppliers(
+          supplierMaterialRepository,
+          material.id,
+          dto.supplierIds,
+          userId,
+        );
+      }
+    });
+
+    return this.findOne(id);
+  }
+
+  async deactivate(id: string, userId: string): Promise<MaterialWithSuppliers> {
+    return this.setActive(id, false, userId);
+  }
+
+  async restore(id: string, userId: string): Promise<MaterialWithSuppliers> {
+    return this.setActive(id, true, userId);
+  }
 
   async findAll(query: ListMaterialsQueryDto) {
     const page = query.page ?? 1;
@@ -178,5 +348,224 @@ export class MaterialsService {
     };
     delete result.supplierMaterials;
     return result;
+  }
+
+  private getDataSource(): DataSource {
+    if (!this.dataSource) {
+      throw new Error('MaterialsService DataSource is not configured');
+    }
+    return this.dataSource;
+  }
+
+  private normalizeCode(code: string): string {
+    return code.trim().toUpperCase();
+  }
+
+  private assertUniqueSupplierIds(supplierIds?: string[]): void {
+    if (supplierIds && new Set(supplierIds).size !== supplierIds.length) {
+      throw new BadRequestException('Supplier IDs must be unique');
+    }
+  }
+
+  private async assertCodeAvailable(
+    repository: Repository<Material>,
+    code: string,
+    currentId?: string,
+  ): Promise<void> {
+    const existing = await repository.findOne({
+      where: { code: ILike(code) },
+    });
+    if (existing && existing.id !== currentId) {
+      throw new ConflictException('Material code already exists');
+    }
+  }
+
+  private async validateReferences(
+    references: {
+      unitId: string;
+      deliveryTypeId: string | null;
+      modelId: string | null;
+      loadingPointId: string | null;
+      supplierIds?: string[];
+    },
+    repositories: {
+      unitRepository: Repository<Unit>;
+      supplierRepository: Repository<Supplier>;
+      modelRepository: Repository<MaterialModel>;
+      deliveryTypeRepository: Repository<DeliveryType>;
+      loadingPointRepository: Repository<LoadingPoint>;
+    },
+  ): Promise<void> {
+    await this.assertActiveReference(
+      repositories.unitRepository,
+      references.unitId,
+      'Unit',
+    );
+    if (references.deliveryTypeId) {
+      await this.assertActiveReference(
+        repositories.deliveryTypeRepository,
+        references.deliveryTypeId,
+        'Delivery type',
+      );
+    }
+    if (references.modelId) {
+      await this.assertActiveReference(
+        repositories.modelRepository,
+        references.modelId,
+        'Material model',
+      );
+    }
+    if (references.loadingPointId) {
+      await this.assertActiveReference(
+        repositories.loadingPointRepository,
+        references.loadingPointId,
+        'Loading point',
+      );
+    }
+    if (references.supplierIds !== undefined) {
+      await this.assertActiveSuppliers(
+        repositories.supplierRepository,
+        references.supplierIds,
+      );
+    }
+  }
+
+  private async assertActiveReference<
+    T extends { id: string; isActive: boolean },
+  >(repository: Repository<T>, id: string, label: string): Promise<void> {
+    const reference = await repository.findOne({ where: { id } as never });
+    if (!reference) {
+      throw new NotFoundException(`${label} not found`);
+    }
+    if (!reference.isActive) {
+      throw new BadRequestException(`${label} is inactive`);
+    }
+  }
+
+  private async assertActiveSuppliers(
+    repository: Repository<Supplier>,
+    supplierIds: string[],
+  ): Promise<void> {
+    if (supplierIds.length === 0) return;
+    const found = await repository.find({
+      where: { id: In(supplierIds) },
+    });
+    const foundById = new Map(found.map((supplier) => [supplier.id, supplier]));
+    const missingId = supplierIds.find((id) => !foundById.has(id));
+    if (missingId) {
+      throw new NotFoundException(`Supplier ${missingId} not found`);
+    }
+    const inactiveId = supplierIds.find((id) => !foundById.get(id)?.isActive);
+    if (inactiveId) {
+      throw new BadRequestException(`Supplier ${inactiveId} is inactive`);
+    }
+  }
+
+  private applyUpdate(
+    material: Material,
+    dto: UpdateMaterialDto,
+    normalizedCode: string,
+    userId: string,
+  ): void {
+    if (dto.code !== undefined) material.code = normalizedCode;
+    for (const field of [
+      'name',
+      'unitId',
+      'deliveryTypeId',
+      'modelId',
+      'loadingPointId',
+      'processLineName',
+      'scale',
+      'imagePath',
+      'specification',
+      'description',
+      'isActive',
+    ] as const) {
+      if (dto[field] !== undefined) {
+        (material[field] as (typeof dto)[typeof field]) = dto[field];
+      }
+    }
+    material.updatedBy = userId;
+  }
+
+  private async synchronizeSuppliers(
+    repository: Repository<SupplierMaterial>,
+    materialId: string,
+    supplierIds: string[],
+    userId: string,
+  ): Promise<void> {
+    const existing = await repository.find({ where: { materialId } });
+    const requested = new Set(supplierIds);
+    const existingBySupplier = new Map(
+      existing.map((mapping) => [mapping.supplierId, mapping]),
+    );
+    const changed: SupplierMaterial[] = [];
+
+    for (const mapping of existing) {
+      const shouldBeActive = requested.has(mapping.supplierId);
+      if (mapping.isActive !== shouldBeActive) {
+        mapping.isActive = shouldBeActive;
+        mapping.updatedBy = userId;
+        changed.push(mapping);
+      }
+    }
+    for (const supplierId of supplierIds) {
+      if (!existingBySupplier.has(supplierId)) {
+        changed.push(
+          repository.create({
+            materialId,
+            supplierId,
+            isActive: true,
+            createdBy: userId,
+            updatedBy: userId,
+          }),
+        );
+      }
+    }
+    if (changed.length > 0) {
+      await repository.save(changed);
+    }
+  }
+
+  private async saveMaterial(
+    repository: Repository<Material>,
+    material: Material,
+  ): Promise<Material> {
+    try {
+      return await repository.save(material);
+    } catch (error) {
+      const databaseError = error as {
+        code?: string;
+        driverError?: { code?: string };
+      };
+      if (
+        databaseError.code === '23505' ||
+        databaseError.driverError?.code === '23505'
+      ) {
+        throw new ConflictException('Material code already exists');
+      }
+      throw error;
+    }
+  }
+
+  private async setActive(
+    id: string,
+    isActive: boolean,
+    userId: string,
+  ): Promise<MaterialWithSuppliers> {
+    await this.getDataSource().transaction(async (manager) => {
+      const repository = manager.getRepository(Material);
+      const material = await repository.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!material) {
+        throw new NotFoundException('Material not found');
+      }
+      material.isActive = isActive;
+      material.updatedBy = userId;
+      await repository.save(material);
+    });
+    return this.findOne(id);
   }
 }
