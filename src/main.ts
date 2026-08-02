@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'node:path';
 import { AppModule } from './app.module';
 import { CustomValidationPipe } from './common/pipes/validation.pipe';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
@@ -8,8 +9,11 @@ import { getAppConfig } from './config/app.config';
 import { getEnv } from './config/env.utils';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.setGlobalPrefix('api/v1');
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads/',
+  });
 
   // Global validation pipe
   app.useGlobalPipes(new CustomValidationPipe());
@@ -50,4 +54,4 @@ async function bootstrap() {
   console.log(`📚 Swagger documentation: http://localhost:${port}/api/docs`);
 }
 
-bootstrap();
+void bootstrap();

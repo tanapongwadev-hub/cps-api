@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
@@ -12,6 +13,7 @@ import { SupplierMaterial } from '../../entities/master/supplier-material.entity
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { CreateMaterialDto } from './dto/create-material.dto';
+import { MaterialImageStorageService } from './material-image-storage.service';
 import { MaterialsService } from './materials.service';
 
 type RepositoryStub<T extends object> = Partial<
@@ -71,6 +73,10 @@ describe('MaterialsService aggregate commands', () => {
     getRepository: (entity: unknown) => RepositoryStub<object>;
   };
   let transaction: jest.Mock;
+  let imageStorage: {
+    promote: jest.Mock;
+    discard: jest.Mock;
+  };
   let service: MaterialsService;
   let savedMaterialWrites: Material[];
   let savedMappingBatches: SupplierMaterial[][];
@@ -128,6 +134,10 @@ describe('MaterialsService aggregate commands', () => {
     transaction = jest.fn((callback: (value: unknown) => Promise<unknown>) =>
       callback(transactionManager),
     );
+    imageStorage = {
+      promote: jest.fn(),
+      discard: jest.fn().mockResolvedValue(undefined),
+    };
     service = new MaterialsService(
       rootMaterials as unknown as Repository<Material>,
       rootUnits as unknown as Repository<Unit>,
@@ -136,6 +146,7 @@ describe('MaterialsService aggregate commands', () => {
       rootDeliveryTypes as unknown as Repository<DeliveryType>,
       rootLoadingPoints as unknown as Repository<LoadingPoint>,
       { transaction } as unknown as DataSource,
+      imageStorage as unknown as MaterialImageStorageService,
     );
 
     units.findOne!.mockResolvedValue(activeUnit);
@@ -211,6 +222,46 @@ describe('MaterialsService aggregate commands', () => {
       }),
     ]);
     expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('promotes a staged image for create and compensates it when the transaction fails', async () => {
+    const temporaryPath =
+      '/uploads/materials/.tmp/00000000-0000-4000-8000-000000000001.png';
+    const promotedPath =
+      '/uploads/materials/00000000-0000-4000-8000-000000000001.png';
+    imageStorage.promote.mockResolvedValue(promotedPath);
+    supplierMaterials.save!.mockRejectedValueOnce(new Error('mapping failed'));
+
+    await expect(
+      service.create({ ...createDto(), imagePath: temporaryPath }, '7'),
+    ).rejects.toThrow('mapping failed');
+
+    expect(imageStorage.promote).toHaveBeenCalledWith(temporaryPath);
+    expect(savedMaterialWrites[0]).toMatchObject({ imagePath: promotedPath });
+    expect(imageStorage.discard).toHaveBeenCalledWith(promotedPath);
+  });
+
+  it('keeps a promoted create image after the transaction commits', async () => {
+    const temporaryPath =
+      '/uploads/materials/.tmp/00000000-0000-4000-8000-000000000002.webp';
+    const promotedPath =
+      '/uploads/materials/00000000-0000-4000-8000-000000000002.webp';
+    imageStorage.promote.mockResolvedValue(promotedPath);
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(
+        detailBuilder({
+          id: '20',
+          code: 'MAT-001',
+          imagePath: promotedPath,
+          supplierMaterials: [],
+        } as Material),
+      );
+
+    await expect(
+      service.create({ ...createDto(), imagePath: temporaryPath }, '7'),
+    ).resolves.toMatchObject({ imagePath: promotedPath });
+    expect(imageStorage.discard).not.toHaveBeenCalled();
   });
 
   it('returns the detailed state read inside the create transaction', async () => {
@@ -537,6 +588,148 @@ describe('MaterialsService aggregate commands', () => {
       ]),
     );
     expect(savedMappingBatches[0]).toHaveLength(3);
+  });
+
+  it('discards the old image only after a replacement transaction commits', async () => {
+    const oldPath = '/uploads/materials/old.png';
+    const temporaryPath =
+      '/uploads/materials/.tmp/00000000-0000-4000-8000-000000000003.jpg';
+    const promotedPath =
+      '/uploads/materials/00000000-0000-4000-8000-000000000003.jpg';
+    const events: string[] = [];
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      imagePath: oldPath,
+      updatedAt: timestamp,
+    } as Material;
+    materials.findOne!.mockResolvedValueOnce(locked);
+    materials.createQueryBuilder!.mockReturnValueOnce(
+      detailBuilder({ ...locked, imagePath: promotedPath }),
+    );
+    imageStorage.promote.mockResolvedValue(promotedPath);
+    imageStorage.discard.mockImplementation(() => {
+      events.push('discard-old');
+      return Promise.resolve();
+    });
+    transaction.mockImplementation(
+      async (callback: (value: unknown) => Promise<unknown>) => {
+        const result = await callback(transactionManager);
+        events.push('commit');
+        return result;
+      },
+    );
+
+    await expect(
+      service.update(
+        '20',
+        { imagePath: temporaryPath, updatedAt: timestamp.toISOString() },
+        '7',
+      ),
+    ).resolves.toMatchObject({ imagePath: promotedPath });
+
+    expect(imageStorage.promote).toHaveBeenCalledWith(temporaryPath);
+    expect(imageStorage.discard).toHaveBeenCalledWith(oldPath);
+    expect(events).toEqual(['commit', 'discard-old']);
+  });
+
+  it('compensates a promoted replacement and retains the old image when the transaction fails', async () => {
+    const oldPath = '/uploads/materials/old.png';
+    const temporaryPath =
+      '/uploads/materials/.tmp/00000000-0000-4000-8000-000000000004.png';
+    const promotedPath =
+      '/uploads/materials/00000000-0000-4000-8000-000000000004.png';
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      imagePath: oldPath,
+      updatedAt: timestamp,
+    } as Material;
+    materials.findOne!.mockResolvedValueOnce(locked);
+    materials.save!.mockRejectedValueOnce(new Error('material write failed'));
+    imageStorage.promote.mockResolvedValue(promotedPath);
+
+    await expect(
+      service.update(
+        '20',
+        { imagePath: temporaryPath, updatedAt: timestamp.toISOString() },
+        '7',
+      ),
+    ).rejects.toThrow('material write failed');
+
+    expect(imageStorage.discard).toHaveBeenCalledWith(promotedPath);
+    expect(imageStorage.discard).not.toHaveBeenCalledWith(oldPath);
+  });
+
+  it('removes the old image after a committed image removal', async () => {
+    const oldPath = '/uploads/materials/old.png';
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      imagePath: oldPath,
+      updatedAt: timestamp,
+    } as Material;
+    materials.findOne!.mockResolvedValueOnce(locked);
+    materials.createQueryBuilder!.mockReturnValueOnce(
+      detailBuilder({ ...locked, imagePath: null }),
+    );
+
+    await expect(
+      service.update(
+        '20',
+        { imagePath: null, updatedAt: timestamp.toISOString() },
+        '7',
+      ),
+    ).resolves.toMatchObject({ imagePath: null });
+    expect(imageStorage.promote).not.toHaveBeenCalled();
+    expect(imageStorage.discard).toHaveBeenCalledWith(oldPath);
+  });
+
+  it('logs cleanup failure after commit without turning success into an API error', async () => {
+    const oldPath = '/uploads/materials/old.png';
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      imagePath: oldPath,
+      updatedAt: timestamp,
+    } as Material;
+    materials.findOne!.mockResolvedValueOnce(locked);
+    materials.createQueryBuilder!.mockReturnValueOnce(
+      detailBuilder({ ...locked, imagePath: null }),
+    );
+    imageStorage.discard.mockRejectedValueOnce(new Error('cleanup failed'));
+    const warning = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+
+    await expect(
+      service.update(
+        '20',
+        { imagePath: null, updatedAt: timestamp.toISOString() },
+        '7',
+      ),
+    ).resolves.toMatchObject({ imagePath: null });
+    expect(warning).toHaveBeenCalledWith(
+      `Failed to discard Material image ${oldPath}`,
+      expect.any(Error),
+    );
+    warning.mockRestore();
   });
 
   it('rejects a stale update before validating or changing aggregate state', async () => {

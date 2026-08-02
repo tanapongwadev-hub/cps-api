@@ -14,6 +14,7 @@ import { PermissionsModule } from './modules/permissions/permissions.module';
 import { SessionsModule } from './modules/sessions/sessions.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { AccessControlModule } from './modules/access-control/access-control.module';
+import { MaterialsModule } from './modules/materials/materials.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { AccessControlModule } from './modules/access-control/access-control.mod
     SessionsModule,
     AuditLogsModule,
     AccessControlModule,
+    MaterialsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

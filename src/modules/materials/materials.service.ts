@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,6 +20,7 @@ import {
   MaterialSortBy,
 } from './dto/list-materials-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
+import { MaterialImageStorageService } from './material-image-storage.service';
 
 const MATERIAL_SORT_COLUMNS: Record<MaterialSortBy, string> = {
   code: 'material.code',
@@ -34,6 +36,8 @@ export type MaterialWithSuppliers = Omit<Material, 'supplierMaterials'> & {
 
 @Injectable()
 export class MaterialsService {
+  private readonly logger = new Logger(MaterialsService.name);
+
   constructor(
     @InjectRepository(Material)
     private materialRepository: Repository<Material>,
@@ -48,6 +52,7 @@ export class MaterialsService {
     @InjectRepository(LoadingPoint)
     private loadingPointRepository: Repository<LoadingPoint>,
     private dataSource?: DataSource,
+    private imageStorage?: MaterialImageStorageService,
   ) {}
 
   async create(
@@ -55,71 +60,82 @@ export class MaterialsService {
     userId: string,
   ): Promise<MaterialWithSuppliers> {
     this.assertUniqueSupplierIds(dto.supplierIds);
-    return this.getDataSource().transaction(async (manager) => {
-      const materialRepository = manager.getRepository(Material);
-      const unitRepository = manager.getRepository(Unit);
-      const supplierRepository = manager.getRepository(Supplier);
-      const modelRepository = manager.getRepository(MaterialModel);
-      const deliveryTypeRepository = manager.getRepository(DeliveryType);
-      const loadingPointRepository = manager.getRepository(LoadingPoint);
-      const supplierMaterialRepository =
-        manager.getRepository(SupplierMaterial);
-      const normalizedCode = this.normalizeCode(dto.code);
+    let promotedImagePath: string | undefined;
+    try {
+      return await this.getDataSource().transaction(async (manager) => {
+        const materialRepository = manager.getRepository(Material);
+        const unitRepository = manager.getRepository(Unit);
+        const supplierRepository = manager.getRepository(Supplier);
+        const modelRepository = manager.getRepository(MaterialModel);
+        const deliveryTypeRepository = manager.getRepository(DeliveryType);
+        const loadingPointRepository = manager.getRepository(LoadingPoint);
+        const supplierMaterialRepository =
+          manager.getRepository(SupplierMaterial);
+        const normalizedCode = this.normalizeCode(dto.code);
 
-      await this.assertCodeAvailable(materialRepository, normalizedCode);
-      await this.validateReferences(
-        {
+        await this.assertCodeAvailable(materialRepository, normalizedCode);
+        await this.validateReferences(
+          {
+            unitId: dto.unitId,
+            deliveryTypeId: dto.deliveryTypeId ?? null,
+            modelId: dto.modelId ?? null,
+            loadingPointId: dto.loadingPointId ?? null,
+            supplierIds: dto.supplierIds,
+          },
+          {
+            unitRepository,
+            supplierRepository,
+            modelRepository,
+            deliveryTypeRepository,
+            loadingPointRepository,
+          },
+        );
+        if (dto.imagePath) {
+          promotedImagePath = await this.getImageStorage().promote(
+            dto.imagePath,
+          );
+        }
+
+        const material = materialRepository.create({
+          code: normalizedCode,
+          name: dto.name,
           unitId: dto.unitId,
           deliveryTypeId: dto.deliveryTypeId ?? null,
           modelId: dto.modelId ?? null,
           loadingPointId: dto.loadingPointId ?? null,
-          supplierIds: dto.supplierIds,
-        },
-        {
-          unitRepository,
-          supplierRepository,
-          modelRepository,
-          deliveryTypeRepository,
-          loadingPointRepository,
-        },
-      );
-
-      const material = materialRepository.create({
-        code: normalizedCode,
-        name: dto.name,
-        unitId: dto.unitId,
-        deliveryTypeId: dto.deliveryTypeId ?? null,
-        modelId: dto.modelId ?? null,
-        loadingPointId: dto.loadingPointId ?? null,
-        processLineName: dto.processLineName ?? null,
-        scale: dto.scale ?? null,
-        imagePath: dto.imagePath ?? null,
-        specification: dto.specification ?? null,
-        description: dto.description ?? null,
-        isActive: dto.isActive ?? true,
-        createdBy: userId,
-        updatedBy: userId,
-      });
-      const savedMaterial = await this.saveMaterial(
-        materialRepository,
-        material,
-      );
-
-      const mappings = (dto.supplierIds ?? []).map((supplierId) =>
-        supplierMaterialRepository.create({
-          materialId: savedMaterial.id,
-          supplierId,
-          isActive: true,
+          processLineName: dto.processLineName ?? null,
+          scale: dto.scale ?? null,
+          imagePath: promotedImagePath ?? null,
+          specification: dto.specification ?? null,
+          description: dto.description ?? null,
+          isActive: dto.isActive ?? true,
           createdBy: userId,
           updatedBy: userId,
-        }),
-      );
-      if (mappings.length > 0) {
-        await supplierMaterialRepository.save(mappings);
-      }
+        });
+        const savedMaterial = await this.saveMaterial(
+          materialRepository,
+          material,
+        );
 
-      return this.findOneUsing(materialRepository, savedMaterial.id);
-    });
+        const mappings = (dto.supplierIds ?? []).map((supplierId) =>
+          supplierMaterialRepository.create({
+            materialId: savedMaterial.id,
+            supplierId,
+            isActive: true,
+            createdBy: userId,
+            updatedBy: userId,
+          }),
+        );
+        if (mappings.length > 0) {
+          await supplierMaterialRepository.save(mappings);
+        }
+
+        return this.findOneUsing(materialRepository, savedMaterial.id);
+      });
+    } catch (error) {
+      await this.compensatePromotedImage(promotedImagePath);
+      throw error;
+    }
   }
 
   async update(
@@ -128,75 +144,105 @@ export class MaterialsService {
     userId: string,
   ): Promise<MaterialWithSuppliers> {
     this.assertUniqueSupplierIds(dto.supplierIds);
-    return this.getDataSource().transaction(async (manager) => {
-      const materialRepository = manager.getRepository(Material);
-      const unitRepository = manager.getRepository(Unit);
-      const supplierRepository = manager.getRepository(Supplier);
-      const modelRepository = manager.getRepository(MaterialModel);
-      const deliveryTypeRepository = manager.getRepository(DeliveryType);
-      const loadingPointRepository = manager.getRepository(LoadingPoint);
-      const supplierMaterialRepository =
-        manager.getRepository(SupplierMaterial);
-      const material = await materialRepository.findOne({
-        where: { id },
-        lock: { mode: 'pessimistic_write' },
+    let promotedImagePath: string | undefined;
+    let previousImagePath: string | null | undefined;
+    let imageChanged = false;
+    let result: MaterialWithSuppliers;
+    try {
+      result = await this.getDataSource().transaction(async (manager) => {
+        const materialRepository = manager.getRepository(Material);
+        const unitRepository = manager.getRepository(Unit);
+        const supplierRepository = manager.getRepository(Supplier);
+        const modelRepository = manager.getRepository(MaterialModel);
+        const deliveryTypeRepository = manager.getRepository(DeliveryType);
+        const loadingPointRepository = manager.getRepository(LoadingPoint);
+        const supplierMaterialRepository =
+          manager.getRepository(SupplierMaterial);
+        const material = await materialRepository.findOne({
+          where: { id },
+          lock: { mode: 'pessimistic_write' },
+        });
+
+        if (!material) {
+          throw new NotFoundException('Material not found');
+        }
+        if (
+          new Date(dto.updatedAt).getTime() !==
+          new Date(material.updatedAt).getTime()
+        ) {
+          throw new ConflictException('Material has been updated');
+        }
+
+        const normalizedCode = dto.code
+          ? this.normalizeCode(dto.code)
+          : material.code;
+        if (dto.code) {
+          await this.assertCodeAvailable(
+            materialRepository,
+            normalizedCode,
+            material.id,
+          );
+        }
+        await this.validateReferences(
+          {
+            unitId: dto.unitId ?? material.unitId,
+            deliveryTypeId:
+              dto.deliveryTypeId === undefined
+                ? material.deliveryTypeId
+                : dto.deliveryTypeId,
+            modelId: dto.modelId === undefined ? material.modelId : dto.modelId,
+            loadingPointId:
+              dto.loadingPointId === undefined
+                ? material.loadingPointId
+                : dto.loadingPointId,
+            supplierIds: dto.supplierIds,
+          },
+          {
+            unitRepository,
+            supplierRepository,
+            modelRepository,
+            deliveryTypeRepository,
+            loadingPointRepository,
+          },
+        );
+
+        let effectiveDto = dto;
+        if (dto.imagePath !== undefined) {
+          imageChanged = true;
+          previousImagePath = material.imagePath;
+          if (dto.imagePath !== null) {
+            promotedImagePath = await this.getImageStorage().promote(
+              dto.imagePath,
+            );
+            effectiveDto = { ...dto, imagePath: promotedImagePath };
+          }
+        }
+
+        this.applyUpdate(material, effectiveDto, normalizedCode, userId);
+        await this.saveMaterial(materialRepository, material);
+        if (dto.supplierIds !== undefined) {
+          await this.synchronizeSuppliers(
+            supplierMaterialRepository,
+            material.id,
+            dto.supplierIds,
+            userId,
+          );
+        }
+        return this.findOneUsing(materialRepository, material.id);
       });
+    } catch (error) {
+      await this.compensatePromotedImage(promotedImagePath);
+      throw error;
+    }
 
-      if (!material) {
-        throw new NotFoundException('Material not found');
-      }
-      if (
-        new Date(dto.updatedAt).getTime() !==
-        new Date(material.updatedAt).getTime()
-      ) {
-        throw new ConflictException('Material has been updated');
-      }
-
-      const normalizedCode = dto.code
-        ? this.normalizeCode(dto.code)
-        : material.code;
-      if (dto.code) {
-        await this.assertCodeAvailable(
-          materialRepository,
-          normalizedCode,
-          material.id,
-        );
-      }
-      await this.validateReferences(
-        {
-          unitId: dto.unitId ?? material.unitId,
-          deliveryTypeId:
-            dto.deliveryTypeId === undefined
-              ? material.deliveryTypeId
-              : dto.deliveryTypeId,
-          modelId: dto.modelId === undefined ? material.modelId : dto.modelId,
-          loadingPointId:
-            dto.loadingPointId === undefined
-              ? material.loadingPointId
-              : dto.loadingPointId,
-          supplierIds: dto.supplierIds,
-        },
-        {
-          unitRepository,
-          supplierRepository,
-          modelRepository,
-          deliveryTypeRepository,
-          loadingPointRepository,
-        },
-      );
-
-      this.applyUpdate(material, dto, normalizedCode, userId);
-      await this.saveMaterial(materialRepository, material);
-      if (dto.supplierIds !== undefined) {
-        await this.synchronizeSuppliers(
-          supplierMaterialRepository,
-          material.id,
-          dto.supplierIds,
-          userId,
-        );
-      }
-      return this.findOneUsing(materialRepository, material.id);
-    });
+    if (
+      imageChanged &&
+      previousImagePath &&
+      previousImagePath !== result.imagePath
+    ) {
+      await this.discardCommittedImage(previousImagePath);
+    }
+    return result;
   }
 
   async deactivate(id: string, userId: string): Promise<MaterialWithSuppliers> {
@@ -359,6 +405,33 @@ export class MaterialsService {
       throw new Error('MaterialsService DataSource is not configured');
     }
     return this.dataSource;
+  }
+
+  private getImageStorage(): MaterialImageStorageService {
+    if (!this.imageStorage) {
+      throw new Error('MaterialsService image storage is not configured');
+    }
+    return this.imageStorage;
+  }
+
+  private async compensatePromotedImage(imagePath?: string): Promise<void> {
+    if (!imagePath) return;
+    try {
+      await this.getImageStorage().discard(imagePath);
+    } catch (error) {
+      this.logger.error(
+        `Failed to compensate Material image ${imagePath}`,
+        error,
+      );
+    }
+  }
+
+  private async discardCommittedImage(imagePath: string): Promise<void> {
+    try {
+      await this.getImageStorage().discard(imagePath);
+    } catch (error) {
+      this.logger.warn(`Failed to discard Material image ${imagePath}`, error);
+    }
   }
 
   private normalizeCode(code: string): string {

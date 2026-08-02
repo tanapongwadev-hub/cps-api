@@ -1,10 +1,16 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { REQUIRE_ANY_PERMISSIONS_KEY } from '../decorators/require-any-permissions.decorator';
 import { REQUIRE_PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
 import { RoleCode } from '../enums/role-code.enum';
 import { PermissionDeniedException } from '../exceptions/custom-exceptions';
 import { CurrentUserWithAssignment } from '../interfaces/current-user.interface';
 import { EffectivePermissionService } from '../../modules/access-control/services/effective-permission.service';
+
+interface PermissionRequest {
+  user?: CurrentUserWithAssignment;
+  path?: string;
+}
 
 @Injectable()
 export class PermissionGuard implements CanActivate {
@@ -18,20 +24,27 @@ export class PermissionGuard implements CanActivate {
       REQUIRE_PERMISSIONS_KEY,
       [context.getHandler(), context.getClass()],
     );
+    const anyPermissions = this.reflector.getAllAndOverride<string[]>(
+      REQUIRE_ANY_PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()],
+    );
 
-    if (!requiredPermissions || requiredPermissions.length === 0) {
+    const requiresAll = Boolean(requiredPermissions?.length);
+    const requiresAny = Boolean(anyPermissions?.length);
+    if (!requiresAll && !requiresAny) {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest();
-    const user = request.user as CurrentUserWithAssignment;
+    const request = context.switchToHttp().getRequest<PermissionRequest>();
+    const user = request.user;
 
     if (!user) {
       throw new PermissionDeniedException(request.path);
     }
 
     // SUPER_ADMIN bypasses permission checks
-    if (user.activeRoleCode === RoleCode.SUPER_ADMIN) {
+    const isSuperAdmin = user.activeRoleCode === RoleCode.SUPER_ADMIN;
+    if (isSuperAdmin) {
       return true;
     }
 
@@ -39,10 +52,17 @@ export class PermissionGuard implements CanActivate {
       await this.effectivePermissionService.getEffectivePermissionCodes(
         user.id,
         undefined,
-        (user.activeRoleCode as string) === RoleCode.SUPER_ADMIN,
+        isSuperAdmin,
       );
     const granted = new Set(permissions);
-    if (requiredPermissions.every((permission) => granted.has(permission))) {
+    const hasAll =
+      !requiresAll ||
+      requiredPermissions?.every((permission) => granted.has(permission)) ===
+        true;
+    const hasAny =
+      !requiresAny ||
+      anyPermissions?.some((permission) => granted.has(permission)) === true;
+    if (hasAll && hasAny) {
       return true;
     }
 
