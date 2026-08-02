@@ -5,12 +5,14 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { DeliveryType } from './delivery-type.entity';
 import { LoadingPoint } from './loading-point.entity';
 import { MaterialModel } from './material-model.entity';
+import { SupplierMaterial } from './supplier-material.entity';
 import { Unit } from './unit.entity';
 
 @Entity('materials', { schema: 'master' })
@@ -109,4 +111,10 @@ export class Material {
   })
   @JoinColumn({ name: 'loading_point_id' })
   loadingPoint: LoadingPoint | null;
+
+  @OneToMany(
+    () => SupplierMaterial,
+    (supplierMaterial) => supplierMaterial.material,
+  )
+  supplierMaterials: SupplierMaterial[];
 }

@@ -3,9 +3,11 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { SupplierMaterial } from './supplier-material.entity';
 
 @Entity('suppliers', { schema: 'master' })
 @Index(['code'], { unique: true })
@@ -56,4 +58,10 @@ export class Supplier {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
   updatedAt: Date;
+
+  @OneToMany(
+    () => SupplierMaterial,
+    (supplierMaterial) => supplierMaterial.supplier,
+  )
+  supplierMaterials: SupplierMaterial[];
 }
