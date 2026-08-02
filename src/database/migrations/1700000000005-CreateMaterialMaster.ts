@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateMaterialMaster1700000000005
-  implements MigrationInterface
-{
+export class CreateMaterialMaster1700000000005 implements MigrationInterface {
   name = 'CreateMaterialMaster1700000000005';
 
   async up(queryRunner: QueryRunner): Promise<void> {
@@ -151,9 +149,7 @@ export class CreateMaterialMaster1700000000005
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `DROP TABLE IF EXISTS master.supplier_materials`,
-    );
+    await queryRunner.query(`DROP TABLE IF EXISTS master.supplier_materials`);
     await queryRunner.query(`DROP TABLE IF EXISTS master.materials`);
     await queryRunner.query(`DROP TABLE IF EXISTS master.suppliers`);
     await queryRunner.query(`DROP TABLE IF EXISTS master.loading_points`);

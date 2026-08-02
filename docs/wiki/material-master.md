@@ -46,25 +46,25 @@ suppliers         1 ─── N supplier_materials
 
 เก็บข้อมูลหลักของวัตถุดิบ โดยใช้ `name` เพียงฟิลด์เดียว ไม่มี `name_th` และ `name_en`
 
-| Column | Type | Required | รายละเอียด |
-|---|---|---:|---|
-| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` | ใช่ | Primary Key |
-| `code` | `VARCHAR(50)` | ใช่ | รหัสวัตถุดิบกลางของบริษัทและห้ามซ้ำ |
-| `name` | `VARCHAR(255)` | ใช่ | ชื่อวัตถุดิบ |
-| `unit_id` | `BIGINT` | ใช่ | Foreign Key ไป `master.units.id` |
-| `delivery_type_id` | `BIGINT` | ไม่ | Foreign Key ไป `master.delivery_types.id` |
-| `model_id` | `BIGINT` | ไม่ | Foreign Key ไป `master.material_models.id` |
-| `loading_point_id` | `BIGINT` | ไม่ | Foreign Key ไป `master.loading_points.id` |
-| `process_line_name` | `VARCHAR(255)` | ไม่ | ชื่อไลน์หรือกระบวนการผลิต เก็บเป็นข้อความโดยไม่แยก Master Data |
-| `scale` | `VARCHAR(255)` | ไม่ | ขนาด เก็บเป็นข้อความ เช่น `กว้าง 50 × ยาว 100 × สูง 20 ซม.` |
-| `image_path` | `VARCHAR(500)` | ไม่ | Path หรือ URL ของรูปภาพหนึ่งรูป |
-| `specification` | `TEXT` | ไม่ | คุณสมบัติหรือสเปกวัตถุดิบ |
-| `description` | `TEXT` | ไม่ | รายละเอียดเพิ่มเติม |
-| `is_active` | `BOOLEAN` | ใช่ | สถานะใช้งาน ค่าเริ่มต้น `true` |
-| `created_by` | `BIGINT` | ไม่ | ผู้สร้างข้อมูล |
-| `updated_by` | `BIGINT` | ไม่ | ผู้แก้ไขล่าสุด |
-| `created_at` | `TIMESTAMP` | ใช่ | วันเวลาที่สร้าง |
-| `updated_at` | `TIMESTAMP` | ใช่ | วันเวลาที่แก้ไขล่าสุด |
+| Column              | Type                                  | Required | รายละเอียด                                                     |
+| ------------------- | ------------------------------------- | -------: | -------------------------------------------------------------- |
+| `id`                | `BIGINT GENERATED ALWAYS AS IDENTITY` |      ใช่ | Primary Key                                                    |
+| `code`              | `VARCHAR(50)`                         |      ใช่ | รหัสวัตถุดิบกลางของบริษัทและห้ามซ้ำ                            |
+| `name`              | `VARCHAR(255)`                        |      ใช่ | ชื่อวัตถุดิบ                                                   |
+| `unit_id`           | `BIGINT`                              |      ใช่ | Foreign Key ไป `master.units.id`                               |
+| `delivery_type_id`  | `BIGINT`                              |      ไม่ | Foreign Key ไป `master.delivery_types.id`                      |
+| `model_id`          | `BIGINT`                              |      ไม่ | Foreign Key ไป `master.material_models.id`                     |
+| `loading_point_id`  | `BIGINT`                              |      ไม่ | Foreign Key ไป `master.loading_points.id`                      |
+| `process_line_name` | `VARCHAR(255)`                        |      ไม่ | ชื่อไลน์หรือกระบวนการผลิต เก็บเป็นข้อความโดยไม่แยก Master Data |
+| `scale`             | `VARCHAR(255)`                        |      ไม่ | ขนาด เก็บเป็นข้อความ เช่น `กว้าง 50 × ยาว 100 × สูง 20 ซม.`    |
+| `image_path`        | `VARCHAR(500)`                        |      ไม่ | Path หรือ URL ของรูปภาพหนึ่งรูป                                |
+| `specification`     | `TEXT`                                |      ไม่ | คุณสมบัติหรือสเปกวัตถุดิบ                                      |
+| `description`       | `TEXT`                                |      ไม่ | รายละเอียดเพิ่มเติม                                            |
+| `is_active`         | `BOOLEAN`                             |      ใช่ | สถานะใช้งาน ค่าเริ่มต้น `true`                                 |
+| `created_by`        | `BIGINT`                              |      ไม่ | ผู้สร้างข้อมูล                                                 |
+| `updated_by`        | `BIGINT`                              |      ไม่ | ผู้แก้ไขล่าสุด                                                 |
+| `created_at`        | `TIMESTAMP`                           |      ใช่ | วันเวลาที่สร้าง                                                |
+| `updated_at`        | `TIMESTAMP`                           |      ใช่ | วันเวลาที่แก้ไขล่าสุด                                          |
 
 ข้อกำหนดสำคัญ:
 
@@ -180,16 +180,16 @@ updated_at
 
 ตารางกลางสำหรับความสัมพันธ์แบบ Many-to-Many ระหว่าง Material และ Supplier
 
-| Column | Type | Required | รายละเอียด |
-|---|---|---:|---|
-| `id` | `BIGINT GENERATED ALWAYS AS IDENTITY` | ใช่ | Primary Key |
-| `material_id` | `BIGINT` | ใช่ | Foreign Key ไป `master.materials.id` |
-| `supplier_id` | `BIGINT` | ใช่ | Foreign Key ไป `master.suppliers.id` |
-| `is_active` | `BOOLEAN` | ใช่ | สถานะความสัมพันธ์ ค่าเริ่มต้น `true` |
-| `created_by` | `BIGINT` | ไม่ | ผู้สร้างข้อมูล |
-| `updated_by` | `BIGINT` | ไม่ | ผู้แก้ไขล่าสุด |
-| `created_at` | `TIMESTAMP` | ใช่ | วันเวลาที่สร้าง |
-| `updated_at` | `TIMESTAMP` | ใช่ | วันเวลาที่แก้ไขล่าสุด |
+| Column        | Type                                  | Required | รายละเอียด                           |
+| ------------- | ------------------------------------- | -------: | ------------------------------------ |
+| `id`          | `BIGINT GENERATED ALWAYS AS IDENTITY` |      ใช่ | Primary Key                          |
+| `material_id` | `BIGINT`                              |      ใช่ | Foreign Key ไป `master.materials.id` |
+| `supplier_id` | `BIGINT`                              |      ใช่ | Foreign Key ไป `master.suppliers.id` |
+| `is_active`   | `BOOLEAN`                             |      ใช่ | สถานะความสัมพันธ์ ค่าเริ่มต้น `true` |
+| `created_by`  | `BIGINT`                              |      ไม่ | ผู้สร้างข้อมูล                       |
+| `updated_by`  | `BIGINT`                              |      ไม่ | ผู้แก้ไขล่าสุด                       |
+| `created_at`  | `TIMESTAMP`                           |      ใช่ | วันเวลาที่สร้าง                      |
+| `updated_at`  | `TIMESTAMP`                           |      ใช่ | วันเวลาที่แก้ไขล่าสุด                |
 
 ต้องกำหนด `UNIQUE (material_id, supplier_id)` เพื่อป้องกันการผูก Material กับ Supplier รายเดิมซ้ำ
 

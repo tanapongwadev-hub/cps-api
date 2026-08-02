@@ -5,6 +5,7 @@
 ## 0. AI Developer Guide
 
 ### 0.1 Before making changes
+
 - อ่าน `PROJECT-WIKI.md` (ไฟล์นี้) และ `API_ENDPOINTS.md`
 - ตรวจสอบ module map และ dependency ก่อนเพิ่ม/แก้ service
 - อย่า hardcode secrets / credentials / JWT defaults ใน source code
@@ -12,16 +13,18 @@
 - config ส่วนกลางอยู่ที่ `src/config/app.config.ts` และ `src/config/database.config.ts`
 
 ### 0.2 Conventions
+
 - Controllers บางเบา วาง business logic ใน Services
 - ใช้ DTO + `class-validator` สำหรับ request validation
 - ใช้ custom exceptions จาก `src/common/exceptions/custom-exceptions.ts`
 - Guards: `JwtAuthGuard`, `RolesGuard`, `PermissionGuard` อยู่ใน `src/common/guards`
 - Decorators: `@Public()`, `@Roles(...)`, `@RequirePermissions(...)`, `@CurrentUser()` อยู่ใน `src/common/decorators`
-- Entities อยู่ใน `src/entities/iam/*`
+- Entities อยู่ใน `src/entities/iam/*` และ `src/entities/master/*`
 - TypeORM migrations อยู่ใน `src/database/migrations/*`
 - Seeds อยู่ใน `src/database/seeds/*`
 
 ### 0.3 Forbidden patterns
+
 - ห้ามใช้ default password/hardcoded secrets (เช่น `9203106`, `default-secret-key...`)
 - ห้าม import `ConfigService` แล้วสร้าง `new ConfigService()` ใน standalone scripts
 - ห้าม `enableCors()` แบบเปิดกว้างใน production (`CORS_ORIGIN` ต้องถูกตั้งค่า)
@@ -38,6 +41,7 @@ CPS Access Control เป็นระบบจัดการสิทธิ์�
 ## 2. สถาปัตยกรรม (Architecture)
 
 ### 2.1 Tech Stack
+
 - **Framework**: NestJS 11.x
 - **Language**: TypeScript
 - **ORM**: TypeORM 0.3.x
@@ -46,9 +50,10 @@ CPS Access Control เป็นระบบจัดการสิทธิ์�
 - **Password Hashing**: Argon2
 - **Documentation**: Swagger/OpenAPI
 - **Configuration**: Centralized via `src/config/app.config.ts`, `src/config/database.config.ts`, and `src/config/env.utils.ts`
-- **Schema**: `iam` (Identity and Access Management)
+- **Schemas**: `iam` (Identity and Access Management) และ `master` (ข้อมูลหลักของระบบ)
 
 ### 2.2 Project Structure
+
 ```
 cps-api/
 ├── src/
@@ -62,11 +67,12 @@ cps-api/
 │   │   ├── roles/                  # Role management
 │   │   ├── sessions/               # Session management
 │   │   └── users/                  # User management
-│   ├── entities/iam/               # TypeORM entities (11 tables)
+│   ├── entities/iam/               # IAM TypeORM entities (12 tables)
 │   │   ├── actions.entity.ts
 │   │   ├── audit-log.entity.ts
 │   │   ├── auth-session.entity.ts
 │   │   ├── department.entity.ts
+│   │   ├── department-permission.entity.ts
 │   │   ├── menu.entity.ts
 │   │   ├── permission.entity.ts
 │   │   ├── role-action.entity.ts
@@ -74,6 +80,14 @@ cps-api/
 │   │   ├── user-department-permission.entity.ts
 │   │   ├── user-department-role.entity.ts
 │   │   └── user.entity.ts
+│   ├── entities/master/            # Material Master TypeORM entities (7 tables)
+│   │   ├── delivery-type.entity.ts
+│   │   ├── loading-point.entity.ts
+│   │   ├── material-model.entity.ts
+│   │   ├── material.entity.ts
+│   │   ├── supplier-material.entity.ts
+│   │   ├── supplier.entity.ts
+│   │   └── unit.entity.ts
 │   ├── database/                   # Database operations
 │   │   ├── migrations/             # TypeORM migrations
 │   │   ├── seeds/                  # Seed scripts
@@ -112,23 +126,25 @@ cps-api/
 
 ## 3. โมเดลข้อมูล (Data Model)
 
-### 3.1 Entities (11 tables)
+### 3.1 IAM Entities (12 tables)
 
-| Table | คำอธิบาย | ความสัมพันธ์ |
-|---|---|---|
-| `actions` | การกระทำที่อนุญาต (CREATE, READ, UPDATE, DELETE) | ถูกอ้างอิงโดย `permissions` และ `role_actions` |
-| `roles` | บทบาท (SUPER_ADMIN, ADMIN, USER) | มี `role_actions` และ `user_department_roles` |
-| `role_actions` | ผูกบทบาทกับการกระทำ | Many-to-many ระหว่าง roles กับ actions |
-| `departments` | แผนก/หน่วยงาน | ถูกอ้างอิงโดย `user_department_roles` |
-| `users` | ผู้ใช้งาน | มี `user_department_roles` |
-| `user_department_roles` | ผูก user กับ role และ department | Core ของระบบ RBAC |
-| `user_department_permissions` | สิทธิ์เฉพาะ user | Override สิทธิ์จาก role |
-| `menus` | เมนูในระบบ | มี parent-child hierarchy |
-| `permissions` | ผูก menu กับ action | ถูกอ้างอิงโดย `user_department_permissions` |
-| `auth_sessions` | เซสชันการเข้าสู่ระบบ | เก็บ refresh token hash |
-| `audit_logs` | บันทึกการกระทำสำคัญ | ตรวจสอบย้อนหลัง |
+| Table                         | คำอธิบาย                                         | ความสัมพันธ์                                     |
+| ----------------------------- | ------------------------------------------------ | ------------------------------------------------ |
+| `actions`                     | การกระทำที่อนุญาต (CREATE, READ, UPDATE, DELETE) | ถูกอ้างอิงโดย `permissions` และ `role_actions`   |
+| `roles`                       | บทบาท (SUPER_ADMIN, ADMIN, USER)                 | มี `role_actions` และ `user_department_roles`    |
+| `role_actions`                | ผูกบทบาทกับการกระทำ                              | Many-to-many ระหว่าง roles กับ actions           |
+| `departments`                 | แผนก/หน่วยงาน                                    | ถูกอ้างอิงโดย `user_department_roles`            |
+| `department_permissions`      | ผูกแผนกกับสิทธิ์ที่อนุญาต                        | Many-to-many ระหว่าง departments กับ permissions |
+| `users`                       | ผู้ใช้งาน                                        | มี `user_department_roles`                       |
+| `user_department_roles`       | ผูก user กับ role และ department                 | Core ของระบบ RBAC                                |
+| `user_department_permissions` | สิทธิ์เฉพาะ user                                 | Override สิทธิ์จาก role                          |
+| `menus`                       | เมนูในระบบ                                       | มี parent-child hierarchy                        |
+| `permissions`                 | ผูก menu กับ action                              | ถูกอ้างอิงโดย `user_department_permissions`      |
+| `auth_sessions`               | เซสชันการเข้าสู่ระบบ                             | เก็บ refresh token hash                          |
+| `audit_logs`                  | บันทึกการกระทำสำคัญ                              | ตรวจสอบย้อนหลัง                                  |
 
 ### 3.2 ER Diagram (Textual)
+
 ```
 users ──┬── user_department_roles ─── roles
         │              │
@@ -141,9 +157,24 @@ menus ─── permissions ─── actions
 users ─── user_department_permissions ─── user_department_roles, permissions
 ```
 
+### 3.3 Material Master Entities (7 tables)
+
+| Table                       | คำอธิบาย                        | ความสัมพันธ์                                                          |
+| --------------------------- | ------------------------------- | --------------------------------------------------------------------- |
+| `master.materials`          | ข้อมูลหลักวัตถุดิบ              | อ้างอิงหน่วย รูปแบบจัดส่ง รุ่น จุดลงสินค้า และ Supplier ผ่านตารางกลาง |
+| `master.units`              | หน่วยนับหลัก                    | หนึ่งหน่วยถูกใช้โดย Material ได้หลายรายการ                            |
+| `master.delivery_types`     | รูปแบบการจัดส่ง                 | หนึ่งรูปแบบถูกใช้โดย Material ได้หลายรายการ                           |
+| `master.material_models`    | รุ่นหรือแบบวัตถุดิบ             | หนึ่งรุ่นถูกใช้โดย Material ได้หลายรายการ                             |
+| `master.loading_points`     | จุดรับหรือจุดลงวัตถุดิบ         | หนึ่งจุดถูกใช้โดย Material ได้หลายรายการ                              |
+| `master.suppliers`          | ข้อมูลหลัก Supplier             | เชื่อมกับ Material ผ่าน `supplier_materials`                          |
+| `master.supplier_materials` | ตารางกลาง Material และ Supplier | Unique ต่อคู่ `material_id`, `supplier_id`                            |
+
+รายละเอียด requirement และข้อมูลที่อยู่นอกขอบเขตอยู่ใน [Material Master Requirements](docs/wiki/material-master.md)
+
 ## 4. กระบวนการเข้าสู่ระบบ (Authentication Flow)
 
 ### 4.1 Login
+
 ```
 POST /auth/login
 {
@@ -153,6 +184,7 @@ POST /auth/login
 ```
 
 ขั้นตอน:
+
 1. `AuthController.login()` รับ `LoginDto`
 2. เรียก `AuthService.validateUser()`:
    - หา user จาก username
@@ -171,6 +203,7 @@ POST /auth/login
    - เก็บ refreshTokenHash ใน session
 
 ### 4.2 Department Selection
+
 ```
 POST /auth/select-department
 {
@@ -180,6 +213,7 @@ POST /auth/select-department
 ```
 
 ขั้นตอน:
+
 1. `AuthController.selectDepartment()` verify `departmentSelectionToken` ด้วย `JWT_DEPARTMENT_SELECTION_SECRET`
 2. ดึง `sub` (userId) จาก token
 3. เรียก `AuthService.selectDepartment(userId, userDepartmentRoleId)`
@@ -187,6 +221,7 @@ POST /auth/select-department
 5. generate tokens สำหรับ assignment นั้น
 
 ### 4.3 Switch Department
+
 ```
 POST /auth/switch-department
 Authorization: Bearer <accessToken>
@@ -196,12 +231,14 @@ Authorization: Bearer <accessToken>
 ```
 
 ขั้นตอน:
+
 1. `JwtAuthGuard` verify accessToken
 2. `CurrentUser` decorator ดึงข้อมูล user จาก `request.user`
 3. `AuthController.switchDepartment()` ส่ง `user.id` และ `userDepartmentRoleId`
 4. ทำงานเหมือน `selectDepartment`
 
 ### 4.4 Refresh Token
+
 ```
 POST /auth/refresh
 {
@@ -210,6 +247,7 @@ POST /auth/refresh
 ```
 
 ขั้นตอน:
+
 1. Verify refreshToken ด้วย `JWT_REFRESH_SECRET`
 2. หา `AuthSession` จาก `sessionId` ในข้อมูล payload
 3. ตรวจสอบ user ยัง active และไม่ locked
@@ -221,16 +259,19 @@ POST /auth/refresh
 ## 5. ระบบสิทธิ์ (Authorization / RBAC)
 
 ### 5.1 Role-Based Access Control
+
 - **SUPER_ADMIN**: สิทธิ์ระดับระบบ ไม่ผูก department
 - **ADMIN**: สิทธิ์ระดับแผนก ผูกกับ department หนึ่งแผนก
 - **USER**: สิทธิ์ระดับแผนก ผูกกับ department หนึ่งแผนก
 
 ### 5.2 Permission Resolution
+
 1. ดึง `role_actions` จาก role ของ user
 2. ดึง `user_department_permissions` เพิ่มเติม/ยกเว้น
 3. รวมกันเป็น set ของ permissions สำหรับ user ใน department นั้น
 
 ### 5.3 Guards
+
 - `JwtAuthGuard`: ตรวจสอบ access token
 - `Public`: อนุญาตให้เข้าถึงได้โดยไม่ต้อง login
 - `@CurrentUser()`: ดึงข้อมูล user จาก JWT payload
@@ -239,51 +280,60 @@ POST /auth/refresh
 
 ### 6.0 Module Dependency Map
 
-| Module | Imports | TypeORM Entities | Exports | Controller | บทบาทหลัก |
-|---|---|---|---|---|---|
-| AppModule | ConfigModule, TypeOrmModule, AuthModule, UsersModule, DepartmentsModule, RolesModule, MenusModule, PermissionsModule, SessionsModule, AuditLogsModule, AccessControlModule | — | — | `AppController` | Root module |
-| AuthModule | AccessControlModule, TypeOrmModule, PassportModule, JwtModule | User, UserDepartmentRole, UserDepartmentPermission, Department, Role, Action, RoleAction, Permission, Menu, AuthSession, AuditLog | `AuthService` | `AuthController` | Login/logout/refresh/token + department selection |
-| UsersModule | TypeOrmModule | User, UserDepartmentRole, UserDepartmentPermission | `UsersService` | `UsersController` | จัดการผู้ใช้ + assignments |
-| DepartmentsModule | TypeOrmModule | Department | `DepartmentsService` | `DepartmentsController` | จัดการแผนก |
-| RolesModule | TypeOrmModule | Role | `RolesService` | `RolesController` | จัดการบทบาท |
-| MenusModule | TypeOrmModule | Menu, Permission, Action | `MenusService` | `MenusController` | จัดการเมนู + tree |
-| PermissionsModule | TypeOrmModule | Permission | `PermissionsService` | `PermissionsController` | ดูรายการสิทธิ์ (read-only) |
-| SessionsModule | TypeOrmModule | AuthSession | `SessionsService` | `SessionsController` | จัดการ session / revoke |
-| AuditLogsModule | TypeOrmModule | AuditLog | `AuditLogsService` | `AuditLogsController` | ดู audit logs |
-| AccessControlModule | TypeOrmModule | Permission, RoleAction, UserDepartmentRole, UserDepartmentPermission, Menu | `AccessControlService`, `EffectivePermissionService`, `MenuTreeService` | — | คำนวณสิทธิ์และเมนูที่ user ได้รับ |
+| Module              | Imports                                                                                                                                                                    | TypeORM Entities                                                                                                                  | Exports                                                                 | Controller              | บทบาทหลัก                                         |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
+| AppModule           | ConfigModule, TypeOrmModule, AuthModule, UsersModule, DepartmentsModule, RolesModule, MenusModule, PermissionsModule, SessionsModule, AuditLogsModule, AccessControlModule | —                                                                                                                                 | —                                                                       | `AppController`         | Root module                                       |
+| AuthModule          | AccessControlModule, TypeOrmModule, PassportModule, JwtModule                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission, Department, Role, Action, RoleAction, Permission, Menu, AuthSession, AuditLog | `AuthService`                                                           | `AuthController`        | Login/logout/refresh/token + department selection |
+| UsersModule         | TypeOrmModule                                                                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission                                                                                | `UsersService`                                                          | `UsersController`       | จัดการผู้ใช้ + assignments                        |
+| DepartmentsModule   | TypeOrmModule                                                                                                                                                              | Department                                                                                                                        | `DepartmentsService`                                                    | `DepartmentsController` | จัดการแผนก                                        |
+| RolesModule         | TypeOrmModule                                                                                                                                                              | Role                                                                                                                              | `RolesService`                                                          | `RolesController`       | จัดการบทบาท                                       |
+| MenusModule         | TypeOrmModule                                                                                                                                                              | Menu, Permission, Action                                                                                                          | `MenusService`                                                          | `MenusController`       | จัดการเมนู + tree                                 |
+| PermissionsModule   | TypeOrmModule                                                                                                                                                              | Permission                                                                                                                        | `PermissionsService`                                                    | `PermissionsController` | ดูรายการสิทธิ์ (read-only)                        |
+| SessionsModule      | TypeOrmModule                                                                                                                                                              | AuthSession                                                                                                                       | `SessionsService`                                                       | `SessionsController`    | จัดการ session / revoke                           |
+| AuditLogsModule     | TypeOrmModule                                                                                                                                                              | AuditLog                                                                                                                          | `AuditLogsService`                                                      | `AuditLogsController`   | ดู audit logs                                     |
+| AccessControlModule | TypeOrmModule                                                                                                                                                              | Permission, RoleAction, UserDepartmentRole, UserDepartmentPermission, Menu                                                        | `AccessControlService`, `EffectivePermissionService`, `MenuTreeService` | —                       | คำนวณสิทธิ์และเมนูที่ user ได้รับ                 |
 
 ### 6.1 AuthModule
+
 - จัดการ login, logout, refresh, select/switch department
 - ใช้ Passport Local Strategy และ JWT Strategy
 - สร้างและจัดการ `AuthSession`
 
 ### 6.2 UsersModule
+
 - CRUD ผู้ใช้งาน
 - จัดการ `user_department_roles`
 - รีเซ็ตรหัสผ่าน
 
 ### 6.3 DepartmentsModule
+
 - CRUD แผนก
 
 ### 6.4 RolesModule
+
 - CRUD บทบาท
 - จัดการ `role_actions`
 
 ### 6.5 MenusModule
+
 - CRUD เมนู
 - รองรับ hierarchy (parent-child)
 
 ### 6.6 PermissionsModule
+
 - ดูรายการสิทธิ์
 - ไม่มี create/update/delete (จัดการผ่าน seeds)
 
 ### 6.7 SessionsModule
+
 - ดูและ revoke เซสชัน
 
 ### 6.8 AuditLogsModule
+
 - ดูบันทึกการกระทำ
 
 ### 6.9 AccessControlModule
+
 - ไม่มี controller (cross-cutting service module)
 - ให้บริการคำนวณสิทธิ์และเมนู:
   - `AccessControlService.getEffectivePermissionRows()` — รวมสิทธิ์จาก role + override
@@ -295,6 +345,7 @@ POST /auth/refresh
 ## 7. Database Migration & Seeding
 
 ### 7.1 คำสั่งที่สำคัญ
+
 ```bash
 pnpm db:reset        # ลบ schema iam และสร้างใหม่
 pnpm migration:run   # รัน migrations
@@ -303,6 +354,7 @@ pnpm start:dev       # เริ่ม development server
 ```
 
 ### 7.2 Seed Data
+
 - Actions: CREATE, READ, UPDATE, DELETE
 - Roles: SUPER_ADMIN, ADMIN, USER
 - Role Actions: SUPER_ADMIN/ADMIN ได้ทุก action, USER ได้ CREATE/READ/UPDATE
@@ -319,12 +371,13 @@ pnpm start:dev       # เริ่ม development server
 
 Config ที่ใช้ประจำ:
 
-| Config | File | คำอธิบาย |
-|---|---|---|
-| App config | `src/config/app.config.ts` | `NODE_ENV`, `PORT`, `CORS_ORIGIN` |
+| Config          | File                            | คำอธิบาย                                                                                     |
+| --------------- | ------------------------------- | -------------------------------------------------------------------------------------------- |
+| App config      | `src/config/app.config.ts`      | `NODE_ENV`, `PORT`, `CORS_ORIGIN`                                                            |
 | Database config | `src/config/database.config.ts` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE`, `DB_SCHEMA`, `DB_LOGGING` |
 
 สิ่งที่ต้องระวัง:
+
 - `DB_PASSWORD` ไม่มี default แล้ว ต้อง set ใน `.env`
 - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_DEPARTMENT_SELECTION_SECRET` ไม่มี default (ใช้ `getOrThrow` ใน auth)
 - `CORS_ORIGIN` ถ้าเว้นว่างจะอนุญาตทุก origin (`true`) — ห้ามทิ้งว่างใน production
@@ -339,6 +392,7 @@ Config ที่ใช้ประจำ:
 ## 10. API Testing
 
 ไฟล์ `cps-api-collection.json` สามารถ import ใน Apidog/Postman ได้ มีตัวแปร:
+
 - `baseUrl`
 - `accessToken`
 - `refreshToken`
@@ -356,6 +410,7 @@ Config ที่ใช้ประจำ:
 ## 12. Common Workflows
 
 ### 12.1 Local Development Setup
+
 ```bash
 pnpm install
 cp .env.example .env
@@ -366,6 +421,7 @@ pnpm start:dev
 ```
 
 ### 12.2 Reset Database (สำหรับ development เท่านั้น)
+
 ```bash
 pnpm db:reset
 pnpm migration:run
@@ -373,15 +429,19 @@ pnpm seed:run
 ```
 
 ### 12.3 Generate a New Migration
+
 ```bash
 pnpm migration:generate src/database/migrations/<MigrationName>
 ```
+
 หรือสร้างด้วย TypeORM CLI:
+
 ```bash
 pnpm exec typeorm migration:create src/database/migrations/<MigrationName>
 ```
 
 ### 12.4 Add a New Feature Module
+
 1. สร้าง module ใหม่ใน `src/modules/<feature>/`
 2. สร้าง `<feature>.module.ts`, `<feature>.service.ts`, `<feature>.controller.ts`, `dto/`
 3. เพิ่ม TypeORM entities ที่ต้องใช้ใน `imports: [TypeOrmModule.forFeature([...])]`
@@ -389,12 +449,14 @@ pnpm exec typeorm migration:create src/database/migrations/<MigrationName>
 5. อัปเดต `API_ENDPOINTS.md` และ `PROJECT-WIKI.md` ถ้ามีผลกระทบต่อ module map หรือ workflow
 
 ### 12.5 Add a New Environment Variable
+
 1. เพิ่มใน `.env.example`
 2. ถ้าเป็นค่าที่ใช้ทั่วไป ให้เพิ่มใน `src/config/app.config.ts` หรือ `src/config/database.config.ts`
 3. อ่านผ่าน `getEnv` / `getEnvNumber` / `getEnvBoolean`
 4. ห้าม hardcode default สำหรับ secrets/passwords
 
 ### 12.6 Standalone Scripts (migrations / seeds / reset)
+
 - สคริปต์เหล่านี้ไม่ผ่าน `NestApplication` ดังนั้น `.env` จะถูกโหลดก็ต่อเมื่อ shell มี env อยู่แล้ว หรือใช้ `dotenv/config`
 - อย่าสร้าง `new ConfigService()` เพื่ออ่าน env ให้ import `getDatabaseConfig()` / `getAppConfig()` จาก `src/config/*` แทน
 - ดูตัวอย่างได้ที่ `src/database/data-source.ts` และ `src/database/reset-database.ts`

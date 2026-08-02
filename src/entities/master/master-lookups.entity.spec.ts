@@ -13,18 +13,21 @@ describe('Material master lookup entities', () => {
     [LoadingPoint, 'loading_points'],
   ] as const;
 
-  it.each(expected)('maps %p to master.%s with a unique code', (target, name) => {
-    const table = storage.tables.find((item) => item.target === target);
-    const uniqueCode = storage.indices.find(
-      (item) =>
-        item.target === target &&
-        item.unique === true &&
-        JSON.stringify(item.columns) === JSON.stringify(['code']),
-    );
+  it.each(expected)(
+    'maps %p to master.%s with a unique code',
+    (target, name) => {
+      const table = storage.tables.find((item) => item.target === target);
+      const uniqueCode = storage.indices.find(
+        (item) =>
+          item.target === target &&
+          item.unique === true &&
+          JSON.stringify(item.columns) === JSON.stringify(['code']),
+      );
 
-    expect(table).toMatchObject({ name, schema: 'master' });
-    expect(uniqueCode).toBeDefined();
-  });
+      expect(table).toMatchObject({ name, schema: 'master' });
+      expect(uniqueCode).toBeDefined();
+    },
+  );
 
   it.each(expected)(
     '%p exposes the shared lookup and audit columns',
