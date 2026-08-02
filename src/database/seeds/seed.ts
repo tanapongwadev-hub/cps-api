@@ -1,6 +1,7 @@
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
+import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
 
 export async function seed(dataSource: DataSource) {
   const configService = new ConfigService();
@@ -219,6 +220,14 @@ export async function seed(dataSource: DataSource) {
         icon: 'file-text',
         sort_order: 70,
       },
+      {
+        code: 'MATERIALS_MANAGEMENTS',
+        name_th: 'à¸ˆà¸±à¸”à¸à¸²à¸£à¸§à¸±à¸ªà¸”à¸¸',
+        name_en: 'Materials Management',
+        path: '/materials',
+        icon: 'package',
+        sort_order: 80,
+      },
     ];
 
     const menuIdMap: Record<string, string> = {};
@@ -270,7 +279,15 @@ export async function seed(dataSource: DataSource) {
         const actionId = actionIdMap[actionCode];
         if (!actionId) continue;
 
-        const permissionCode = `${menu.code}_${actionCode}`;
+        const permissionCode =
+          menu.code === 'MATERIALS_MANAGEMENTS'
+            ? {
+                CREATE: MATERIAL_PERMISSIONS.CREATE,
+                READ: MATERIAL_PERMISSIONS.VIEW,
+                UPDATE: MATERIAL_PERMISSIONS.UPDATE,
+                DELETE: MATERIAL_PERMISSIONS.DELETE,
+              }[actionCode]
+            : `${menu.code}_${actionCode}`;
         const existing = await queryRunner.query(
           `SELECT id FROM iam.permissions WHERE code = $1`,
           [permissionCode],
