@@ -56,7 +56,39 @@ describe('PermissionGuard', () => {
     ).resolves.toBe(true);
     expect(service.getEffectivePermissionCodes).toHaveBeenCalledWith(
       '1',
-      undefined,
+      '2',
+      false,
+    );
+  });
+
+  it('denies a permission granted only by a different active assignment', async () => {
+    const reflector = reflectorMetadata({ all: ['material.delete'] });
+    const service = permissionService();
+    service.getEffectivePermissionCodes.mockImplementation(
+      (_userId, assignmentId) =>
+        Promise.resolve(
+          assignmentId === 'selected-assignment'
+            ? ['material.view']
+            : ['material.delete'],
+        ),
+    );
+    const guard = new PermissionGuard(
+      reflector,
+      service as unknown as EffectivePermissionService,
+    );
+
+    await expect(
+      guard.canActivate(
+        context({
+          id: '1',
+          activeRoleCode: RoleCode.USER,
+          activeUserDepartmentRoleId: 'selected-assignment',
+        }),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'PERMISSION_DENIED' } });
+    expect(service.getEffectivePermissionCodes).toHaveBeenCalledWith(
+      '1',
+      'selected-assignment',
       false,
     );
   });

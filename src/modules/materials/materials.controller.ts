@@ -22,7 +22,10 @@ import { CreateMaterialDto } from './dto/create-material.dto';
 import { ListMaterialsQueryDto } from './dto/list-materials-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import type { MaterialImageFile } from './material-image-storage.service';
-import { MaterialImageStorageService } from './material-image-storage.service';
+import {
+  MATERIAL_IMAGE_MAX_SIZE,
+  MaterialImageStorageService,
+} from './material-image-storage.service';
 import { MATERIAL_PERMISSIONS } from './material-permissions';
 import { MaterialsService } from './materials.service';
 
@@ -85,7 +88,11 @@ export class MaterialsController {
     MATERIAL_PERMISSIONS.CREATE,
     MATERIAL_PERMISSIONS.UPDATE,
   )
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MATERIAL_IMAGE_MAX_SIZE },
+    }),
+  )
   stageImage(@UploadedFile() file: MaterialImageFile) {
     return this.imageStorage.stage(file);
   }

@@ -637,6 +637,34 @@ describe('MaterialsService aggregate commands', () => {
     expect(events).toEqual(['commit', 'discard-old']);
   });
 
+  it('keeps an unchanged permanent image without promoting or discarding it', async () => {
+    const permanentPath = '/uploads/materials/existing.png';
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      unitId: '1',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      imagePath: permanentPath,
+      updatedAt: timestamp,
+    } as Material;
+    materials.findOne!.mockResolvedValueOnce(locked);
+    materials.createQueryBuilder!.mockReturnValueOnce(
+      detailBuilder({ ...locked, imagePath: permanentPath }),
+    );
+
+    await expect(
+      service.update(
+        '20',
+        { imagePath: permanentPath, updatedAt: timestamp.toISOString() },
+        '7',
+      ),
+    ).resolves.toMatchObject({ imagePath: permanentPath });
+    expect(imageStorage.promote).not.toHaveBeenCalled();
+    expect(imageStorage.discard).not.toHaveBeenCalled();
+  });
+
   it('compensates a promoted replacement and retains the old image when the transaction fails', async () => {
     const oldPath = '/uploads/materials/old.png';
     const temporaryPath =

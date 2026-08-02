@@ -11,7 +11,11 @@ import { getEnv } from './config/env.utils';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.setGlobalPrefix('api/v1');
-  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+  const uploadsDirectory = join(process.cwd(), 'uploads');
+  app.useStaticAssets(join(uploadsDirectory, 'materials', '.tmp'), {
+    prefix: '/uploads/materials/.tmp/',
+  });
+  app.useStaticAssets(uploadsDirectory, {
     prefix: '/uploads/',
   });
 

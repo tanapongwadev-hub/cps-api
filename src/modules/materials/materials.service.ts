@@ -208,9 +208,9 @@ export class MaterialsService {
 
         let effectiveDto = dto;
         if (dto.imagePath !== undefined) {
-          imageChanged = true;
           previousImagePath = material.imagePath;
-          if (dto.imagePath !== null) {
+          imageChanged = dto.imagePath !== material.imagePath;
+          if (imageChanged && dto.imagePath !== null) {
             promotedImagePath = await this.getImageStorage().promote(
               dto.imagePath,
             );

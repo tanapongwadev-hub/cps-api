@@ -43,6 +43,10 @@ describe('bootstrap static uploads', () => {
       join(process.cwd(), 'uploads'),
       { prefix: '/uploads/' },
     );
+    expect(mockApp.useStaticAssets).toHaveBeenCalledWith(
+      join(process.cwd(), 'uploads', 'materials', '.tmp'),
+      { prefix: '/uploads/materials/.tmp/' },
+    );
     expect(mockApp.useStaticAssets).not.toHaveBeenCalledWith(
       process.cwd(),
       expect.anything(),

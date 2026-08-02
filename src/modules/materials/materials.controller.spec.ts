@@ -1,10 +1,13 @@
-import { RequestMethod } from '@nestjs/common';
+import { HttpStatus, INestApplication, RequestMethod } from '@nestjs/common';
 import {
   GUARDS_METADATA,
   INTERCEPTORS_METADATA,
   METHOD_METADATA,
   PATH_METADATA,
 } from '@nestjs/common/constants';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import type { App } from 'supertest/types';
 import { REQUIRE_ANY_PERMISSIONS_KEY } from '../../common/decorators/require-any-permissions.decorator';
 import { REQUIRE_PERMISSIONS_KEY } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
@@ -15,6 +18,7 @@ import { ListMaterialsQueryDto } from './dto/list-materials-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import {
   MaterialImageFile,
+  MATERIAL_IMAGE_MAX_SIZE,
   MaterialImageStorageService,
 } from './material-image-storage.service';
 import { MATERIAL_PERMISSIONS } from './material-permissions';
@@ -74,6 +78,15 @@ describe('MaterialsController', () => {
     }
 
     const methodNames = Object.getOwnPropertyNames(prototype);
+    const routeCount = methodNames.filter(
+      (name) =>
+        name !== 'constructor' &&
+        Reflect.getMetadata(
+          METHOD_METADATA,
+          prototype[name as keyof MaterialsController],
+        ) !== undefined,
+    ).length;
+    expect(routeCount).toBe(8);
     expect(methodNames.indexOf('getLookups')).toBeLessThan(
       methodNames.indexOf('findOne'),
     );
@@ -150,5 +163,36 @@ describe('MaterialsController', () => {
       previewUrl: '/uploads/materials/.tmp/image.png',
     });
     expect(imageStorage.stage).toHaveBeenCalledWith(file);
+  });
+
+  it('rejects multipart files larger than 5 MiB before staging', async () => {
+    const uploadStorage = { stage: jest.fn() };
+    const moduleRef = await Test.createTestingModule({
+      controllers: [MaterialsController],
+      providers: [
+        { provide: MaterialsService, useValue: service },
+        { provide: MaterialImageStorageService, useValue: uploadStorage },
+      ],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(ActiveAssignmentGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(PermissionGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app: INestApplication<App> = moduleRef.createNestApplication();
+    await app.init();
+
+    const response = await request(app.getHttpServer())
+      .post('/materials/images')
+      .attach('file', Buffer.alloc(MATERIAL_IMAGE_MAX_SIZE + 1), {
+        filename: 'large.png',
+        contentType: 'image/png',
+      });
+
+    expect(response.status).toBe(HttpStatus.PAYLOAD_TOO_LARGE);
+    expect(uploadStorage.stage).not.toHaveBeenCalled();
+    await app.close();
   });
 });
