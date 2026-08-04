@@ -282,7 +282,7 @@ POST /auth/refresh
 
 | Module              | Imports                                                                                                                                                                    | TypeORM Entities                                                                                                                  | Exports                                                                 | Controller              | บทบาทหลัก                                         |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
-| AppModule           | ConfigModule, TypeOrmModule, AuthModule, UsersModule, DepartmentsModule, RolesModule, MenusModule, PermissionsModule, SessionsModule, AuditLogsModule, AccessControlModule | —                                                                                                                                 | —                                                                       | `AppController`         | Root module                                       |
+| AppModule           | ConfigModule, TypeOrmModule, AuthModule, UsersModule, DepartmentsModule, RolesModule, MenusModule, PermissionsModule, SessionsModule, AuditLogsModule, AccessControlModule, MaterialsModule | —                                                                                                                                 | —                                                                       | `AppController`         | Root module                                       |
 | AuthModule          | AccessControlModule, TypeOrmModule, PassportModule, JwtModule                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission, Department, Role, Action, RoleAction, Permission, Menu, AuthSession, AuditLog | `AuthService`                                                           | `AuthController`        | Login/logout/refresh/token + department selection |
 | UsersModule         | TypeOrmModule                                                                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission                                                                                | `UsersService`                                                          | `UsersController`       | จัดการผู้ใช้ + assignments                        |
 | DepartmentsModule   | TypeOrmModule                                                                                                                                                              | Department                                                                                                                        | `DepartmentsService`                                                    | `DepartmentsController` | จัดการแผนก                                        |
@@ -292,6 +292,7 @@ POST /auth/refresh
 | SessionsModule      | TypeOrmModule                                                                                                                                                              | AuthSession                                                                                                                       | `SessionsService`                                                       | `SessionsController`    | จัดการ session / revoke                           |
 | AuditLogsModule     | TypeOrmModule                                                                                                                                                              | AuditLog                                                                                                                          | `AuditLogsService`                                                      | `AuditLogsController`   | ดู audit logs                                     |
 | AccessControlModule | TypeOrmModule                                                                                                                                                              | Permission, RoleAction, UserDepartmentRole, UserDepartmentPermission, Menu                                                        | `AccessControlService`, `EffectivePermissionService`, `MenuTreeService` | —                       | คำนวณสิทธิ์และเมนูที่ user ได้รับ                 |
+| MaterialsModule     | AccessControlModule, TypeOrmModule                                                                                                                                         | Material, SupplierMaterial, Unit, DeliveryType, MaterialModel, LoadingPoint, Supplier                                             | `MaterialsService`, `MaterialImageStorageService`, `PermissionGuard`    | `MaterialsController`   | CRUD Material Master + จัดการรูปภาพ              |
 
 ### 6.1 AuthModule
 
@@ -341,6 +342,22 @@ POST /auth/refresh
   - `MenuTreeService.buildMenuTree()` — สร้างเมนู tree ตามสิทธิ์
 - ถูก import โดย `AuthModule` เพื่อใช้ใน `AuthService.getMyMenus()` / `getMyPermissions()`
 - หาก controller อื่นต้องการตรวจสิทธิ์ละเอียด ให้ import `AccessControlModule` และใช้ `PermissionGuard` พร้อม `@RequirePermissions(...)`
+
+### 6.10 MaterialsModule
+
+- CRUD Material Master ตาม [Material Master Requirements](docs/wiki/material-master.md)
+- ใช้สิทธิ์จาก `MATERIAL_VIEW`, `MATERIAL_CREATE`, `MATERIAL_UPDATE`, `MATERIAL_DELETE` ผ่าน `PermissionGuard` (ดู `src/modules/materials/material-permissions.ts`)
+- จัดการความสัมพันธ์กับ Lookup Master Data (Unit, DeliveryType, MaterialModel, LoadingPoint) และ Supplier ผ่านตารางกลาง `master.supplier_materials`
+- ใช้ `DataSource.transaction()` ในการ create/update/deactivate/restore เพื่อรักษาความ consistent ของ material + supplier mappings
+- ใช้ `pessimistic_write` lock ตอน update เพื่อป้องกัน concurrent write
+- ใช้ optimistic concurrency ผ่าย `updatedAt` ใน `UpdateMaterialDto` (ถ้า `updatedAt` ไม่ตรงกัน → `409 Conflict`)
+- Endpoint `POST /materials/images` ใช้ `MaterialImageStorageService` ทำสองขั้นตอน:
+  1. `stage()` รับ multipart file แล้วเขียนลง `.tmp/` (เก็บ path ชั่วคราว 24 ชม.)
+  2. `promote()` ย้ายไฟล์จาก `.tmp/` ไปยัง root เมื่อ create/update Material สำเร็จ
+  3. `discard()` ลบไฟล์เก่าเมื่อมีการเปลี่ยนรูป หรือ compensate เมื่อ transaction fail
+- `MaterialImageStorageService` validate MIME type, magic bytes (JPEG/PNG/WEBP), และขนาดไม่เกิน 5 MiB
+- การลบ Material ใช้ soft delete ผ่าน `isActive = false` (เรียก `DELETE /materials/:id` → `PATCH /materials/:id/restore` เพื่อ restore)
+- รายการ Material ใช้ query builder join กับ lookup + supplier mappings และกรองเฉพาะ active suppliers/mappings
 
 ## 7. Database Migration & Seeding
 

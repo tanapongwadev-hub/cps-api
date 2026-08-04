@@ -30,9 +30,29 @@ const MATERIAL_SORT_COLUMNS: Record<MaterialSortBy, string> = {
   updatedAt: 'material.updatedAt',
 };
 
-export type MaterialWithSuppliers = Omit<Material, 'supplierMaterials'> & {
-  suppliers: Supplier[];
+export interface MaterialLookupResponse {
+  id: string;
+  code: string;
+  isActive?: boolean;
+  nameTh?: string;
+  nameEn?: string | null;
+  symbol?: string | null;
+  description?: string | null;
+}
+
+export type MaterialWithSuppliers = Omit<
+  Material,
+  'supplierMaterials' | 'unit' | 'model' | 'deliveryType' | 'loadingPoint'
+> & {
+  unit?: MaterialLookupResponse | null;
+  model?: MaterialLookupResponse | null;
+  deliveryType?: MaterialLookupResponse | null;
+  loadingPoint?: MaterialLookupResponse | null;
+  suppliers: MaterialLookupResponse[];
 };
+
+type MasterLookupEntity =
+  Unit | Supplier | MaterialModel | DeliveryType | LoadingPoint;
 
 @Injectable()
 export class MaterialsService {
@@ -127,7 +147,10 @@ export class MaterialsService {
           }),
         );
         if (mappings.length > 0) {
-          await supplierMaterialRepository.save(mappings);
+          await this.saveSupplierMaterials(
+            supplierMaterialRepository,
+            mappings,
+          );
         }
 
         return this.findOneUsing(materialRepository, savedMaterial.id);
@@ -359,7 +382,17 @@ export class MaterialsService {
         this.loadingPointRepository.find(lookupOptions),
       ]);
 
-    return { units, suppliers, models, deliveryTypes, loadingPoints };
+    return {
+      units: units.map((unit) => this.mapLookup(unit)),
+      suppliers: suppliers.map((supplier) => this.mapLookup(supplier)),
+      models: models.map((model) => this.mapLookup(model)),
+      deliveryTypes: deliveryTypes.map((deliveryType) =>
+        this.mapLookup(deliveryType),
+      ),
+      loadingPoints: loadingPoints.map((loadingPoint) =>
+        this.mapLookup(loadingPoint),
+      ),
+    };
   }
 
   private createReadQuery(
@@ -392,12 +425,66 @@ export class MaterialsService {
           supplierMaterial.isActive && supplierMaterial.supplier?.isActive,
       )
       .map((supplierMaterial) => supplierMaterial.supplier)
-      .sort((first, second) => first.code.localeCompare(second.code));
-    const result = { ...material, suppliers } as MaterialWithSuppliers & {
-      supplierMaterials?: SupplierMaterial[];
+      .sort((first, second) => first.code.localeCompare(second.code))
+      .map((supplier) => this.mapLookup(supplier));
+
+    const result: Record<string, unknown> = {};
+    for (const field of [
+      'id',
+      'code',
+      'name',
+      'unitId',
+      'deliveryTypeId',
+      'modelId',
+      'loadingPointId',
+      'processLineName',
+      'scale',
+      'imagePath',
+      'specification',
+      'description',
+      'isActive',
+      'createdBy',
+      'updatedBy',
+      'createdAt',
+      'updatedAt',
+    ] as const) {
+      if (field in material) {
+        result[field] = material[field];
+      }
+    }
+
+    for (const field of [
+      'unit',
+      'model',
+      'deliveryType',
+      'loadingPoint',
+    ] as const) {
+      if (field in material) {
+        const lookup = material[field];
+        result[field] = lookup ? this.mapLookup(lookup) : null;
+      }
+    }
+    result.suppliers = suppliers;
+    return result as MaterialWithSuppliers;
+  }
+
+  private mapLookup(entity: MasterLookupEntity): MaterialLookupResponse {
+    const result: Record<string, unknown> = {
+      id: entity.id,
+      code: entity.code,
     };
-    delete result.supplierMaterials;
-    return result;
+    for (const field of [
+      'isActive',
+      'nameTh',
+      'nameEn',
+      'symbol',
+      'description',
+    ] as const) {
+      if (field in entity) {
+        result[field] = Reflect.get(entity, field);
+      }
+    }
+    return result as unknown as MaterialLookupResponse;
   }
 
   private getDataSource(): DataSource {
@@ -614,8 +701,33 @@ export class MaterialsService {
       }
     }
     if (changed.length > 0) {
-      await repository.save(changed);
+      await this.saveSupplierMaterials(repository, changed);
     }
+  }
+
+  private async saveSupplierMaterials(
+    repository: Repository<SupplierMaterial>,
+    mappings: SupplierMaterial[],
+  ): Promise<SupplierMaterial[]> {
+    try {
+      return await repository.save(mappings);
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw new ConflictException('Material supplier mapping already exists');
+      }
+      throw error;
+    }
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    const databaseError = error as {
+      code?: string;
+      driverError?: { code?: string };
+    };
+    return (
+      databaseError.code === '23505' ||
+      databaseError.driverError?.code === '23505'
+    );
   }
 
   private async saveMaterial(
@@ -625,14 +737,7 @@ export class MaterialsService {
     try {
       return await repository.save(material);
     } catch (error) {
-      const databaseError = error as {
-        code?: string;
-        driverError?: { code?: string };
-      };
-      if (
-        databaseError.code === '23505' ||
-        databaseError.driverError?.code === '23505'
-      ) {
+      if (this.isUniqueViolation(error)) {
         throw new ConflictException('Material code already exists');
       }
       throw error;

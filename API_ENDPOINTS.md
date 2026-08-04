@@ -165,6 +165,148 @@ Request สำหรับกำหนดแผนก:
 | GET | `/audit-logs` | Bearer + SUPER_ADMIN | รายการ audit logs (รองรับ `page`, `limit`, `userId`, `action`) |
 | GET | `/audit-logs/:id` | Bearer + SUPER_ADMIN | ข้อมูล audit log |
 
+## Materials
+
+> Material Master ตาม [Material Master Requirements](docs/wiki/material-master.md)
+> สิทธิ์ที่ใช้: `MATERIAL_VIEW`, `MATERIAL_CREATE`, `MATERIAL_UPDATE`, `MATERIAL_DELETE`
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| GET | `/materials` | `MATERIAL_VIEW` | รายการ Material (รองรับ `page`, `limit`, `search`, `isActive`, `unitId`, `modelId`, `deliveryTypeId`, `loadingPointId`, `supplierId`, `sortBy`, `sortOrder`) |
+| GET | `/materials/lookups` | `MATERIAL_VIEW` | ดึง Lookup Master Data ทั้งหมด (units, suppliers, models, deliveryTypes, loadingPoints) สำหรับสร้างฟอร์ม |
+| GET | `/materials/:id` | `MATERIAL_VIEW` | ข้อมูล Material ตาม id พร้อม suppliers และ lookup relations |
+| POST | `/materials` | `MATERIAL_CREATE` | สร้าง Material ใหม่ |
+| PATCH | `/materials/:id` | `MATERIAL_UPDATE` | แก้ไข Material (ต้องส่ง `updatedAt` เพื่อทำ optimistic concurrency check) |
+| DELETE | `/materials/:id` | `MATERIAL_DELETE` | Soft delete (`isActive = false`) |
+| PATCH | `/materials/:id/restore` | `MATERIAL_UPDATE` | Restore Material ที่ถูก soft delete |
+| POST | `/materials/images` | `MATERIAL_CREATE` หรือ `MATERIAL_UPDATE` | อัปโหลดรูปภาพ (multipart `file`, JPEG/PNG/WEBP ≤ 5 MiB) ได้ `imagePath` ชั่วคราวไปใช้ใน create/update |
+
+### Query Parameters ของ `GET /materials`
+
+| Param | Type | Default | หมายเหตุ |
+|---|---|---|---|
+| `page` | int ≥ 1 | `1` | หน้าที่ต้องการ |
+| `limit` | int 1–100 | `20` | จำนวนต่อหน้า |
+| `search` | string | — | ค้นหา `code` หรือ `name` (ILIKE) |
+| `isActive` | bool | — | กรองตามสถานะ |
+| `unitId` | string (positive int) | — | กรองตาม Unit |
+| `modelId` | string (positive int) | — | กรองตาม Material Model |
+| `deliveryTypeId` | string (positive int) | — | กรองตาม Delivery Type |
+| `loadingPointId` | string (positive int) | — | กรองตาม Loading Point |
+| `supplierId` | string (positive int) | — | กรองตาม Supplier (ดูจาก `supplier_materials`) |
+| `sortBy` | enum | `code` | `code` \| `name` \| `isActive` \| `createdAt` \| `updatedAt` |
+| `sortOrder` | enum | `asc` | `asc` \| `desc` |
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "id": "42",
+      "code": "MAT-001",
+      "name": "น้ำมันปาล์ม",
+      "unitId": "1",
+      "deliveryTypeId": "1",
+      "modelId": null,
+      "loadingPointId": "1",
+      "processLineName": "Line A",
+      "scale": "กว้าง 50 × ยาว 100 × สูง 20 ซม.",
+      "imagePath": "/uploads/materials/abc.jpg",
+      "specification": "...",
+      "description": "...",
+      "isActive": true,
+      "createdBy": "1",
+      "updatedBy": "1",
+      "createdAt": "2026-08-02T10:00:00.000Z",
+      "updatedAt": "2026-08-02T10:00:00.000Z",
+      "unit": { "id": "1", "code": "KG", "nameTh": "กิโลกรัม", "nameEn": "Kilogram" },
+      "deliveryType": { "id": "1", "code": "TRUCK", "nameTh": "รถบรรทุก" },
+      "model": null,
+      "loadingPoint": { "id": "1", "code": "RCV-A", "nameTh": "Receiving A" },
+      "suppliers": [
+        { "id": "1", "code": "SUP-001", "nameTh": "บริษัท ตัวอย่าง จำกัด" }
+      ]
+    }
+  ],
+  "meta": { "page": 1, "limit": 20, "totalItems": 1, "totalPages": 1 }
+}
+```
+
+### `POST /materials`
+
+```json
+{
+  "code": "MAT-001",
+  "name": "น้ำมันปาล์ม",
+  "unitId": "1",
+  "deliveryTypeId": "1",
+  "modelId": null,
+  "loadingPointId": "1",
+  "processLineName": "Line A",
+  "scale": "กว้าง 50 × ยาว 100 × สูง 20 ซม.",
+  "imagePath": "/uploads/materials/.tmp/<uuid>.jpg",
+  "specification": "...",
+  "description": "...",
+  "isActive": true,
+  "supplierIds": ["1", "2"]
+}
+```
+
+- `code` จะถูก trim + uppercase อัตโนมัติ
+- `imagePath` ต้องเป็น path ที่ได้จาก `POST /materials/images` (ถ้าไม่ส่ง = ไม่มีรูป)
+- `supplierIds` ต้องไม่ซ้ำ และทุก id ต้อง active
+
+### `PATCH /materials/:id`
+
+เหมือน `POST /materials` แต่ทุก field เป็น optional และต้องส่ง:
+
+```json
+{
+  "name": "น้ำมันปาล์ม (ใหม่)",
+  "updatedAt": "2026-08-02T10:00:00.000Z"
+}
+```
+
+- `updatedAt` ต้องตรงกับค่าปัจจุบัน → ถ้าไม่ตรง backend ตอบ `409 Conflict`
+- ถ้าเปลี่ยน `supplierIds` ระบบจะ sync (เพิ่มใหม่ / soft delete ของเดิมที่หายไป / restore ของเดิม)
+- ถ้าเปลี่ยน `imagePath` ระบบจะ promote ไฟล์ใหม่และลบไฟล์เก่า (ถ้าสำเร็จ)
+
+### `POST /materials/images`
+
+ใช้ `multipart/form-data` field ชื่อ `file`:
+
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/image.jpg" \
+  http://localhost:3001/api/v1/materials/images
+```
+
+Response:
+
+```json
+{
+  "imagePath": "/uploads/materials/.tmp/0c9b8e6e-...jpg",
+  "previewUrl": "/uploads/materials/.tmp/0c9b8e6e-...jpg"
+}
+```
+
+> `imagePath` ที่ได้เป็น path ชั่วคราว (อยู่ใน `.tmp/`) ระบบจะย้ายไปยัง root เมื่อ create/update Material สำเร็จ และลบอัตโนมัติภายใน 24 ชั่วโมงหากไม่ถูกใช้
+
+### Lookup response ของ `GET /materials/lookups`
+
+```json
+{
+  "units": [{ "id": "1", "code": "KG", "nameTh": "กิโลกรัม", "nameEn": "Kilogram" }],
+  "suppliers": [{ "id": "1", "code": "SUP-001", "nameTh": "..." }],
+  "models": [],
+  "deliveryTypes": [{ "id": "1", "code": "TRUCK", "nameTh": "รถบรรทุก" }],
+  "loadingPoints": [{ "id": "1", "code": "RCV-A", "nameTh": "Receiving A" }]
+}
+```
+
+> ทุก lookup จะคืนเฉพาะ `isActive = true` เรียงตาม `code ASC`
+
 ## Root
 
 | Method | Endpoint | Auth | Description |

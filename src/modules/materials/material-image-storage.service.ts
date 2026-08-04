@@ -77,7 +77,7 @@ export class MaterialImageStorageService {
     const filename = `${randomUUID()}.${extension}`;
     const temporaryDirectory = resolve(this.rootDirectory, '.tmp');
     await mkdir(temporaryDirectory, { recursive: true });
-    await this.cleanupStaleTemporaryFiles(temporaryDirectory);
+    await this.cleanupStaleTemporaryFiles();
     await writeFile(resolve(temporaryDirectory, filename), file.buffer, {
       flag: 'wx',
     });
@@ -111,7 +111,8 @@ export class MaterialImageStorageService {
     await rm(this.resolveMaterialPath(imagePath), { force: true });
   }
 
-  private async cleanupStaleTemporaryFiles(directory: string): Promise<void> {
+  async cleanupStaleTemporaryFiles(): Promise<void> {
+    const directory = resolve(this.rootDirectory, '.tmp');
     const entries: string[] = [];
     try {
       const temporaryFiles = await opendir(directory);

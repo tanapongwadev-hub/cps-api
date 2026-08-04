@@ -28,5 +28,6 @@ import { MaterialsService } from './materials.service';
   ],
   controllers: [MaterialsController],
   providers: [MaterialsService, MaterialImageStorageService, PermissionGuard],
+  exports: [MaterialsService, MaterialImageStorageService, PermissionGuard],
 })
 export class MaterialsModule {}

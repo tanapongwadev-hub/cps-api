@@ -1,6 +1,7 @@
 # Material Master Requirements
 
 > สถานะ: Requirement ที่ยืนยันแล้ว ณ วันที่ 2 สิงหาคม 2026
+> สถานะ Implementation: ✅ Implemented (CRUD + Image upload + Tests) — ดู [ส่วน 9](#9-implementation-status)
 > ขอบเขต: ข้อมูลหลักวัตถุดิบและ Master Data ที่เกี่ยวข้องเท่านั้น
 
 ## 1. วัตถุประสงค์
@@ -216,3 +217,55 @@ updated_at
 - ประวัติการเคลื่อนไหวสต็อก
 
 การเพิ่มข้อมูลเหล่านี้ในอนาคตต้องไม่ย้ายข้อมูลธุรกรรมมาเก็บใน `master.materials`
+
+## 9. Implementation Status
+
+Requirement ในเอกสารนี้ถูก implement แล้วตามแผน `docs/superpowers/plans/2026-08-02-material-master.md` และครอบคลุม CRUD + Image upload + Unit tests ครบทุก entity
+
+### 9.1 ไฟล์ที่เกี่ยวข้อง
+
+| Layer | ไฟล์ |
+| --- | --- |
+| Migration | `src/database/migrations/1700000000005-CreateMaterialMaster.ts` |
+| Entities | `src/entities/master/{material,unit,delivery-type,material-model,loading-point,supplier,supplier-material}.entity.ts` |
+| Module | `src/modules/materials/materials.module.ts` |
+| Service | `src/modules/materials/materials.service.ts` (create, update, deactivate, restore, findAll, findOne, getLookups) |
+| Controller | `src/modules/materials/materials.controller.ts` (REST endpoints + image upload) |
+| Image storage | `src/modules/materials/material-image-storage.service.ts` (stage → promote → discard) |
+| DTOs | `src/modules/materials/dto/{create-material,update-material,list-materials-query}.dto.ts` |
+| Permissions | `src/modules/materials/material-permissions.ts` (`MATERIAL_VIEW`/`CREATE`/`UPDATE`/`DELETE`) |
+| Tests | `src/database/migrations/1700000000005-CreateMaterialMaster.spec.ts`, `src/entities/master/*.spec.ts`, `src/modules/materials/*.spec.ts` |
+
+### 9.2 REST Endpoints
+
+| Method | Path | Permission | คำอธิบาย |
+| --- | --- | --- | --- |
+| GET | `/materials` | `MATERIAL_VIEW` | รายการ Material พร้อม filter/sort/pagination |
+| GET | `/materials/lookups` | `MATERIAL_VIEW` | Lookup Master Data ทั้งหมด (สำหรับฟอร์ม) |
+| GET | `/materials/:id` | `MATERIAL_VIEW` | ข้อมูล Material ตาม id |
+| POST | `/materials` | `MATERIAL_CREATE` | สร้าง Material |
+| PATCH | `/materials/:id` | `MATERIAL_UPDATE` | แก้ไข (ต้องส่ง `updatedAt` เพื่อ optimistic concurrency) |
+| DELETE | `/materials/:id` | `MATERIAL_DELETE` | Soft delete (`isActive = false`) |
+| PATCH | `/materials/:id/restore` | `MATERIAL_UPDATE` | Restore Material |
+| POST | `/materials/images` | `MATERIAL_CREATE` หรือ `MATERIAL_UPDATE` | อัปโหลดรูป (multipart) → ได้ `imagePath` ชั่วคราว |
+
+> ดู request/response ตัวอย่างทั้งหมดได้ที่ `API_ENDPOINTS.md` ส่วน **Materials**
+
+### 9.3 แนวปฏิบัติที่ใช้ในการ Implement
+
+- ใช้ `DataSource.transaction()` ครอบ create/update/deactivate/restore เพื่อรักษาความ consistent ระหว่าง `materials` กับ `supplier_materials`
+- ใช้ `pessimistic_write` lock ตอน update เพื่อกัน concurrent write
+- ใช้ optimistic concurrency ผ่าน field `updatedAt` ใน `UpdateMaterialDto` (ตอบ `409 Conflict` ถ้าไม่ตรง)
+- `MaterialImageStorageService` แยกเป็น 2 phase (`stage` → `promote`) เพื่อให้ compensate ไฟล์ได้เมื่อ transaction fail
+- Validate magic bytes (JPEG/PNG/WEBP) และขนาดไม่เกิน 5 MiB ตอน stage
+- ไฟล์ใน `.tmp/` จะถูกลบอัตโนมัติหลัง 24 ชั่วโมงหากไม่ถูก promote
+- Lookup list query (`GET /materials/lookups`) คืนเฉพาะ `isActive = true` เรียงตาม `code ASC`
+- `code` ใน Material ถูก trim + uppercase อัตโนมัติ และเช็ค unique แบบ case-insensitive
+- การ filter `supplierId` ใน list ใช้ EXISTS subquery กับ `master.supplier_materials` และกรองเฉพาะ mapping/supplier ที่ active
+
+### 9.4 เอกสารที่เกี่ยวข้อง
+
+- [PROJECT-WIKI.md §6.10 MaterialsModule](../PROJECT-WIKI.md#610-materialsmodule) — ภาพรวม module + dependency
+- [PROJECT-WIKI.md §3.3 Material Master Entities](../PROJECT-WIKI.md#33-material-master-entities-7-tables) — data model
+- [API_ENDPOINTS.md §Materials](../API_ENDPOINTS.md#materials) — REST contract
+- [Implementation Plan](../superpowers/plans/2026-08-02-material-master.md) — แผนงานตั้งต้นที่ใช้ implement
