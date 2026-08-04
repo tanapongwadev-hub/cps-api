@@ -4,6 +4,7 @@ import * as argon2 from 'argon2';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
 import { UNIT_PERMISSIONS } from '../../modules/units/unit-permissions';
 import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissions';
+import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
 
 export async function seed(dataSource: DataSource) {
   const configService = new ConfigService();
@@ -246,6 +247,14 @@ export async function seed(dataSource: DataSource) {
         icon: 'truck',
         sort_order: 91,
       },
+      {
+        code: 'MATERIAL_MODEL_MANAGEMENT',
+        name_th: 'จัดการรุ่นวัสดุ',
+        name_en: 'Material Model Management',
+        path: '/master-data/material-models',
+        icon: 'box',
+        sort_order: 92,
+      },
     ];
 
     const menuIdMap: Record<string, string> = {};
@@ -319,7 +328,14 @@ export async function seed(dataSource: DataSource) {
                     UPDATE: SUPPLIER_PERMISSIONS.UPDATE,
                     DELETE: SUPPLIER_PERMISSIONS.DELETE,
                   }[actionCode]
-                : `${menu.code}_${actionCode}`;
+                : menu.code === 'MATERIAL_MODEL_MANAGEMENT'
+                  ? {
+                      CREATE: MATERIAL_MODEL_PERMISSIONS.CREATE,
+                      READ: MATERIAL_MODEL_PERMISSIONS.VIEW,
+                      UPDATE: MATERIAL_MODEL_PERMISSIONS.UPDATE,
+                      DELETE: MATERIAL_MODEL_PERMISSIONS.DELETE,
+                    }[actionCode]
+                  : `${menu.code}_${actionCode}`;
         const existing = await queryRunner.query(
           `SELECT id FROM iam.permissions WHERE code = $1`,
           [permissionCode],

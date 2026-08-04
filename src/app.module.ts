@@ -17,6 +17,7 @@ import { AccessControlModule } from './modules/access-control/access-control.mod
 import { MaterialsModule } from './modules/materials/materials.module';
 import { UnitsModule } from './modules/units/units.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { MaterialModelsModule } from './modules/material-models/material-models.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
     MaterialsModule,
     UnitsModule,
     SuppliersModule,
+    MaterialModelsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
