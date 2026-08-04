@@ -5,6 +5,8 @@ import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissio
 import { UNIT_PERMISSIONS } from '../../modules/units/unit-permissions';
 import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissions';
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
+import { DELIVERY_TYPE_PERMISSIONS } from '../../modules/delivery-types/delivery-type-permissions';
+import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
 
 export async function seed(dataSource: DataSource) {
   const configService = new ConfigService();
@@ -255,6 +257,22 @@ export async function seed(dataSource: DataSource) {
         icon: 'box',
         sort_order: 92,
       },
+      {
+        code: 'DELIVERY_TYPE_MANAGEMENT',
+        name_th: 'จัดการประเภทการจัดส่ง',
+        name_en: 'Delivery Type Management',
+        path: '/master-data/delivery-types',
+        icon: 'truck',
+        sort_order: 93,
+      },
+      {
+        code: 'LOADING_POINT_MANAGEMENT',
+        name_th: 'จัดการจุดขนถ่าย',
+        name_en: 'Loading Point Management',
+        path: '/master-data/loading-points',
+        icon: 'map-pin',
+        sort_order: 94,
+      },
     ];
 
     const menuIdMap: Record<string, string> = {};
@@ -335,7 +353,21 @@ export async function seed(dataSource: DataSource) {
                       UPDATE: MATERIAL_MODEL_PERMISSIONS.UPDATE,
                       DELETE: MATERIAL_MODEL_PERMISSIONS.DELETE,
                     }[actionCode]
-                  : `${menu.code}_${actionCode}`;
+                  : menu.code === 'DELIVERY_TYPE_MANAGEMENT'
+                    ? {
+                        CREATE: DELIVERY_TYPE_PERMISSIONS.CREATE,
+                        READ: DELIVERY_TYPE_PERMISSIONS.VIEW,
+                        UPDATE: DELIVERY_TYPE_PERMISSIONS.UPDATE,
+                        DELETE: DELIVERY_TYPE_PERMISSIONS.DELETE,
+                      }[actionCode]
+                    : menu.code === 'LOADING_POINT_MANAGEMENT'
+                      ? {
+                          CREATE: LOADING_POINT_PERMISSIONS.CREATE,
+                          READ: LOADING_POINT_PERMISSIONS.VIEW,
+                          UPDATE: LOADING_POINT_PERMISSIONS.UPDATE,
+                          DELETE: LOADING_POINT_PERMISSIONS.DELETE,
+                        }[actionCode]
+                      : `${menu.code}_${actionCode}`;
         const existing = await queryRunner.query(
           `SELECT id FROM iam.permissions WHERE code = $1`,
           [permissionCode],

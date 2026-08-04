@@ -18,6 +18,8 @@ import { MaterialsModule } from './modules/materials/materials.module';
 import { UnitsModule } from './modules/units/units.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { MaterialModelsModule } from './modules/material-models/material-models.module';
+import { DeliveryTypesModule } from './modules/delivery-types/delivery-types.module';
+import { LoadingPointsModule } from './modules/loading-points/loading-points.module';
 
 @Module({
   imports: [
@@ -46,6 +48,8 @@ import { MaterialModelsModule } from './modules/material-models/material-models.
     UnitsModule,
     SuppliersModule,
     MaterialModelsModule,
+    DeliveryTypesModule,
+    LoadingPointsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
