@@ -20,6 +20,9 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { MaterialModelsModule } from './modules/material-models/material-models.module';
 import { DeliveryTypesModule } from './modules/delivery-types/delivery-types.module';
 import { LoadingPointsModule } from './modules/loading-points/loading-points.module';
+import { CategoriesModule } from './modules/categories/categories.module';
+import { StatusItemsModule } from './modules/status-items/status-items.module';
+import { OrganizationsModule } from './modules/organizations/organizations.module';
 
 @Module({
   imports: [
@@ -50,6 +53,9 @@ import { LoadingPointsModule } from './modules/loading-points/loading-points.mod
     MaterialModelsModule,
     DeliveryTypesModule,
     LoadingPointsModule,
+    CategoriesModule,
+    StatusItemsModule,
+    OrganizationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -7,6 +7,9 @@ import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissio
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
 import { DELIVERY_TYPE_PERMISSIONS } from '../../modules/delivery-types/delivery-type-permissions';
 import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
+import { CATEGORY_PERMISSIONS } from '../../modules/categories/category-permissions';
+import { STATUS_ITEM_PERMISSIONS } from '../../modules/status-items/status-item-permissions';
+import { ORGANIZATION_PERMISSIONS } from '../../modules/organizations/organization-permissions';
 
 export async function seed(dataSource: DataSource) {
   const configService = new ConfigService();
@@ -273,6 +276,30 @@ export async function seed(dataSource: DataSource) {
         icon: 'map-pin',
         sort_order: 94,
       },
+      {
+        code: 'CATEGORY_MANAGEMENT',
+        name_th: 'จัดการหมวดหมู่',
+        name_en: 'Category Management',
+        path: '/master-data/categories',
+        icon: 'folder-tree',
+        sort_order: 95,
+      },
+      {
+        code: 'STATUS_ITEM_MANAGEMENT',
+        name_th: 'จัดการสถานะ',
+        name_en: 'Status Item Management',
+        path: '/master-data/statuses',
+        icon: 'tag',
+        sort_order: 96,
+      },
+      {
+        code: 'ORGANIZATION_MANAGEMENT',
+        name_th: 'จัดการองค์กร',
+        name_en: 'Organization Management',
+        path: '/master-data/organizations',
+        icon: 'building',
+        sort_order: 97,
+      },
     ];
 
     const menuIdMap: Record<string, string> = {};
@@ -367,7 +394,28 @@ export async function seed(dataSource: DataSource) {
                           UPDATE: LOADING_POINT_PERMISSIONS.UPDATE,
                           DELETE: LOADING_POINT_PERMISSIONS.DELETE,
                         }[actionCode]
-                      : `${menu.code}_${actionCode}`;
+                      : menu.code === 'CATEGORY_MANAGEMENT'
+                        ? {
+                            CREATE: CATEGORY_PERMISSIONS.CREATE,
+                            READ: CATEGORY_PERMISSIONS.VIEW,
+                            UPDATE: CATEGORY_PERMISSIONS.UPDATE,
+                            DELETE: CATEGORY_PERMISSIONS.DELETE,
+                          }[actionCode]
+                        : menu.code === 'STATUS_ITEM_MANAGEMENT'
+                          ? {
+                              CREATE: STATUS_ITEM_PERMISSIONS.CREATE,
+                              READ: STATUS_ITEM_PERMISSIONS.VIEW,
+                              UPDATE: STATUS_ITEM_PERMISSIONS.UPDATE,
+                              DELETE: STATUS_ITEM_PERMISSIONS.DELETE,
+                            }[actionCode]
+                          : menu.code === 'ORGANIZATION_MANAGEMENT'
+                            ? {
+                                CREATE: ORGANIZATION_PERMISSIONS.CREATE,
+                                READ: ORGANIZATION_PERMISSIONS.VIEW,
+                                UPDATE: ORGANIZATION_PERMISSIONS.UPDATE,
+                                DELETE: ORGANIZATION_PERMISSIONS.DELETE,
+                              }[actionCode]
+                            : `${menu.code}_${actionCode}`;
         const existing = await queryRunner.query(
           `SELECT id FROM iam.permissions WHERE code = $1`,
           [permissionCode],
