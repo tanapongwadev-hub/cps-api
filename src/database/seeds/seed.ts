@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
 import { UNIT_PERMISSIONS } from '../../modules/units/unit-permissions';
+import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissions';
 
 export async function seed(dataSource: DataSource) {
   const configService = new ConfigService();
@@ -237,6 +238,14 @@ export async function seed(dataSource: DataSource) {
         icon: 'ruler',
         sort_order: 90,
       },
+      {
+        code: 'SUPPLIER_MANAGEMENT',
+        name_th: 'จัดการผู้จัดจำหน่าย',
+        name_en: 'Supplier Management',
+        path: '/master-data/suppliers',
+        icon: 'truck',
+        sort_order: 91,
+      },
     ];
 
     const menuIdMap: Record<string, string> = {};
@@ -303,7 +312,14 @@ export async function seed(dataSource: DataSource) {
                   UPDATE: UNIT_PERMISSIONS.UPDATE,
                   DELETE: UNIT_PERMISSIONS.DELETE,
                 }[actionCode]
-              : `${menu.code}_${actionCode}`;
+              : menu.code === 'SUPPLIER_MANAGEMENT'
+                ? {
+                    CREATE: SUPPLIER_PERMISSIONS.CREATE,
+                    READ: SUPPLIER_PERMISSIONS.VIEW,
+                    UPDATE: SUPPLIER_PERMISSIONS.UPDATE,
+                    DELETE: SUPPLIER_PERMISSIONS.DELETE,
+                  }[actionCode]
+                : `${menu.code}_${actionCode}`;
         const existing = await queryRunner.query(
           `SELECT id FROM iam.permissions WHERE code = $1`,
           [permissionCode],

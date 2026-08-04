@@ -16,6 +16,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { AccessControlModule } from './modules/access-control/access-control.module';
 import { MaterialsModule } from './modules/materials/materials.module';
 import { UnitsModule } from './modules/units/units.module';
+import { SuppliersModule } from './modules/suppliers/suppliers.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { UnitsModule } from './modules/units/units.module';
     AccessControlModule,
     MaterialsModule,
     UnitsModule,
+    SuppliersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
