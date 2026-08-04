@@ -1,0 +1,6 @@
+export const UNIT_PERMISSIONS = {
+  VIEW: 'UNIT_VIEW',
+  CREATE: 'UNIT_CREATE',
+  UPDATE: 'UNIT_UPDATE',
+  DELETE: 'UNIT_DELETE',
+} as const;

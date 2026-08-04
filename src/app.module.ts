@@ -15,6 +15,7 @@ import { SessionsModule } from './modules/sessions/sessions.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { AccessControlModule } from './modules/access-control/access-control.module';
 import { MaterialsModule } from './modules/materials/materials.module';
+import { UnitsModule } from './modules/units/units.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { MaterialsModule } from './modules/materials/materials.module';
     AuditLogsModule,
     AccessControlModule,
     MaterialsModule,
+    UnitsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

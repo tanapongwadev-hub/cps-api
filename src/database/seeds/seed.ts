@@ -2,6 +2,7 @@ import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
+import { UNIT_PERMISSIONS } from '../../modules/units/unit-permissions';
 
 export async function seed(dataSource: DataSource) {
   const configService = new ConfigService();
@@ -222,11 +223,19 @@ export async function seed(dataSource: DataSource) {
       },
       {
         code: 'MATERIALS_MANAGEMENTS',
-        name_th: 'à¸ˆà¸±à¸”à¸à¸²à¸£à¸§à¸±à¸ªà¸”à¸¸',
+        name_th: 'จัดการวัสดุ',
         name_en: 'Materials Management',
         path: '/materials',
         icon: 'package',
         sort_order: 80,
+      },
+      {
+        code: 'UNIT_MANAGEMENT',
+        name_th: 'จัดการหน่วยนับ',
+        name_en: 'Unit Management',
+        path: '/master-data/units',
+        icon: 'ruler',
+        sort_order: 90,
       },
     ];
 
@@ -287,7 +296,14 @@ export async function seed(dataSource: DataSource) {
                 UPDATE: MATERIAL_PERMISSIONS.UPDATE,
                 DELETE: MATERIAL_PERMISSIONS.DELETE,
               }[actionCode]
-            : `${menu.code}_${actionCode}`;
+            : menu.code === 'UNIT_MANAGEMENT'
+              ? {
+                  CREATE: UNIT_PERMISSIONS.CREATE,
+                  READ: UNIT_PERMISSIONS.VIEW,
+                  UPDATE: UNIT_PERMISSIONS.UPDATE,
+                  DELETE: UNIT_PERMISSIONS.DELETE,
+                }[actionCode]
+              : `${menu.code}_${actionCode}`;
         const existing = await queryRunner.query(
           `SELECT id FROM iam.permissions WHERE code = $1`,
           [permissionCode],
