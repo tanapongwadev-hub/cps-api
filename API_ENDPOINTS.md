@@ -29,6 +29,9 @@
 | GET | `/users/:id/access-summary` | Bearer + SUPER_ADMIN | Effective menu access grouped by assignment |
 | GET | `/users/:id/assignments` | Bearer + SUPER_ADMIN | ดึง assignments ของผู้ใช้ |
 | POST | `/users/:id/assignments` | Bearer + SUPER_ADMIN | สร้าง assignment ใหม่ |
+| PATCH | `/users/:id/assignments/:assignmentId` | Bearer + SUPER_ADMIN | แก้ไข assignment รายรายการ |
+| DELETE | `/users/:id/assignments/:assignmentId` | Bearer + SUPER_ADMIN | ลบ assignment รายรายการ |
+| DELETE | `/users/:id` | Bearer + SUPER_ADMIN | ลบผู้ใช้ |
 
 ### GET `/users/:id/access-summary`
 
@@ -307,11 +310,175 @@ Response:
 
 > ทุก lookup จะคืนเฉพาะ `isActive = true` เรียงตาม `code ASC`
 
+## Master Data (CRUD pattern เดียวกันทั้ง 8 resource)
+
+Guard: `JwtAuthGuard` + `ActiveAssignmentGuard` + `PermissionGuard` — ต้องส่ง Bearer token, ต้องมี active assignment และต้องมี permission ตามตาราง
+
+| Resource | Base path | Permission prefix |
+|---|---|---|
+| Units | `/units` | `UNIT_*` |
+| Suppliers | `/suppliers` | `SUPPLIER_*` |
+| Categories | `/categories` | `CATEGORY_*` |
+| Delivery Types | `/delivery-types` | `DELIVERY_TYPE_*` |
+| Loading Points | `/loading-points` | `LOADING_POINT_*` |
+| Material Models | `/material-models` | `MATERIAL_MODEL_*` |
+| Organizations | `/organizations` | `ORGANIZATION_*` |
+| Status Items | `/status-items` | `STATUS_ITEM_*` |
+
+ทุก resource มี 6 endpoints เหมือนกัน (แทน `<base>` ด้วย base path และ `<PREFIX>` ด้วย permission prefix):
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| GET | `<base>` | `<PREFIX>_VIEW` | รายการแบบ pagination |
+| GET | `<base>/:id` | `<PREFIX>_VIEW` | ข้อมูลรายการเดียว (404 ถ้าไม่พบ) |
+| POST | `<base>` | `<PREFIX>_CREATE` | สร้างใหม่ (409 ถ้า `code` ซ้ำ — เทียบแบบ case-insensitive) |
+| PATCH | `<base>/:id` | `<PREFIX>_UPDATE` | แก้ไข ทุก field optional แต่ **ต้องส่ง `updatedAt`** (409 ถ้าไม่ตรง) |
+| DELETE | `<base>/:id` | `<PREFIX>_DELETE` | Soft delete (`isActive = false`) |
+| PATCH | `<base>/:id/restore` | `<PREFIX>_UPDATE` | Restore (`isActive = true`) |
+
+หมายเหตุร่วม:
+
+- `code` จะถูก trim + uppercase อัตโนมัติทั้งตอน create และ update
+- ทุก string field ถูก trim; string ว่างจะถูกแปลงเป็น `null`
+- ทุก response object มี field ร่วม: `id`, `isActive`, `createdBy`, `updatedBy`, `createdAt`, `updatedAt`
+- DELETE/restore ไม่ต้องส่ง body และไม่ตรวจ `updatedAt`
+
+### Query parameters ของ list endpoint
+
+| Param | Type | Default | ใช้กับ |
+|---|---|---|---|
+| `page` | int ≥ 1 | `1` | ทุก resource |
+| `limit` | int 1–100 | `20` | ทุก resource |
+| `search` | string | — | ค้นหา `code`, `nameTh`, `nameEn` (ILIKE) |
+| `isActive` | `true` \| `false` | — | ทุก resource |
+| `type` | string | — | `/organizations` เท่านั้น |
+| `module` | string | — | `/status-items` เท่านั้น |
+| `sortBy` | enum | ดูตารางล่าง | ทุก resource |
+| `sortOrder` | `asc` \| `desc` | `asc` | ทุก resource |
+
+| Resource | `sortBy` ที่รองรับ | Default |
+|---|---|---|
+| Units, Suppliers, Delivery Types, Loading Points, Material Models | `code`, `nameTh`, `isActive`, `createdAt`, `updatedAt` | `code` |
+| Categories | `code`, `nameTh`, `sortOrder`, `isActive`, `createdAt`, `updatedAt` | `sortOrder` |
+| Status Items | `code`, `nameTh`, `module`, `sortOrder`, `isActive`, `createdAt`, `updatedAt` | `sortOrder` |
+| Organizations | `code`, `nameTh`, `type`, `isActive`, `createdAt`, `updatedAt` | `code` |
+
+Response ของ list ทุก resource:
+
+```json
+{
+  "items": [],
+  "meta": { "page": 1, "limit": 20, "totalItems": 0, "totalPages": 0 }
+}
+```
+
+### Fields ของแต่ละ resource
+
+**Units** (`/units`)
+
+| Field | Type | Required (create) | Note |
+|---|---|---|---|
+| `code` | string ≤ 20 | ✅ | uppercase, unique |
+| `nameTh` | string ≤ 100 | ✅ | |
+| `nameEn` | string ≤ 100 \| null | — | |
+| `symbol` | string ≤ 20 \| null | — | เช่น `kg`, `ตัน` |
+| `description` | string \| null | — | |
+| `isActive` | bool | — | default `true` |
+
+**Suppliers** (`/suppliers`)
+
+| Field | Type | Required (create) | Note |
+|---|---|---|---|
+| `code` | string ≤ 50 | ✅ | uppercase, unique |
+| `nameTh` | string ≤ 255 | ✅ | |
+| `nameEn` | string ≤ 255 \| null | — | |
+| `taxId` | string ≤ 20 \| null | — | |
+| `contactName` | string ≤ 255 \| null | — | |
+| `telephone` | string ≤ 50 \| null | — | |
+| `email` | string ≤ 255 \| null | — | ต้องเป็นรูปแบบ email |
+| `address` | string \| null | — | |
+| `isActive` | bool | — | default `true` |
+
+**Categories** (`/categories`)
+
+| Field | Type | Required (create) | Note |
+|---|---|---|---|
+| `code` | string ≤ 50 | ✅ | uppercase, unique |
+| `nameTh` | string ≤ 100 | ✅ | |
+| `nameEn` | string ≤ 100 \| null | — | |
+| `parentId` | string \| null | — | ต้องเป็นตัวเลขจำนวนเต็มบวกในรูป string |
+| `sortOrder` | int 0–9999 | — | |
+| `iconColor` | string ≤ 20 \| null | — | |
+| `description` | string \| null | — | |
+| `isActive` | bool | — | default `true` |
+
+**Delivery Types** (`/delivery-types`), **Loading Points** (`/loading-points`), **Material Models** (`/material-models`) — ใช้ชุด field เดียวกัน
+
+| Field | Type | Required (create) | Note |
+|---|---|---|---|
+| `code` | string ≤ 50 | ✅ | uppercase, unique |
+| `nameTh` | string ≤ 100 | ✅ | |
+| `nameEn` | string ≤ 100 \| null | — | |
+| `description` | string \| null | — | |
+| `isActive` | bool | — | default `true` |
+
+**Organizations** (`/organizations`)
+
+| Field | Type | Required (create) | Note |
+|---|---|---|---|
+| `code` | string ≤ 50 | ✅ | uppercase, unique |
+| `nameTh` | string ≤ 255 | ✅ | |
+| `nameEn` | string ≤ 255 \| null | — | |
+| `taxId` | string ≤ 20 \| null | — | |
+| `address` | string \| null | — | |
+| `phone` | string ≤ 50 \| null | — | |
+| `email` | string ≤ 255 \| null | — | ต้องเป็นรูปแบบ email |
+| `website` | string ≤ 255 \| null | — | |
+| `logoUrl` | string ≤ 500 \| null | — | |
+| `parentId` | string \| null | — | ตัวเลขจำนวนเต็มบวกในรูป string |
+| `type` | enum | ✅ | `headquarters` \| `branch` \| `subsidiary` \| `department` (default `department`) |
+| `isActive` | bool | — | default `true` |
+
+**Status Items** (`/status-items`)
+
+| Field | Type | Required (create) | Note |
+|---|---|---|---|
+| `code` | string ≤ 50 | ✅ | uppercase, unique |
+| `nameTh` | string ≤ 100 | ✅ | |
+| `nameEn` | string ≤ 100 \| null | — | |
+| `color` | enum ≤ 20 | ✅ | `info` \| `success` \| `warning` \| `danger` \| `muted` (default `info`) |
+| `module` | string ≤ 50 | ✅ | ชื่อ module ที่สถานะนี้ใช้ |
+| `isDefault` | bool | — | สถานะเริ่มต้นของ module |
+| `sortOrder` | int 0–9999 | — | |
+| `description` | string \| null | — | |
+| `isActive` | bool | — | default `true` |
+
+### ตัวอย่าง create / update
+
+```http
+POST /api/v1/units
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{ "code": "kg", "nameTh": "กิโลกรัม", "nameEn": "Kilogram", "symbol": "kg" }
+```
+
+```http
+PATCH /api/v1/units/1
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{ "nameTh": "กิโลกรัม (แก้ไข)", "updatedAt": "2026-08-05T03:21:44.512Z" }
+```
+
 ## Root
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
 | GET | `/` | Public | Hello message จาก `AppController` (default NestJS) |
+
+> เอกสาร Swagger อยู่ที่ `http://localhost:<port>/api/docs` (นอก global prefix)
+> ไฟล์ที่อัปโหลดเสิร์ฟผ่าน static path `/uploads/...` (นอก global prefix เช่นกัน)
 
 ## คำอธิบาย Auth
 

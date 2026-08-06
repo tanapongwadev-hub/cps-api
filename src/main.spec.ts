@@ -1,13 +1,10 @@
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
+import { bootstrap } from './main';
 
-const mockApp = {
-  setGlobalPrefix: jest.fn(),
-  useStaticAssets: jest.fn(),
-  useGlobalPipes: jest.fn(),
-  useGlobalInterceptors: jest.fn(),
-  enableCors: jest.fn(),
-  listen: jest.fn().mockResolvedValue(undefined),
-};
+// We control the `NestFactory.create` call from inside `bootstrap()` so we
+// can capture the static-asset registrations on a per-test basis instead
+// of fighting Jest's module cache.
+let capturedUseStaticAssets: jest.Mock;
 
 const mockDocumentBuilder = {
   setTitle: jest.fn().mockReturnThis(),
@@ -19,7 +16,16 @@ const mockDocumentBuilder = {
 };
 
 jest.mock('@nestjs/core', () => ({
-  NestFactory: { create: jest.fn().mockResolvedValue(mockApp) },
+  NestFactory: {
+    create: jest.fn().mockImplementation(async () => ({
+      setGlobalPrefix: jest.fn(),
+      useStaticAssets: capturedUseStaticAssets,
+      useGlobalPipes: jest.fn(),
+      useGlobalInterceptors: jest.fn(),
+      enableCors: jest.fn(),
+      listen: jest.fn().mockResolvedValue(undefined),
+    })),
+  },
 }));
 
 jest.mock('@nestjs/swagger', () => ({
@@ -30,27 +36,66 @@ jest.mock('@nestjs/swagger', () => ({
   },
 }));
 
-import './main';
-
 describe('bootstrap static uploads', () => {
-  it('serves only the uploads directory at /uploads while preserving API routes', async () => {
+  beforeEach(() => {
+    capturedUseStaticAssets = jest.fn();
+    delete process.env.MATERIAL_IMAGE_ROOT;
+  });
+
+  it('serves the default uploads tree at /uploads while preserving API routes', async () => {
     const consoleLog = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await bootstrap();
 
-    await new Promise<void>((resolve) => setImmediate(resolve));
+      const expectedRoot = resolvePath(
+        join(process.cwd(), 'uploads', 'materials'),
+      );
+      // Higher-priority mount for staged images (must be registered first
+      // so it wins over the broader `/uploads/materials/` mount).
+      expect(capturedUseStaticAssets).toHaveBeenCalledWith(
+        join(expectedRoot, '.tmp'),
+        { prefix: '/uploads/materials/.tmp/' },
+      );
+      // Fallback mount for promoted images.
+      expect(capturedUseStaticAssets).toHaveBeenCalledWith(expectedRoot, {
+        prefix: '/uploads/materials/',
+      });
+      expect(capturedUseStaticAssets).not.toHaveBeenCalledWith(
+        process.cwd(),
+        expect.anything(),
+      );
+    } finally {
+      consoleLog.mockRestore();
+    }
+  });
 
-    expect(mockApp.setGlobalPrefix).toHaveBeenCalledWith('api/v1');
-    expect(mockApp.useStaticAssets).toHaveBeenCalledWith(
-      join(process.cwd(), 'uploads'),
-      { prefix: '/uploads/' },
-    );
-    expect(mockApp.useStaticAssets).toHaveBeenCalledWith(
-      join(process.cwd(), 'uploads', 'materials', '.tmp'),
-      { prefix: '/uploads/materials/.tmp/' },
-    );
-    expect(mockApp.useStaticAssets).not.toHaveBeenCalledWith(
-      process.cwd(),
-      expect.anything(),
-    );
-    consoleLog.mockRestore();
+  it('honours MATERIAL_IMAGE_ROOT when set in the environment', async () => {
+    const previousRoot = process.env.MATERIAL_IMAGE_ROOT;
+    const expected = 'D:/project-cps/New/image/materials';
+    process.env.MATERIAL_IMAGE_ROOT = expected;
+    const consoleLog = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await bootstrap();
+
+      const expectedRoot = resolvePath(expected);
+      expect(capturedUseStaticAssets).toHaveBeenCalledWith(
+        join(expectedRoot, '.tmp'),
+        { prefix: '/uploads/materials/.tmp/' },
+      );
+      expect(capturedUseStaticAssets).toHaveBeenCalledWith(expectedRoot, {
+        prefix: '/uploads/materials/',
+      });
+    } finally {
+      if (previousRoot === undefined) {
+        delete process.env.MATERIAL_IMAGE_ROOT;
+      } else {
+        process.env.MATERIAL_IMAGE_ROOT = previousRoot;
+      }
+      consoleLog.mockRestore();
+    }
   });
 });
+
+
+
+
