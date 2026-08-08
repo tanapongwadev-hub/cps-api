@@ -7,10 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { Unit } from '../../entities/master/unit.entity';
 import { CreateUnitDto } from './dto/create-unit.dto';
-import {
-  ListUnitsQueryDto,
-  UnitSortBy,
-} from './dto/list-units-query.dto';
+import { ListUnitsQueryDto, UnitSortBy } from './dto/list-units-query.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
 
 const UNIT_SORT_COLUMNS: Record<UnitSortBy, string> = {
@@ -79,8 +76,7 @@ export class UnitsService {
         throw new NotFoundException('Unit not found');
       }
       if (
-        new Date(dto.updatedAt).getTime() !==
-        new Date(unit.updatedAt).getTime()
+        new Date(dto.updatedAt).getTime() !== new Date(unit.updatedAt).getTime()
       ) {
         throw new ConflictException('Unit has been updated');
       }
@@ -123,12 +119,17 @@ export class UnitsService {
 
   async findAll(query: ListUnitsQueryDto): Promise<{
     items: UnitResponse[];
-    meta: { page: number; limit: number; totalItems: number; totalPages: number };
+    meta: {
+      page: number;
+      limit: number;
+      totalItems: number;
+      totalPages: number;
+    };
   }> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const queryBuilder: SelectQueryBuilder<Unit> = this.unitRepository
-      .createQueryBuilder('unit');
+    const queryBuilder: SelectQueryBuilder<Unit> =
+      this.unitRepository.createQueryBuilder('unit');
 
     if (query.search) {
       queryBuilder.andWhere(

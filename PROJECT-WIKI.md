@@ -37,6 +37,7 @@ CPS Access Control เป็นระบบจัดการสิทธิ์�
 ### 1.1 Domain Requirement Documents
 
 - [Material Master Requirements](docs/wiki/material-master.md) — ข้อมูลหลักวัตถุดิบ, Supplier และ Master Data ที่เกี่ยวข้อง
+- [Goods Receipt Requirements](docs/wiki/goods-receipt.md) — เอกสารรับเข้าวัตถุดิบ, ขอบเขตที่ตัดออก และกฎธุรกิจ
 
 ## 2. สถาปัตยกรรม (Architecture)
 
@@ -170,6 +171,29 @@ users ─── user_department_permissions ─── user_department_roles, per
 | `master.supplier_materials` | ตารางกลาง Material และ Supplier | Unique ต่อคู่ `material_id`, `supplier_id`                            |
 
 รายละเอียด requirement และข้อมูลที่อยู่นอกขอบเขตอยู่ใน [Material Master Requirements](docs/wiki/material-master.md)
+
+### 3.4 Inventory Entities (4 tables)
+
+Schema `inventory` เก็บเอกสารธุรกรรม แยกจาก `master` ที่เก็บข้อมูลหลัก
+
+| Table                                  | คำอธิบาย                        | ความสัมพันธ์                                                    |
+| -------------------------------------- | ------------------------------- | --------------------------------------------------------------- |
+| `inventory.goods_receipts`             | หัวเอกสารรับเข้าวัตถุดิบ        | อ้าง `master.organizations` และ `master.suppliers` (หนึ่งราย)   |
+| `inventory.goods_receipt_items`        | รายการรับแต่ละบรรทัด            | อ้าง `master.materials`, `master.units`, `master.reject_reasons` |
+| `inventory.goods_receipt_attachments`  | ไฟล์แนบหลายไฟล์ต่อเอกสาร        | `ON DELETE CASCADE` จากหัวเอกสาร                                |
+| `inventory.document_counters`          | ตัวรันเลขเอกสารต่อองค์กร/งวด    | Unique `(organization_id, doc_type, period)`                     |
+
+`master.reject_reasons` เป็น Master Data เพิ่มเติมที่โมดูลนี้ต้องใช้ โครงสร้างเหมือน `master.loading_points`
+
+ข้อกำหนดสำคัญ:
+
+- จำนวนและราคาใช้ `NUMERIC(18,4)` และ map เป็น `string` ฝั่ง TypeScript ห้ามใช้ float
+- วันที่ทางธุรกิจใช้ `DATE` ไม่ใช่ `TIMESTAMP` เพื่อเลี่ยงปัญหา timezone
+- `goods_receipts` เป็นตารางแรกในระบบที่อ้าง `master.organizations`
+- เอกสารสถานะ `posted` ห้ามแก้ตัวเลข การแก้ทำด้วยการยกเลิกแล้วออกใบใหม่
+- ยังไม่มี stock ledger หรือยอดคงเหลือในเฟสนี้ (ดูเหตุผลใน [Goods Receipt Requirements §2.2](docs/wiki/goods-receipt.md))
+
+รายละเอียด requirement ทั้งหมดอยู่ใน [Goods Receipt Requirements](docs/wiki/goods-receipt.md)
 
 ## 4. กระบวนการเข้าสู่ระบบ (Authentication Flow)
 
@@ -407,6 +431,23 @@ POST /auth/refresh
 - CRUD รายการสถานะ (เช่น รอดำเนินการ, กำลังดำเนินการ, เสร็จสิ้น) พร้อม `color` และ `module` สำหรับจัดกลุ่ม
 - ใช้สิทธิ์ `STATUS_ITEM_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
 
+### 6.19 RejectReasonsModule
+
+- CRUD เหตุผลการปฏิเสธของตอนรับเข้า โครงสร้างเดียวกับ `LoadingPointsModule`
+- ใช้สิทธิ์ `REJECT_REASON_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+- ถูกอ้างจาก `inventory.goods_receipt_items.reject_reason_id` จึงปิดใช้งานด้วย `isActive = false` แทนการลบ
+
+### 6.20 GoodsReceiptsModule
+
+- เอกสารรับเข้าวัตถุดิบ วงจรชีวิต `draft → posted → cancelled`
+- ใช้สิทธิ์ `GOODS_RECEIPT_VIEW/CREATE/UPDATE/DELETE/POST/CANCEL` — `POST` และ `CANCEL` เป็น action ใหม่ใน `iam.actions`
+- `GoodsReceiptAttachmentStorageService` รับ JPEG/PNG/WebP/PDF (10 MiB, 10 ไฟล์ต่อเอกสาร) ใช้ pattern `stage` → `promote` → `discard` แยกจาก `MaterialImageStorageService`
+- ออกเลขเอกสาร `GR-YYYYMM-NNNN` ตอน post โดยล็อกแถวใน `inventory.document_counters` เป็นขั้นตอนสุดท้ายของทรานแซกชัน
+- บังคับให้ทุกบรรทัดมี mapping ที่ active ใน `master.supplier_materials` กับ Supplier ที่หัวเอกสาร
+- Snapshot `material_code`/`material_name` ลงบรรทัดตอน post เพื่อให้เอกสารย้อนหลังไม่เปลี่ยนตาม Master Data
+- อ่านองค์กรจาก config `DEFAULT_ORGANIZATION_CODE` เพราะ `User`/`Department` ยังไม่มีสังกัดองค์กร
+- Dependencies: `AccessControlModule`, entities จาก `inventory` และ `master`
+
 ## 7. Database Migration & Seeding
 
 ### 7.1 คำสั่งที่สำคัญ
@@ -420,11 +461,16 @@ pnpm start:dev       # เริ่ม development server
 
 ### 7.2 Seed Data
 
-- Actions: CREATE, READ, UPDATE, DELETE
+- Actions: CREATE, READ, UPDATE, DELETE, POST, CANCEL
 - Roles: SUPER_ADMIN, ADMIN, USER
-- Role Actions: SUPER_ADMIN/ADMIN ได้ทุก action, USER ได้ CREATE/READ/UPDATE
+- Role Actions: SUPER_ADMIN/ADMIN ได้ทุก action รวม POST/CANCEL, USER ได้ CREATE/READ/UPDATE
 - Departments: WE, PS
+- Default Organization: active `headquarters` ตาม `DEFAULT_ORGANIZATION_CODE` (default `CPS`) เพื่อให้ startup validation ของ Goods Receipt ผ่านบน fresh database
 - Initial Super Admin: username `superadmin` / password `change-me-secure-password`
+
+Permission ถูกสร้างจาก menu × action ผ่าน `src/database/seeds/permission-registry.ts` ซึ่งเป็น registry ที่ map `menu.code` → `action.code` → `permission.code` เมนูที่ไม่อยู่ใน registry จะใช้รูปแบบ `${menuCode}_${actionCode}` และเมนูที่ต้องการ action นอกเหนือชุด CRUD (เช่น `GOODS_RECEIPT` ที่ต้องมี POST/CANCEL) ประกาศไว้ใน `MENU_ACTION_CODES`
+
+`permission-registry.spec.ts` ยืนยันว่า permission code ของทุกเมนูเดิมไม่เปลี่ยนหลัง refactor
 
 ## 8. Environment Variables
 
@@ -438,7 +484,7 @@ Config ที่ใช้ประจำ:
 
 | Config          | File                            | คำอธิบาย                                                                                     |
 | --------------- | ------------------------------- | -------------------------------------------------------------------------------------------- |
-| App config      | `src/config/app.config.ts`      | `NODE_ENV`, `PORT`, `CORS_ORIGIN`                                                            |
+| App config      | `src/config/app.config.ts`      | `NODE_ENV`, `PORT`, `CORS_ORIGIN`, `DEFAULT_ORGANIZATION_CODE`                                |
 | Database config | `src/config/database.config.ts` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE`, `DB_SCHEMA`, `DB_LOGGING` |
 
 สิ่งที่ต้องระวัง:
@@ -447,6 +493,7 @@ Config ที่ใช้ประจำ:
 - `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_DEPARTMENT_SELECTION_SECRET` ไม่มี default (ใช้ `getOrThrow` ใน auth)
 - `CORS_ORIGIN` ถ้าเว้นว่างจะอนุญาตทุก origin (`true`) — ห้ามทิ้งว่างใน production
 - `MAX_FAILED_LOGIN_ATTEMPTS`, `ACCOUNT_LOCK_MINUTES` ใช้ `getEnvNumber` (default `5` และ `15` ตามลำดับ)
+- `DEFAULT_ORGANIZATION_CODE` (default `CPS`) ใช้กำหนดองค์กรของเอกสารรับเข้าวัตถุดิบ ต้องมีแถวใน `master.organizations` ที่ `code` ตรงกันและ `is_active = true` มิฉะนั้นการสร้างใบรับจะตอบ 400
 
 ## 9. Logging
 

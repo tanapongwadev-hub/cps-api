@@ -23,6 +23,8 @@ import { LoadingPointsModule } from './modules/loading-points/loading-points.mod
 import { CategoriesModule } from './modules/categories/categories.module';
 import { StatusItemsModule } from './modules/status-items/status-items.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
+import { RejectReasonsModule } from './modules/reject-reasons/reject-reasons.module';
+import { GoodsReceiptsModule } from './modules/goods-receipts/goods-receipts.module';
 
 @Module({
   imports: [
@@ -56,6 +58,8 @@ import { OrganizationsModule } from './modules/organizations/organizations.modul
     CategoriesModule,
     StatusItemsModule,
     OrganizationsModule,
+    RejectReasonsModule,
+    GoodsReceiptsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

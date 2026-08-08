@@ -84,9 +84,14 @@ export class OrganizationsService {
   async update(id: string, dto: UpdateOrganizationDto, userId: string) {
     return this.dataSource.transaction(async (manager) => {
       const r = manager.getRepository(Organization);
-      const o = await r.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      const o = await r.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
       if (!o) throw new NotFoundException('Organization not found');
-      if (new Date(dto.updatedAt).getTime() !== new Date(o.updatedAt).getTime()) {
+      if (
+        new Date(dto.updatedAt).getTime() !== new Date(o.updatedAt).getTime()
+      ) {
         throw new ConflictException('Organization has been updated');
       }
       const code = dto.code ? this.normalize(dto.code) : o.code;
@@ -106,7 +111,8 @@ export class OrganizationsService {
       if (dto.email !== undefined) o.email = this.toNullable(dto.email);
       if (dto.website !== undefined) o.website = this.toNullable(dto.website);
       if (dto.logoUrl !== undefined) o.logoUrl = this.toNullable(dto.logoUrl);
-      if (dto.parentId !== undefined) o.parentId = this.toNullable(dto.parentId);
+      if (dto.parentId !== undefined)
+        o.parentId = this.toNullable(dto.parentId);
       if (dto.type !== undefined) o.type = dto.type;
       if (dto.isActive !== undefined) o.isActive = dto.isActive;
       o.updatedBy = userId;
@@ -115,17 +121,26 @@ export class OrganizationsService {
     });
   }
 
-  async deactivate(id: string, userId: string) { return this.setActive(id, false, userId); }
-  async restore(id: string, userId: string) { return this.setActive(id, true, userId); }
+  async deactivate(id: string, userId: string) {
+    return this.setActive(id, false, userId);
+  }
+  async restore(id: string, userId: string) {
+    return this.setActive(id, true, userId);
+  }
 
   async findAll(query: ListOrganizationsQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const qb: SelectQueryBuilder<Organization> = this.repo.createQueryBuilder('org');
+    const qb: SelectQueryBuilder<Organization> =
+      this.repo.createQueryBuilder('org');
     if (query.search) {
-      qb.andWhere('(org.code ILIKE :s OR org.name_th ILIKE :s OR org.name_en ILIKE :s OR org.tax_id ILIKE :s)', { s: `%${query.search}%` });
+      qb.andWhere(
+        '(org.code ILIKE :s OR org.name_th ILIKE :s OR org.name_en ILIKE :s OR org.tax_id ILIKE :s)',
+        { s: `%${query.search}%` },
+      );
     }
-    if (query.isActive !== undefined) qb.andWhere('org.is_active = :a', { a: query.isActive });
+    if (query.isActive !== undefined)
+      qb.andWhere('org.is_active = :a', { a: query.isActive });
     if (query.type) qb.andWhere('org.type = :t', { t: query.type });
     const sortColumn = ORG_SORT_COLUMNS[query.sortBy] ?? ORG_SORT_COLUMNS.code;
     const sortOrder = query.sortOrder === 'desc' ? 'DESC' : 'ASC';
@@ -137,7 +152,12 @@ export class OrganizationsService {
       .getManyAndCount();
     return {
       items: rows.map((r) => this.toResponse(r)),
-      meta: { page, limit, totalItems: total, totalPages: Math.ceil(total / limit) },
+      meta: {
+        page,
+        limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
@@ -150,7 +170,10 @@ export class OrganizationsService {
   private async setActive(id: string, isActive: boolean, userId: string) {
     return this.dataSource.transaction(async (manager) => {
       const r = manager.getRepository(Organization);
-      const o = await r.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      const o = await r.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
       if (!o) throw new NotFoundException('Organization not found');
       o.isActive = isActive;
       o.updatedBy = userId;
@@ -159,16 +182,25 @@ export class OrganizationsService {
     });
   }
 
-  private normalize(c: string) { return c.trim().toUpperCase(); }
+  private normalize(c: string) {
+    return c.trim().toUpperCase();
+  }
   private toNullable(v: string | null | undefined) {
     if (v === null || v === undefined) return null;
     const t = v.trim();
     return t === '' ? null : t;
   }
-  private async assertCodeAvailable(r: Repository<Organization>, code: string, currentId?: string) {
-    const q = r.createQueryBuilder('o').where('LOWER(o.code) = LOWER(:c)', { c: code });
+  private async assertCodeAvailable(
+    r: Repository<Organization>,
+    code: string,
+    currentId?: string,
+  ) {
+    const q = r
+      .createQueryBuilder('o')
+      .where('LOWER(o.code) = LOWER(:c)', { c: code });
     if (currentId) q.andWhere('o.id <> :id', { id: currentId });
-    if (await q.getOne()) throw new ConflictException('Organization code already exists');
+    if (await q.getOne())
+      throw new ConflictException('Organization code already exists');
   }
   private async assertActiveParent(r: Repository<Organization>, id: string) {
     const p = await r.findOne({ where: { id, isActive: true } });
@@ -176,12 +208,23 @@ export class OrganizationsService {
   }
   private toResponse(o: Organization): OrganizationResponse {
     return {
-      id: o.id, code: o.code, nameTh: o.nameTh, nameEn: o.nameEn,
-      taxId: o.taxId, address: o.address, phone: o.phone, email: o.email,
-      website: o.website, logoUrl: o.logoUrl, parentId: o.parentId,
-      type: o.type, isActive: o.isActive,
-      createdBy: o.createdBy, updatedBy: o.updatedBy,
-      createdAt: o.createdAt, updatedAt: o.updatedAt,
+      id: o.id,
+      code: o.code,
+      nameTh: o.nameTh,
+      nameEn: o.nameEn,
+      taxId: o.taxId,
+      address: o.address,
+      phone: o.phone,
+      email: o.email,
+      website: o.website,
+      logoUrl: o.logoUrl,
+      parentId: o.parentId,
+      type: o.type,
+      isActive: o.isActive,
+      createdBy: o.createdBy,
+      updatedBy: o.updatedBy,
+      createdAt: o.createdAt,
+      updatedAt: o.updatedAt,
     };
   }
 }

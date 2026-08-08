@@ -132,7 +132,7 @@ describe('UserAccessSummaryService', () => {
   } as UserDepartmentRole;
 
   beforeEach(() => {
-    users = { findOneBy: jest.fn().mockResolvedValue({ id: '7' } as User) };
+    users = { findOneBy: jest.fn().mockResolvedValue({ id: '7' }) };
     assignmentsRepository = { createQueryBuilder: jest.fn() };
     effectivePermissions = {
       getEffectivePermissionCodes: jest.fn().mockResolvedValue([]),
@@ -147,7 +147,12 @@ describe('UserAccessSummaryService', () => {
         ...baseAssignment,
         id: '77',
         department: { id: '4', code: 'QA', nameTh: 'ฝ่ายคุณภาพ' },
-        role: { id: '5', code: 'INSPECTOR', nameTh: 'ผู้ตรวจสอบ', scopeType: 'DEPARTMENT' },
+        role: {
+          id: '5',
+          code: 'INSPECTOR',
+          nameTh: 'ผู้ตรวจสอบ',
+          scopeType: 'DEPARTMENT',
+        },
       } as UserDepartmentRole,
     ];
     assignmentQuery = {
@@ -177,18 +182,12 @@ describe('UserAccessSummaryService', () => {
 
     const result = await service.getForUser('7');
 
-    expect(effectivePermissions.getEffectivePermissionCodes).toHaveBeenNthCalledWith(
-      1,
-      '7',
-      '76',
-      false,
-    );
-    expect(effectivePermissions.getEffectivePermissionCodes).toHaveBeenNthCalledWith(
-      2,
-      '7',
-      '77',
-      false,
-    );
+    expect(
+      effectivePermissions.getEffectivePermissionCodes,
+    ).toHaveBeenNthCalledWith(1, '7', '76', false);
+    expect(
+      effectivePermissions.getEffectivePermissionCodes,
+    ).toHaveBeenNthCalledWith(2, '7', '77', false);
     expect(result.assignments[0]).toMatchObject({
       assignmentId: '76',
       permissions: ['production.read'],
@@ -199,7 +198,10 @@ describe('UserAccessSummaryService', () => {
       permissions: ['quality.read'],
       menuCount: 1,
     });
-    expect(assignmentQuery.orderBy).toHaveBeenCalledWith('udr.createdAt', 'ASC');
+    expect(assignmentQuery.orderBy).toHaveBeenCalledWith(
+      'udr.createdAt',
+      'ASC',
+    );
     expect(assignmentQuery.addOrderBy).toHaveBeenCalledWith('udr.id', 'ASC');
     expect(accessControl.getMenusWithPermissions).toHaveBeenCalledTimes(1);
   });
@@ -225,11 +227,9 @@ describe('UserAccessSummaryService', () => {
 
     await service.getForUser('7');
 
-    expect(effectivePermissions.getEffectivePermissionCodes).toHaveBeenCalledWith(
-      '7',
-      '80',
-      true,
-    );
+    expect(
+      effectivePermissions.getEffectivePermissionCodes,
+    ).toHaveBeenCalledWith('7', '80', true);
     expect(menuTree.buildMenuTree).toHaveBeenCalledWith(
       menuDefinitions,
       ['all.permissions'],
@@ -239,20 +239,29 @@ describe('UserAccessSummaryService', () => {
 
   it.each([
     { label: 'inactive', isActive: false, expiredAt: null },
-    { label: 'expired', isActive: true, expiredAt: new Date('2026-08-01T00:00:00Z') },
-  ])('returns no current access for an $label assignment', async ({ isActive, expiredAt }) => {
-    assignments = [{ ...baseAssignment, isActive, expiredAt }];
+    {
+      label: 'expired',
+      isActive: true,
+      expiredAt: new Date('2026-08-01T00:00:00Z'),
+    },
+  ])(
+    'returns no current access for an $label assignment',
+    async ({ isActive, expiredAt }) => {
+      assignments = [{ ...baseAssignment, isActive, expiredAt }];
 
-    const result = await service.getForUser('7');
+      const result = await service.getForUser('7');
 
-    expect(result.assignments[0]).toMatchObject({
-      permissions: [],
-      menus: [],
-      menuCount: 0,
-    });
-    expect(effectivePermissions.getEffectivePermissionCodes).not.toHaveBeenCalled();
-    expect(menuTree.buildMenuTree).not.toHaveBeenCalled();
-  });
+      expect(result.assignments[0]).toMatchObject({
+        permissions: [],
+        menus: [],
+        menuCount: 0,
+      });
+      expect(
+        effectivePermissions.getEffectivePermissionCodes,
+      ).not.toHaveBeenCalled();
+      expect(menuTree.buildMenuTree).not.toHaveBeenCalled();
+    },
+  );
 
   it('throws NotFoundException when the target user does not exist', async () => {
     users.findOneBy.mockResolvedValue(null);

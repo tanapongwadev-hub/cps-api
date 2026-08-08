@@ -3,4 +3,6 @@ export enum ActionCode {
   READ = 'READ',
   UPDATE = 'UPDATE',
   DELETE = 'DELETE',
+  POST = 'POST',
+  CANCEL = 'CANCEL',
 }

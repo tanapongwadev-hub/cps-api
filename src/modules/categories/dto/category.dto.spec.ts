@@ -3,7 +3,10 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CreateCategoryDto } from './create-category.dto';
 
-async function validateDto<T extends object>(cls: new () => T, payload: unknown) {
+async function validateDto<T extends object>(
+  cls: new () => T,
+  payload: unknown,
+) {
   const instance = plainToInstance(cls, payload);
   const errors = await validate(instance as object, {
     whitelist: true,

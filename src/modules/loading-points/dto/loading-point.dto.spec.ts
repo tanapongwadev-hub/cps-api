@@ -5,7 +5,10 @@ import { CreateLoadingPointDto } from './create-loading-point.dto';
 import { UpdateLoadingPointDto } from './update-loading-point.dto';
 import { ListLoadingPointsQueryDto } from './list-loading-points-query.dto';
 
-async function validateDto<T extends object>(cls: new () => T, payload: unknown) {
+async function validateDto<T extends object>(
+  cls: new () => T,
+  payload: unknown,
+) {
   const instance = plainToInstance(cls, payload);
   const errors = await validate(instance as object, {
     whitelist: true,
@@ -44,14 +47,19 @@ describe('CreateLoadingPointDto', () => {
 
 describe('UpdateLoadingPointDto', () => {
   it('requires updatedAt', async () => {
-    const { errors } = await validateDto(UpdateLoadingPointDto, { nameTh: 'x' });
+    const { errors } = await validateDto(UpdateLoadingPointDto, {
+      nameTh: 'x',
+    });
     expect(errors.some((e) => e.property === 'updatedAt')).toBe(true);
   });
 });
 
 describe('ListLoadingPointsQueryDto', () => {
   it('applies default values', async () => {
-    const { instance, errors } = await validateDto(ListLoadingPointsQueryDto, {});
+    const { instance, errors } = await validateDto(
+      ListLoadingPointsQueryDto,
+      {},
+    );
     expect(errors).toHaveLength(0);
     expect(instance.page).toBe(1);
     expect(instance.limit).toBe(20);

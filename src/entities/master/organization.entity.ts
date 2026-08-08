@@ -7,7 +7,8 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type OrganizationType = 'headquarters' | 'branch' | 'subsidiary' | 'department';
+export type OrganizationType =
+  'headquarters' | 'branch' | 'subsidiary' | 'department';
 
 @Entity('organizations', { schema: 'master' })
 @Index(['code'], { unique: true })

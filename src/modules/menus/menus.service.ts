@@ -143,9 +143,7 @@ export class MenusService {
       ];
       for (const permission of allPermissions) {
         if (!actionMap.has(permission.action.toUpperCase())) {
-          throw new BadRequestException(
-            `Invalid action: ${permission.action}`,
-          );
+          throw new BadRequestException(`Invalid action: ${permission.action}`);
         }
       }
 
@@ -165,9 +163,7 @@ export class MenusService {
         throw new DuplicateResourceException('Menu code');
       }
 
-      const subcodes = (createMenuDto.submenus ?? []).map(
-        (sub) => sub.code,
-      );
+      const subcodes = (createMenuDto.submenus ?? []).map((sub) => sub.code);
       if (new Set(subcodes).size !== subcodes.length) {
         throw new BadRequestException('Duplicate submenu code in request');
       }
@@ -269,13 +265,20 @@ export class MenusService {
     if (updateMenuDto.nameEn !== undefined) menu.nameEn = updateMenuDto.nameEn;
     if (updateMenuDto.path !== undefined) menu.path = updateMenuDto.path;
     if (updateMenuDto.icon !== undefined) menu.icon = updateMenuDto.icon;
-    if (updateMenuDto.sortOrder !== undefined) menu.sortOrder = updateMenuDto.sortOrder;
-    if (updateMenuDto.isVisible !== undefined) menu.isVisible = updateMenuDto.isVisible;
-    if (updateMenuDto.isActive !== undefined) menu.isActive = updateMenuDto.isActive;
+    if (updateMenuDto.sortOrder !== undefined)
+      menu.sortOrder = updateMenuDto.sortOrder;
+    if (updateMenuDto.isVisible !== undefined)
+      menu.isVisible = updateMenuDto.isVisible;
+    if (updateMenuDto.isActive !== undefined)
+      menu.isActive = updateMenuDto.isActive;
 
     if (updateMenuDto.parentId !== undefined) {
       menu.parentId = (updateMenuDto.parentId || null) as string;
-      menu.menuType = updateMenuDto.parentId ? 'SUB' : (updateMenuDto.menuType !== undefined ? this.mapMenuType(updateMenuDto.menuType) : 'MAIN');
+      menu.menuType = updateMenuDto.parentId
+        ? 'SUB'
+        : updateMenuDto.menuType !== undefined
+          ? this.mapMenuType(updateMenuDto.menuType)
+          : 'MAIN';
     } else if (updateMenuDto.menuType !== undefined) {
       menu.menuType = this.mapMenuType(updateMenuDto.menuType);
     }

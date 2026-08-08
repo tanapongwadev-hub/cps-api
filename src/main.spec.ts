@@ -95,7 +95,3 @@ describe('bootstrap static uploads', () => {
     }
   });
 });
-
-
-
-

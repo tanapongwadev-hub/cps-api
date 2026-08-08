@@ -5,7 +5,10 @@ import { CreateSupplierDto } from './create-supplier.dto';
 import { UpdateSupplierDto } from './update-supplier.dto';
 import { ListSuppliersQueryDto } from './list-suppliers-query.dto';
 
-async function validateDto<T extends object>(cls: new () => T, payload: unknown) {
+async function validateDto<T extends object>(
+  cls: new () => T,
+  payload: unknown,
+) {
   const instance = plainToInstance(cls, payload);
   const errors = await validate(instance as object, {
     whitelist: true,

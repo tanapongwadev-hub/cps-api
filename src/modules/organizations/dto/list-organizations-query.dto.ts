@@ -48,9 +48,11 @@ function queryBoolean(params: TransformFnParams): unknown {
 export class ListOrganizationsQueryDto {
   @Type(() => Number) @IsInt() @Min(1) page: number = 1;
   @Type(() => Number) @IsInt() @Min(1) @Max(100) limit: number = 20;
-  @Transform(nullableTrimmedString) @IsOptional() @IsString() search?: string | null;
+  @Transform(nullableTrimmedString) @IsOptional() @IsString() search?:
+    string | null;
   @Transform(queryBoolean) @IsOptional() @IsBoolean() isActive?: boolean;
-  @Transform(nullableTrimmedString) @IsOptional() @IsString() type?: string | null;
+  @Transform(nullableTrimmedString) @IsOptional() @IsString() type?:
+    string | null;
   @IsIn(ORG_SORT_FIELDS) sortBy: OrganizationSortBy = 'code';
   @IsIn(['asc', 'desc']) sortOrder: 'asc' | 'desc' = 'asc';
 }

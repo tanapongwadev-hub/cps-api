@@ -35,12 +35,7 @@ describe('LoadingPointsController', () => {
       ['findAll', '/', RequestMethod.GET, LOADING_POINT_PERMISSIONS.VIEW],
       ['findOne', ':id', RequestMethod.GET, LOADING_POINT_PERMISSIONS.VIEW],
       ['create', '/', RequestMethod.POST, LOADING_POINT_PERMISSIONS.CREATE],
-      [
-        'update',
-        ':id',
-        RequestMethod.PATCH,
-        LOADING_POINT_PERMISSIONS.UPDATE,
-      ],
+      ['update', ':id', RequestMethod.PATCH, LOADING_POINT_PERMISSIONS.UPDATE],
       [
         'deactivate',
         ':id',
@@ -77,7 +72,10 @@ describe('LoadingPointsController', () => {
   it('forwards route parameters, DTOs, and current user IDs', async () => {
     const query = { page: 1 } as any;
     const createDto = { code: 'LP-01', nameTh: 'จุดขนถ่าย A' } as any;
-    const updateDto = { nameTh: 'x', updatedAt: '2026-08-04T00:00:00.000Z' } as any;
+    const updateDto = {
+      nameTh: 'x',
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    } as any;
 
     await controller.findAll(query);
     await controller.findOne('20');

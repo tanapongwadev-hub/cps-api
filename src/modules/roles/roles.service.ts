@@ -25,7 +25,10 @@ export class RolesService {
   /** ดึงจำนวนสิทธิ์ (role_actions ที่ active) และจำนวนผู้ใช้งานของแต่ละ role */
   private async getRoleCounts(roleIds: string[]) {
     if (roleIds.length === 0) {
-      return { permissionCounts: new Map<string, number>(), userCounts: new Map<string, number>() };
+      return {
+        permissionCounts: new Map<string, number>(),
+        userCounts: new Map<string, number>(),
+      };
     }
 
     const permissionRows = await this.roleActionRepository
@@ -47,8 +50,12 @@ export class RolesService {
       .getRawMany<{ roleId: string; count: string }>();
 
     return {
-      permissionCounts: new Map(permissionRows.map((r) => [String(r.roleId), Number(r.count)])),
-      userCounts: new Map(userRows.map((r) => [String(r.roleId), Number(r.count)])),
+      permissionCounts: new Map(
+        permissionRows.map((r) => [String(r.roleId), Number(r.count)]),
+      ),
+      userCounts: new Map(
+        userRows.map((r) => [String(r.roleId), Number(r.count)]),
+      ),
     };
   }
 
@@ -62,7 +69,9 @@ export class RolesService {
   }
 
   /** ดึง action codes ของหลาย role พร้อมกัน (query เดียว) */
-  private async getRoleActionCodesMap(roleIds: string[]): Promise<Map<string, string[]>> {
+  private async getRoleActionCodesMap(
+    roleIds: string[],
+  ): Promise<Map<string, string[]>> {
     const map = new Map<string, string[]>();
     if (roleIds.length === 0) return map;
 
@@ -85,7 +94,9 @@ export class RolesService {
     });
     const wantedActionIds = new Set(actions.map((a) => String(a.id)));
 
-    const existing = await this.roleActionRepository.find({ where: { roleId } });
+    const existing = await this.roleActionRepository.find({
+      where: { roleId },
+    });
     for (const ra of existing) {
       const shouldBeActive = wantedActionIds.has(String(ra.actionId));
       if (ra.isActive !== shouldBeActive) {
@@ -102,7 +113,12 @@ export class RolesService {
     }
   }
 
-  async findAll(page: number = 1, limit: number = 20, search?: string, status?: string) {
+  async findAll(
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    status?: string,
+  ) {
     const queryBuilder = this.roleRepository
       .createQueryBuilder('role')
       .select([
@@ -184,7 +200,9 @@ export class RolesService {
     }
 
     const { actionCodes, ...roleData } = createRoleDto;
-    const role = await this.roleRepository.save(this.roleRepository.create(roleData));
+    const role = await this.roleRepository.save(
+      this.roleRepository.create(roleData),
+    );
 
     if (actionCodes?.length) {
       await this.syncRoleActions(String(role.id), actionCodes);

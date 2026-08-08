@@ -400,7 +400,7 @@ Response:
 
 > ทุก lookup จะคืนเฉพาะ `isActive = true` เรียงตาม `code ASC`
 
-## Master Data (CRUD pattern เดียวกันทั้ง 8 resource)
+## Master Data (CRUD pattern เดียวกันทั้ง 9 resource)
 
 Guard: `JwtAuthGuard` + `ActiveAssignmentGuard` + `PermissionGuard` — ต้องส่ง Bearer token, ต้องมี active assignment และต้องมี permission ตามตาราง
 
@@ -414,6 +414,7 @@ Guard: `JwtAuthGuard` + `ActiveAssignmentGuard` + `PermissionGuard` — ต้�
 | Material Models | `/material-models` | `MATERIAL_MODEL_*` |
 | Organizations | `/organizations` | `ORGANIZATION_*` |
 | Status Items | `/status-items` | `STATUS_ITEM_*` |
+| Reject Reasons | `/reject-reasons` | `REJECT_REASON_*` |
 
 ทุก resource มี 6 endpoints เหมือนกัน (แทน `<base>` ด้วย base path และ `<PREFIX>` ด้วย permission prefix):
 
@@ -543,6 +544,16 @@ Response ของ list ทุก resource:
 | `description` | string \| null | — | |
 | `isActive` | bool | — | default `true` |
 
+**Reject Reasons** (`/reject-reasons`) — โครงสร้างเหมือน `/loading-points`, `/delivery-types`, `/material-models` ใช้กับ `rejectReasonId` ใน Goods Receipt items
+
+| Field | Type | Required (create) | Note |
+|---|---|---|---|
+| `code` | string ≤ 50 | ✅ | uppercase, unique |
+| `nameTh` | string ≤ 100 | ✅ | |
+| `nameEn` | string ≤ 100 \| null | — | |
+| `description` | string \| null | — | |
+| `isActive` | bool | — | default `true` |
+
 ### ตัวอย่าง create / update
 
 ```http
@@ -560,6 +571,123 @@ Content-Type: application/json
 
 { "nameTh": "กิโลกรัม (แก้ไข)", "updatedAt": "2026-08-05T03:21:44.512Z" }
 ```
+
+## Goods Receipts
+
+Guard: `JwtAuthGuard` + `ActiveAssignmentGuard` + `PermissionGuard`
+
+Requirement ทั้งหมดอยู่ใน [docs/wiki/goods-receipt.md](docs/wiki/goods-receipt.md)
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| GET | `/goods-receipts` | `GOODS_RECEIPT_VIEW` | รายการ พร้อม filter/sort/pagination |
+| GET | `/goods-receipts/lookups` | `GOODS_RECEIPT_VIEW` | Supplier, Material (กรองด้วย `?supplierId=`), Unit, Reject Reason |
+| GET | `/goods-receipts/:id` | `GOODS_RECEIPT_VIEW` | หัวเอกสาร + บรรทัด + ไฟล์แนบ |
+| POST | `/goods-receipts` | `GOODS_RECEIPT_CREATE` | สร้าง draft |
+| PATCH | `/goods-receipts/:id` | `GOODS_RECEIPT_UPDATE` | แก้ draft (ต้องส่ง `updatedAt`) |
+| DELETE | `/goods-receipts/:id` | `GOODS_RECEIPT_DELETE` | ลบ draft (hard delete, 204) |
+| POST | `/goods-receipts/:id/post` | `GOODS_RECEIPT_POST` | รับรองเอกสาร → ออกเลขที่ |
+| POST | `/goods-receipts/:id/cancel` | `GOODS_RECEIPT_CANCEL` | ยกเลิก (ต้องส่ง `cancelReason`) |
+| POST | `/goods-receipts/attachments` | `GOODS_RECEIPT_CREATE` หรือ `UPDATE` | Stage ไฟล์ (multipart `file`) |
+| POST | `/goods-receipts/:id/attachments` | `GOODS_RECEIPT_CREATE` หรือ `UPDATE` | ผูกไฟล์ที่ stage แล้วเข้าเอกสาร |
+| DELETE | `/goods-receipts/:id/attachments/:attachmentId` | `GOODS_RECEIPT_UPDATE` | ลบไฟล์แนบ (เฉพาะ draft, 204) |
+
+### Query Parameters ของ `GET /goods-receipts`
+
+| Parameter | ชนิด | ค่าเริ่มต้น | คำอธิบาย |
+|---|---|---|---|
+| `page` | number | 1 | |
+| `limit` | number | 20 | สูงสุด 100 |
+| `search` | string | — | ค้นใน `receiptNo` และ `supplierDocNo` |
+| `status` | enum | ไม่กรอง | `draft` / `posted` / `cancelled` — แสดงทุกสถานะรวมที่ยกเลิกถ้าไม่ระบุ |
+| `supplierId` | string | — | |
+| `materialId` | string | — | มีวัตถุดิบนี้อยู่ในบรรทัดใดบรรทัดหนึ่ง |
+| `receiptDateFrom` | `YYYY-MM-DD` | — | |
+| `receiptDateTo` | `YYYY-MM-DD` | — | |
+| `hasRejection` | boolean | — | `true` = มีบรรทัดที่ปฏิเสธของ |
+| `sortBy` | enum | `receiptDate` | `receiptNo` / `receiptDate` / `supplierDocNo` / `createdAt` / `updatedAt` |
+| `sortOrder` | enum | `desc` | |
+
+รายการส่งกลับเฉพาะหัวเอกสาร + `supplier` + `itemCount` + `totalQtyReceived` ไม่ส่งบรรทัดทั้งหมด
+
+### `POST /goods-receipts`
+
+```json
+{
+  "supplierId": "2",
+  "receiptDate": "2026-08-08",
+  "poNo": "PO-2026-0142",
+  "supplierDocNo": "DN-55031",
+  "supplierDocDate": "2026-08-07",
+  "noSupplierDocument": false,
+  "remark": "รถมาถึง 08:30",
+  "items": [
+    {
+      "materialId": "5",
+      "qtyDelivered": "1000.0000",
+      "qtyReceived": "970.0000",
+      "qtyRejected": "30.0000",
+      "rejectReasonId": "7",
+      "rejectNote": "ถุงขาด 3 ใบ",
+      "lotNo": "L2608-01",
+      "productionDate": "2026-08-01",
+      "expiryDate": "2027-02-01",
+      "unitPrice": "112.5000",
+      "lineAmount": "109125.0000"
+    }
+  ],
+  "attachments": [
+    {
+      "docType": "DELIVERY_NOTE",
+      "filePath": "/uploads/goods-receipts/.tmp/9f1c....pdf",
+      "fileName": "DN-55031.pdf"
+    }
+  ]
+}
+```
+
+กฎที่ตรวจ:
+
+- `receiptDate` ห้ามเป็นวันในอนาคต
+- `qtyReceived + qtyRejected <= qtyDelivered` และต้องมีอย่างน้อยหนึ่งค่ามากกว่า 0
+- `rejectReasonId` จำเป็นเมื่อ `qtyRejected > 0` และต้องว่างเมื่อไม่ปฏิเสธ
+- ห้าม `(materialId, lotNo)` ซ้ำในเอกสารเดียว วัตถุดิบซ้ำต่าง lot ได้
+- ทุกวัตถุดิบต้องมี mapping ที่ active ใน `master.supplier_materials` กับ Supplier ที่ระบุ มิฉะนั้นตอบ 400
+- จำนวนและราคาส่งเป็น string (รับ number ได้แต่จะถูกแปลง) ทศนิยมไม่เกิน 4 ตำแหน่ง
+
+### `POST /goods-receipts/:id/post`
+
+ไม่ต้องส่ง body ระบบจะ:
+
+1. ตรวจว่าเอกสารเป็น `draft` และมีอย่างน้อย 1 บรรทัด
+2. ตรวจว่ามี `supplierDocNo` เว้นแต่ `noSupplierDocument = true`
+3. Snapshot `materialCode`/`materialName` ลงทุกบรรทัด
+4. ออกเลข `GR-YYYYMM-NNNN` จาก `inventory.document_counters`
+5. ตั้ง `status = posted`, `postedBy`, `postedAt`
+
+หลัง post แก้ได้เฉพาะ `remark` และการเพิ่มไฟล์แนบ — ตอบ 409 ถ้าพยายามแก้อย่างอื่น
+
+### `POST /goods-receipts/:id/cancel`
+
+```json
+{ "cancelReason": "กรอกเลขใบส่งของผิด" }
+```
+
+ยกเลิกได้เฉพาะเอกสารที่ `posted` เอกสารยังคงเลขที่เดิมและยังปรากฏในรายการ
+
+### `POST /goods-receipts/attachments`
+
+multipart form-data field ชื่อ `file` — รับ JPEG/PNG/WebP/PDF ไม่เกิน 10 MiB ต่อไฟล์ และ 10 ไฟล์ต่อเอกสาร ตรวจ magic bytes ทุกชนิด
+
+Response คือ metadata ที่ต้องส่งกลับใน `attachments[]` ของ create/update หรือ `POST /goods-receipts/:id/attachments` ไฟล์ใน `.tmp/` จะถูกลบอัตโนมัติหลัง 24 ชั่วโมงถ้าไม่ถูกผูกกับเอกสาร
+
+### Error ที่พบบ่อยของ Goods Receipts
+
+| Code | เมื่อไหร่ |
+|---|---|
+| `400` | validation ไม่ผ่าน, `qtyReceived + qtyRejected > qtyDelivered`, ขาด `rejectReasonId` ตอน `qtyRejected > 0`, material ไม่มี mapping active กับ supplier ที่ระบุ |
+| `404` | ไม่พบเอกสาร หรือไม่พบไฟล์แนบ |
+| `409` | `supplierDocNo` ซ้ำกับ supplier เดียวกัน (เอกสารที่ไม่ cancelled), `updatedAt` ไม่ตรง (optimistic lock), หรือ action ไม่ตรงกับสถานะเอกสาร (เช่น post เอกสารที่ posted แล้ว, แก้เอกสารที่ posted, ลบไฟล์แนบของเอกสาร posted) |
 
 ## Root
 

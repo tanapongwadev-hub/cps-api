@@ -113,10 +113,7 @@ export class DeliveryTypesService {
     });
   }
 
-  async deactivate(
-    id: string,
-    userId: string,
-  ): Promise<DeliveryTypeResponse> {
+  async deactivate(id: string, userId: string): Promise<DeliveryTypeResponse> {
     return this.setActive(id, false, userId);
   }
 
@@ -126,7 +123,12 @@ export class DeliveryTypesService {
 
   async findAll(query: ListDeliveryTypesQueryDto): Promise<{
     items: DeliveryTypeResponse[];
-    meta: { page: number; limit: number; totalItems: number; totalPages: number };
+    meta: {
+      page: number;
+      limit: number;
+      totalItems: number;
+      totalPages: number;
+    };
   }> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;

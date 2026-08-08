@@ -5,7 +5,10 @@ import { CreateMaterialModelDto } from './create-material-model.dto';
 import { UpdateMaterialModelDto } from './update-material-model.dto';
 import { ListMaterialModelsQueryDto } from './list-material-models-query.dto';
 
-async function validateDto<T extends object>(cls: new () => T, payload: unknown) {
+async function validateDto<T extends object>(
+  cls: new () => T,
+  payload: unknown,
+) {
   const instance = plainToInstance(cls, payload);
   const errors = await validate(instance as object, {
     whitelist: true,
@@ -44,14 +47,19 @@ describe('CreateMaterialModelDto', () => {
 
 describe('UpdateMaterialModelDto', () => {
   it('requires updatedAt', async () => {
-    const { errors } = await validateDto(UpdateMaterialModelDto, { nameTh: 'x' });
+    const { errors } = await validateDto(UpdateMaterialModelDto, {
+      nameTh: 'x',
+    });
     expect(errors.some((e) => e.property === 'updatedAt')).toBe(true);
   });
 });
 
 describe('ListMaterialModelsQueryDto', () => {
   it('applies default values', async () => {
-    const { instance, errors } = await validateDto(ListMaterialModelsQueryDto, {});
+    const { instance, errors } = await validateDto(
+      ListMaterialModelsQueryDto,
+      {},
+    );
     expect(errors).toHaveLength(0);
     expect(instance.page).toBe(1);
     expect(instance.limit).toBe(20);

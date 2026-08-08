@@ -36,12 +36,7 @@ describe('SuppliersController', () => {
       ['findOne', ':id', RequestMethod.GET, SUPPLIER_PERMISSIONS.VIEW],
       ['create', '/', RequestMethod.POST, SUPPLIER_PERMISSIONS.CREATE],
       ['update', ':id', RequestMethod.PATCH, SUPPLIER_PERMISSIONS.UPDATE],
-      [
-        'deactivate',
-        ':id',
-        RequestMethod.DELETE,
-        SUPPLIER_PERMISSIONS.DELETE,
-      ],
+      ['deactivate', ':id', RequestMethod.DELETE, SUPPLIER_PERMISSIONS.DELETE],
       [
         'restore',
         ':id/restore',
@@ -74,7 +69,10 @@ describe('SuppliersController', () => {
   it('forwards route parameters, DTOs, and current user IDs', async () => {
     const query = { page: 1 } as any;
     const createDto = { code: 'SUP-001', nameTh: 'บริษัท' } as any;
-    const updateDto = { nameTh: 'x', updatedAt: '2026-08-04T00:00:00.000Z' } as any;
+    const updateDto = {
+      nameTh: 'x',
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    } as any;
 
     await controller.findAll(query);
     await controller.findOne('20');

@@ -88,7 +88,7 @@ describe('UnitsService', () => {
 
   describe('create', () => {
     it('normalizes the code to uppercase, saves audit ids, and returns the row', async () => {
-      const dto: CreateUnitDto = { code: ' pcs ', nameTh: ' ชิ้น ' } as any;
+      const dto: CreateUnitDto = { code: ' pcs ', nameTh: ' ชิ้น ' };
       const saved = makeRow({ code: 'PCS', nameTh: 'ชิ้น' });
       unitRepository.findOne.mockResolvedValue(null);
       unitRepository.save.mockResolvedValue(saved);
@@ -130,7 +130,11 @@ describe('UnitsService', () => {
     it('rejects with NotFoundException when id is missing', async () => {
       unitRepository.findOne.mockResolvedValue(null);
       await expect(
-        service.update('99', { updatedAt: new Date().toISOString() } as any, 'u'),
+        service.update(
+          '99',
+          { updatedAt: new Date().toISOString() } as any,
+          'u',
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -140,7 +144,11 @@ describe('UnitsService', () => {
       });
       unitRepository.findOne.mockResolvedValue(row);
       await expect(
-        service.update('1', { nameTh: 'x', updatedAt: '2026-01-01T00:00:00.000Z' } as any, 'u'),
+        service.update(
+          '1',
+          { nameTh: 'x', updatedAt: '2026-01-01T00:00:00.000Z' } as any,
+          'u',
+        ),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -153,7 +161,7 @@ describe('UnitsService', () => {
       const dto: UpdateUnitDto = {
         nameTh: 'กิโลกรัม',
         updatedAt: '2026-08-04T00:00:00.000Z',
-      } as any;
+      };
 
       const result = await service.update('1', dto, 'user-2');
 

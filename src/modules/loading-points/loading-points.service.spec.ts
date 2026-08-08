@@ -65,9 +65,7 @@ describe('LoadingPointsService', () => {
       createQueryBuilder: jest.fn(() => makeQueryBuilder()),
     };
     dataSource = {
-      transaction: jest.fn(async (cb) =>
-        cb({ getRepository: () => repo }),
-      ),
+      transaction: jest.fn(async (cb) => cb({ getRepository: () => repo })),
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -84,7 +82,7 @@ describe('LoadingPointsService', () => {
   describe('create', () => {
     it('normalizes code, trims strings, saves audit ids', async () => {
       const result = await service.create(
-        { code: ' lp-01 ', nameTh: ' จุดขนถ่าย A ' } as any,
+        { code: ' lp-01 ', nameTh: ' จุดขนถ่าย A ' },
         'user-1',
       );
       expect(repo.create).toHaveBeenCalledWith(
@@ -102,10 +100,7 @@ describe('LoadingPointsService', () => {
       builder.getOne.mockResolvedValue(makeRow());
       repo.createQueryBuilder.mockReturnValue(builder);
       await expect(
-        service.create(
-          { code: 'LP-01', nameTh: 'จุดขนถ่าย A' } as any,
-          'u',
-        ),
+        service.create({ code: 'LP-01', nameTh: 'จุดขนถ่าย A' } as any, 'u'),
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });
@@ -114,7 +109,11 @@ describe('LoadingPointsService', () => {
     it('rejects with NotFound when id missing', async () => {
       repo.findOne.mockResolvedValue(null);
       await expect(
-        service.update('99', { updatedAt: new Date().toISOString() } as any, 'u'),
+        service.update(
+          '99',
+          { updatedAt: new Date().toISOString() } as any,
+          'u',
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -139,7 +138,7 @@ describe('LoadingPointsService', () => {
         {
           nameTh: 'จุดขนถ่าย B',
           updatedAt: '2026-08-04T00:00:00.000Z',
-        } as any,
+        },
         'user-2',
       );
       expect(result.nameTh).toBe('จุดขนถ่าย B');

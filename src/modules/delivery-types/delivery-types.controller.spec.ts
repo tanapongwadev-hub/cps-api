@@ -35,12 +35,7 @@ describe('DeliveryTypesController', () => {
       ['findAll', '/', RequestMethod.GET, DELIVERY_TYPE_PERMISSIONS.VIEW],
       ['findOne', ':id', RequestMethod.GET, DELIVERY_TYPE_PERMISSIONS.VIEW],
       ['create', '/', RequestMethod.POST, DELIVERY_TYPE_PERMISSIONS.CREATE],
-      [
-        'update',
-        ':id',
-        RequestMethod.PATCH,
-        DELIVERY_TYPE_PERMISSIONS.UPDATE,
-      ],
+      ['update', ':id', RequestMethod.PATCH, DELIVERY_TYPE_PERMISSIONS.UPDATE],
       [
         'deactivate',
         ':id',
@@ -77,7 +72,10 @@ describe('DeliveryTypesController', () => {
   it('forwards route parameters, DTOs, and current user IDs', async () => {
     const query = { page: 1 } as any;
     const createDto = { code: 'DT-01', nameTh: 'จัดส่งด่วน' } as any;
-    const updateDto = { nameTh: 'x', updatedAt: '2026-08-04T00:00:00.000Z' } as any;
+    const updateDto = {
+      nameTh: 'x',
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    } as any;
 
     await controller.findAll(query);
     await controller.findOne('20');

@@ -1,15 +1,11 @@
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
-import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
-import { UNIT_PERMISSIONS } from '../../modules/units/unit-permissions';
-import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissions';
-import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
-import { DELIVERY_TYPE_PERMISSIONS } from '../../modules/delivery-types/delivery-type-permissions';
-import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
-import { CATEGORY_PERMISSIONS } from '../../modules/categories/category-permissions';
-import { STATUS_ITEM_PERMISSIONS } from '../../modules/status-items/status-item-permissions';
-import { ORGANIZATION_PERMISSIONS } from '../../modules/organizations/organization-permissions';
+import {
+  DOCUMENT_ACTION_CODES,
+  resolveActionCodes,
+  resolvePermissionCode,
+} from './permission-registry';
 
 export async function seed(dataSource: DataSource) {
   const configService = new ConfigService();
@@ -29,6 +25,18 @@ export async function seed(dataSource: DataSource) {
       { code: 'READ', name_th: 'อ่าน', name_en: 'Read', sort_order: 2 },
       { code: 'UPDATE', name_th: 'แก้ไข', name_en: 'Update', sort_order: 3 },
       { code: 'DELETE', name_th: 'ลบ', name_en: 'Delete', sort_order: 4 },
+      {
+        code: 'POST',
+        name_th: 'รับรองเอกสาร',
+        name_en: 'Post',
+        sort_order: 5,
+      },
+      {
+        code: 'CANCEL',
+        name_th: 'ยกเลิกเอกสาร',
+        name_en: 'Cancel',
+        sort_order: 6,
+      },
     ];
 
     for (const action of actions) {
@@ -48,6 +56,31 @@ export async function seed(dataSource: DataSource) {
         console.log(`  - Action already exists: ${action.code}`);
       }
     }
+
+    // Seed default organization required by Goods Receipt. Organizations are
+    // intentionally master data, but a fresh database must have the configured
+    // default before the API's startup validation can pass.
+    console.log('Seeding default organization...');
+    const configuredOrganizationCode = configService.get<string>(
+      'DEFAULT_ORGANIZATION_CODE',
+      'CPS',
+    );
+    const defaultOrganizationCode = configuredOrganizationCode.trim().toUpperCase();
+    if (!defaultOrganizationCode) {
+      throw new Error('DEFAULT_ORGANIZATION_CODE must not be empty');
+    }
+    await queryRunner.query(
+      `INSERT INTO master.organizations
+         (code, name_th, name_en, type, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, 'headquarters', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT (code) DO NOTHING`,
+      [
+        defaultOrganizationCode,
+        `องค์กร ${defaultOrganizationCode}`,
+        `${defaultOrganizationCode} Organization`,
+      ],
+    );
+    console.log(`  ✓ Ensured default organization: ${defaultOrganizationCode}`);
 
     // Seed Roles
     console.log('Seeding roles...');
@@ -98,11 +131,15 @@ export async function seed(dataSource: DataSource) {
       { role_code: 'SUPER_ADMIN', action_code: 'READ' },
       { role_code: 'SUPER_ADMIN', action_code: 'UPDATE' },
       { role_code: 'SUPER_ADMIN', action_code: 'DELETE' },
+      { role_code: 'SUPER_ADMIN', action_code: 'POST' },
+      { role_code: 'SUPER_ADMIN', action_code: 'CANCEL' },
       // ADMIN gets all actions
       { role_code: 'ADMIN', action_code: 'CREATE' },
       { role_code: 'ADMIN', action_code: 'READ' },
       { role_code: 'ADMIN', action_code: 'UPDATE' },
       { role_code: 'ADMIN', action_code: 'DELETE' },
+      { role_code: 'ADMIN', action_code: 'POST' },
+      { role_code: 'ADMIN', action_code: 'CANCEL' },
       // USER gets CREATE, READ, UPDATE only
       { role_code: 'USER', action_code: 'CREATE' },
       { role_code: 'USER', action_code: 'READ' },
@@ -300,6 +337,22 @@ export async function seed(dataSource: DataSource) {
         icon: 'building',
         sort_order: 97,
       },
+      {
+        code: 'GOODS_RECEIPT',
+        name_th: 'รับเข้าวัตถุดิบ',
+        name_en: 'Goods Receipt',
+        path: '/goods-receipts',
+        icon: 'inbox',
+        sort_order: 85,
+      },
+      {
+        code: 'REJECT_REASON_MANAGEMENT',
+        name_th: 'จัดการเหตุผลการปฏิเสธ',
+        name_en: 'Reject Reason Management',
+        path: '/master-data/reject-reasons',
+        icon: 'x-circle',
+        sort_order: 98,
+      },
     ];
 
     const menuIdMap: Record<string, string> = {};
@@ -333,9 +386,8 @@ export async function seed(dataSource: DataSource) {
 
     // Seed Permissions for all menus x actions
     console.log('Seeding permissions...');
-    const actionCodes = ['CREATE', 'READ', 'UPDATE', 'DELETE'];
     const actionIdMap: Record<string, string> = {};
-    for (const code of actionCodes) {
+    for (const code of DOCUMENT_ACTION_CODES) {
       const result = await queryRunner.query(
         `SELECT id FROM iam.actions WHERE code = $1`,
         [code],
@@ -347,75 +399,11 @@ export async function seed(dataSource: DataSource) {
 
     for (const menu of menus) {
       const menuId = menuIdMap[menu.code];
-      for (const actionCode of actionCodes) {
+      for (const actionCode of resolveActionCodes(menu.code)) {
         const actionId = actionIdMap[actionCode];
         if (!actionId) continue;
 
-        const permissionCode =
-          menu.code === 'MATERIALS_MANAGEMENTS'
-            ? {
-                CREATE: MATERIAL_PERMISSIONS.CREATE,
-                READ: MATERIAL_PERMISSIONS.VIEW,
-                UPDATE: MATERIAL_PERMISSIONS.UPDATE,
-                DELETE: MATERIAL_PERMISSIONS.DELETE,
-              }[actionCode]
-            : menu.code === 'UNIT_MANAGEMENT'
-              ? {
-                  CREATE: UNIT_PERMISSIONS.CREATE,
-                  READ: UNIT_PERMISSIONS.VIEW,
-                  UPDATE: UNIT_PERMISSIONS.UPDATE,
-                  DELETE: UNIT_PERMISSIONS.DELETE,
-                }[actionCode]
-              : menu.code === 'SUPPLIER_MANAGEMENT'
-                ? {
-                    CREATE: SUPPLIER_PERMISSIONS.CREATE,
-                    READ: SUPPLIER_PERMISSIONS.VIEW,
-                    UPDATE: SUPPLIER_PERMISSIONS.UPDATE,
-                    DELETE: SUPPLIER_PERMISSIONS.DELETE,
-                  }[actionCode]
-                : menu.code === 'MATERIAL_MODEL_MANAGEMENT'
-                  ? {
-                      CREATE: MATERIAL_MODEL_PERMISSIONS.CREATE,
-                      READ: MATERIAL_MODEL_PERMISSIONS.VIEW,
-                      UPDATE: MATERIAL_MODEL_PERMISSIONS.UPDATE,
-                      DELETE: MATERIAL_MODEL_PERMISSIONS.DELETE,
-                    }[actionCode]
-                  : menu.code === 'DELIVERY_TYPE_MANAGEMENT'
-                    ? {
-                        CREATE: DELIVERY_TYPE_PERMISSIONS.CREATE,
-                        READ: DELIVERY_TYPE_PERMISSIONS.VIEW,
-                        UPDATE: DELIVERY_TYPE_PERMISSIONS.UPDATE,
-                        DELETE: DELIVERY_TYPE_PERMISSIONS.DELETE,
-                      }[actionCode]
-                    : menu.code === 'LOADING_POINT_MANAGEMENT'
-                      ? {
-                          CREATE: LOADING_POINT_PERMISSIONS.CREATE,
-                          READ: LOADING_POINT_PERMISSIONS.VIEW,
-                          UPDATE: LOADING_POINT_PERMISSIONS.UPDATE,
-                          DELETE: LOADING_POINT_PERMISSIONS.DELETE,
-                        }[actionCode]
-                      : menu.code === 'CATEGORY_MANAGEMENT'
-                        ? {
-                            CREATE: CATEGORY_PERMISSIONS.CREATE,
-                            READ: CATEGORY_PERMISSIONS.VIEW,
-                            UPDATE: CATEGORY_PERMISSIONS.UPDATE,
-                            DELETE: CATEGORY_PERMISSIONS.DELETE,
-                          }[actionCode]
-                        : menu.code === 'STATUS_ITEM_MANAGEMENT'
-                          ? {
-                              CREATE: STATUS_ITEM_PERMISSIONS.CREATE,
-                              READ: STATUS_ITEM_PERMISSIONS.VIEW,
-                              UPDATE: STATUS_ITEM_PERMISSIONS.UPDATE,
-                              DELETE: STATUS_ITEM_PERMISSIONS.DELETE,
-                            }[actionCode]
-                          : menu.code === 'ORGANIZATION_MANAGEMENT'
-                            ? {
-                                CREATE: ORGANIZATION_PERMISSIONS.CREATE,
-                                READ: ORGANIZATION_PERMISSIONS.VIEW,
-                                UPDATE: ORGANIZATION_PERMISSIONS.UPDATE,
-                                DELETE: ORGANIZATION_PERMISSIONS.DELETE,
-                              }[actionCode]
-                            : `${menu.code}_${actionCode}`;
+        const permissionCode = resolvePermissionCode(menu.code, actionCode);
         const existing = await queryRunner.query(
           `SELECT id FROM iam.permissions WHERE code = $1`,
           [permissionCode],

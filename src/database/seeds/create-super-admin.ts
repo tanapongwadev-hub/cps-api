@@ -80,7 +80,13 @@ async function main() {
       `INSERT INTO iam.users (username, password_hash, first_name, last_name, email, is_active, is_locked, permission_version, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, true, false, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        RETURNING id`,
-      [username, passwordHash, 'System', 'Administrator', `${username}@example.com`],
+      [
+        username,
+        passwordHash,
+        'System',
+        'Administrator',
+        `${username}@example.com`,
+      ],
     );
 
     const userId = userResult[0].id;

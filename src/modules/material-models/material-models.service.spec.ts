@@ -65,9 +65,7 @@ describe('MaterialModelsService', () => {
       createQueryBuilder: jest.fn(() => makeQueryBuilder()),
     };
     dataSource = {
-      transaction: jest.fn(async (cb) =>
-        cb({ getRepository: () => repo }),
-      ),
+      transaction: jest.fn(async (cb) => cb({ getRepository: () => repo })),
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -84,7 +82,7 @@ describe('MaterialModelsService', () => {
   describe('create', () => {
     it('normalizes code, trims strings, saves audit ids', async () => {
       const result = await service.create(
-        { code: ' md-01 ', nameTh: ' รุ่น A ' } as any,
+        { code: ' md-01 ', nameTh: ' รุ่น A ' },
         'user-1',
       );
       expect(repo.create).toHaveBeenCalledWith(
@@ -113,7 +111,11 @@ describe('MaterialModelsService', () => {
     it('rejects with NotFound when id missing', async () => {
       repo.findOne.mockResolvedValue(null);
       await expect(
-        service.update('99', { updatedAt: new Date().toISOString() } as any, 'u'),
+        service.update(
+          '99',
+          { updatedAt: new Date().toISOString() } as any,
+          'u',
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -135,7 +137,7 @@ describe('MaterialModelsService', () => {
       repo.save.mockImplementation(async (e: any) => e);
       const result = await service.update(
         '1',
-        { nameTh: 'รุ่น B', updatedAt: '2026-08-04T00:00:00.000Z' } as any,
+        { nameTh: 'รุ่น B', updatedAt: '2026-08-04T00:00:00.000Z' },
         'user-2',
       );
       expect(result.nameTh).toBe('รุ่น B');

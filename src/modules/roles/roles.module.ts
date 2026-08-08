@@ -8,7 +8,9 @@ import { Action } from '../../entities/iam/action.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Role, RoleAction, Action, UserDepartmentRole])],
+  imports: [
+    TypeOrmModule.forFeature([Role, RoleAction, Action, UserDepartmentRole]),
+  ],
   controllers: [RolesController],
   providers: [RolesService],
   exports: [RolesService],

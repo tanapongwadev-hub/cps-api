@@ -5,7 +5,10 @@ import { CreateDeliveryTypeDto } from './create-delivery-type.dto';
 import { UpdateDeliveryTypeDto } from './update-delivery-type.dto';
 import { ListDeliveryTypesQueryDto } from './list-delivery-types-query.dto';
 
-async function validateDto<T extends object>(cls: new () => T, payload: unknown) {
+async function validateDto<T extends object>(
+  cls: new () => T,
+  payload: unknown,
+) {
   const instance = plainToInstance(cls, payload);
   const errors = await validate(instance as object, {
     whitelist: true,
@@ -44,14 +47,19 @@ describe('CreateDeliveryTypeDto', () => {
 
 describe('UpdateDeliveryTypeDto', () => {
   it('requires updatedAt', async () => {
-    const { errors } = await validateDto(UpdateDeliveryTypeDto, { nameTh: 'x' });
+    const { errors } = await validateDto(UpdateDeliveryTypeDto, {
+      nameTh: 'x',
+    });
     expect(errors.some((e) => e.property === 'updatedAt')).toBe(true);
   });
 });
 
 describe('ListDeliveryTypesQueryDto', () => {
   it('applies default values', async () => {
-    const { instance, errors } = await validateDto(ListDeliveryTypesQueryDto, {});
+    const { instance, errors } = await validateDto(
+      ListDeliveryTypesQueryDto,
+      {},
+    );
     expect(errors).toHaveLength(0);
     expect(instance.page).toBe(1);
     expect(instance.limit).toBe(20);

@@ -25,10 +25,38 @@ import { StatusItemsService } from './status-items.service';
 export class StatusItemsController {
   constructor(private readonly service: StatusItemsService) {}
 
-  @Get() @RequirePermissions(STATUS_ITEM_PERMISSIONS.VIEW) findAll(@Query() q: ListStatusItemsQueryDto) { return this.service.findAll(q); }
-  @Get(':id') @RequirePermissions(STATUS_ITEM_PERMISSIONS.VIEW) findOne(@Param('id') id: string) { return this.service.findOne(id); }
-  @Post() @RequirePermissions(STATUS_ITEM_PERMISSIONS.CREATE) create(@Body() dto: CreateStatusItemDto, @CurrentUser('id') userId: string) { return this.service.create(dto, userId); }
-  @Patch(':id') @RequirePermissions(STATUS_ITEM_PERMISSIONS.UPDATE) update(@Param('id') id: string, @Body() dto: UpdateStatusItemDto, @CurrentUser('id') userId: string) { return this.service.update(id, dto, userId); }
-  @Delete(':id') @RequirePermissions(STATUS_ITEM_PERMISSIONS.DELETE) deactivate(@Param('id') id: string, @CurrentUser('id') userId: string) { return this.service.deactivate(id, userId); }
-  @Patch(':id/restore') @RequirePermissions(STATUS_ITEM_PERMISSIONS.UPDATE) restore(@Param('id') id: string, @CurrentUser('id') userId: string) { return this.service.restore(id, userId); }
+  @Get() @RequirePermissions(STATUS_ITEM_PERMISSIONS.VIEW) findAll(
+    @Query() q: ListStatusItemsQueryDto,
+  ) {
+    return this.service.findAll(q);
+  }
+  @Get(':id') @RequirePermissions(STATUS_ITEM_PERMISSIONS.VIEW) findOne(
+    @Param('id') id: string,
+  ) {
+    return this.service.findOne(id);
+  }
+  @Post() @RequirePermissions(STATUS_ITEM_PERMISSIONS.CREATE) create(
+    @Body() dto: CreateStatusItemDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.create(dto, userId);
+  }
+  @Patch(':id') @RequirePermissions(STATUS_ITEM_PERMISSIONS.UPDATE) update(
+    @Param('id') id: string,
+    @Body() dto: UpdateStatusItemDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.update(id, dto, userId);
+  }
+  @Delete(':id') @RequirePermissions(STATUS_ITEM_PERMISSIONS.DELETE) deactivate(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.deactivate(id, userId);
+  }
+  @Patch(':id/restore')
+  @RequirePermissions(STATUS_ITEM_PERMISSIONS.UPDATE)
+  restore(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.service.restore(id, userId);
+  }
 }

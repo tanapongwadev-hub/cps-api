@@ -46,13 +46,20 @@ export class CategoriesService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async create(dto: CreateCategoryDto, userId: string): Promise<CategoryResponse> {
+  async create(
+    dto: CreateCategoryDto,
+    userId: string,
+  ): Promise<CategoryResponse> {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(Category);
       const normalizedCode = this.normalizeCode(dto.code);
       await this.assertCodeAvailable(repository, normalizedCode);
       if (dto.parentId) {
-        await this.assertActiveReference(repository, dto.parentId, 'Parent category');
+        await this.assertActiveReference(
+          repository,
+          dto.parentId,
+          'Parent category',
+        );
       }
       const cat = repository.create({
         code: normalizedCode,
@@ -83,7 +90,9 @@ export class CategoriesService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!cat) throw new NotFoundException('Category not found');
-      if (new Date(dto.updatedAt).getTime() !== new Date(cat.updatedAt).getTime()) {
+      if (
+        new Date(dto.updatedAt).getTime() !== new Date(cat.updatedAt).getTime()
+      ) {
         throw new ConflictException('Category has been updated');
       }
       const normalizedCode = dto.code ? this.normalizeCode(dto.code) : cat.code;
@@ -95,16 +104,23 @@ export class CategoriesService {
           throw new ConflictException('Category cannot be its own parent');
         }
         if (dto.parentId) {
-          await this.assertActiveReference(repository, dto.parentId, 'Parent category');
+          await this.assertActiveReference(
+            repository,
+            dto.parentId,
+            'Parent category',
+          );
         }
       }
       if (dto.code !== undefined) cat.code = normalizedCode;
       if (dto.nameTh !== undefined) cat.nameTh = dto.nameTh.trim();
       if (dto.nameEn !== undefined) cat.nameEn = this.toNullable(dto.nameEn);
-      if (dto.parentId !== undefined) cat.parentId = this.toNullable(dto.parentId);
+      if (dto.parentId !== undefined)
+        cat.parentId = this.toNullable(dto.parentId);
       if (dto.sortOrder !== undefined) cat.sortOrder = dto.sortOrder;
-      if (dto.iconColor !== undefined) cat.iconColor = this.toNullable(dto.iconColor);
-      if (dto.description !== undefined) cat.description = this.toNullable(dto.description);
+      if (dto.iconColor !== undefined)
+        cat.iconColor = this.toNullable(dto.iconColor);
+      if (dto.description !== undefined)
+        cat.description = this.toNullable(dto.description);
       if (dto.isActive !== undefined) cat.isActive = dto.isActive;
       cat.updatedBy = userId;
       const saved = await repository.save(cat);
@@ -122,12 +138,18 @@ export class CategoriesService {
   async findAll(query: ListCategoriesQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const qb: SelectQueryBuilder<Category> = this.categoryRepository.createQueryBuilder('category');
+    const qb: SelectQueryBuilder<Category> =
+      this.categoryRepository.createQueryBuilder('category');
     if (query.search) {
-      qb.andWhere('(category.code ILIKE :s OR category.name_th ILIKE :s OR category.name_en ILIKE :s)', { s: `%${query.search}%` });
+      qb.andWhere(
+        '(category.code ILIKE :s OR category.name_th ILIKE :s OR category.name_en ILIKE :s)',
+        { s: `%${query.search}%` },
+      );
     }
-    if (query.isActive !== undefined) qb.andWhere('category.is_active = :a', { a: query.isActive });
-    const sortColumn = CATEGORY_SORT_COLUMNS[query.sortBy] ?? CATEGORY_SORT_COLUMNS.sortOrder;
+    if (query.isActive !== undefined)
+      qb.andWhere('category.is_active = :a', { a: query.isActive });
+    const sortColumn =
+      CATEGORY_SORT_COLUMNS[query.sortBy] ?? CATEGORY_SORT_COLUMNS.sortOrder;
     const sortOrder = query.sortOrder === 'desc' ? 'DESC' : 'ASC';
     const [rows, total] = await qb
       .orderBy(sortColumn, sortOrder)
@@ -137,7 +159,12 @@ export class CategoriesService {
       .getManyAndCount();
     return {
       items: rows.map((r) => this.toResponse(r)),
-      meta: { page, limit, totalItems: total, totalPages: Math.ceil(total / limit) },
+      meta: {
+        page,
+        limit,
+        totalItems: total,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 
@@ -150,7 +177,10 @@ export class CategoriesService {
   private async setActive(id: string, isActive: boolean, userId: string) {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(Category);
-      const cat = await repository.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      const cat = await repository.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
       if (!cat) throw new NotFoundException('Category not found');
       cat.isActive = isActive;
       cat.updatedBy = userId;
@@ -169,22 +199,41 @@ export class CategoriesService {
     return t === '' ? null : t;
   }
 
-  private async assertCodeAvailable(repo: Repository<Category>, code: string, currentId?: string) {
-    const q = repo.createQueryBuilder('c').where('LOWER(c.code) = LOWER(:code)', { code });
+  private async assertCodeAvailable(
+    repo: Repository<Category>,
+    code: string,
+    currentId?: string,
+  ) {
+    const q = repo
+      .createQueryBuilder('c')
+      .where('LOWER(c.code) = LOWER(:code)', { code });
     if (currentId) q.andWhere('c.id <> :id', { id: currentId });
-    if (await q.getOne()) throw new ConflictException('Category code already exists');
+    if (await q.getOne())
+      throw new ConflictException('Category code already exists');
   }
-  private async assertActiveReference(repo: Repository<Category>, id: string, label: string) {
+  private async assertActiveReference(
+    repo: Repository<Category>,
+    id: string,
+    label: string,
+  ) {
     const r = await repo.findOne({ where: { id, isActive: true } });
     if (!r) throw new NotFoundException(`${label} not found`);
   }
   private toResponse(c: Category): CategoryResponse {
     return {
-      id: c.id, code: c.code, nameTh: c.nameTh, nameEn: c.nameEn,
-      parentId: c.parentId, sortOrder: c.sortOrder, iconColor: c.iconColor,
-      description: c.description, isActive: c.isActive,
-      createdBy: c.createdBy, updatedBy: c.updatedBy,
-      createdAt: c.createdAt, updatedAt: c.updatedAt,
+      id: c.id,
+      code: c.code,
+      nameTh: c.nameTh,
+      nameEn: c.nameEn,
+      parentId: c.parentId,
+      sortOrder: c.sortOrder,
+      iconColor: c.iconColor,
+      description: c.description,
+      isActive: c.isActive,
+      createdBy: c.createdBy,
+      updatedBy: c.updatedBy,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
     };
   }
 }

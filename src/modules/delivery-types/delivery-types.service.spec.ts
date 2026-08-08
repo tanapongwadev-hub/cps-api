@@ -65,9 +65,7 @@ describe('DeliveryTypesService', () => {
       createQueryBuilder: jest.fn(() => makeQueryBuilder()),
     };
     dataSource = {
-      transaction: jest.fn(async (cb) =>
-        cb({ getRepository: () => repo }),
-      ),
+      transaction: jest.fn(async (cb) => cb({ getRepository: () => repo })),
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -84,7 +82,7 @@ describe('DeliveryTypesService', () => {
   describe('create', () => {
     it('normalizes code, trims strings, saves audit ids', async () => {
       const result = await service.create(
-        { code: ' dt-01 ', nameTh: ' จัดส่งด่วน ' } as any,
+        { code: ' dt-01 ', nameTh: ' จัดส่งด่วน ' },
         'user-1',
       );
       expect(repo.create).toHaveBeenCalledWith(
@@ -111,7 +109,11 @@ describe('DeliveryTypesService', () => {
     it('rejects with NotFound when id missing', async () => {
       repo.findOne.mockResolvedValue(null);
       await expect(
-        service.update('99', { updatedAt: new Date().toISOString() } as any, 'u'),
+        service.update(
+          '99',
+          { updatedAt: new Date().toISOString() } as any,
+          'u',
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -133,7 +135,7 @@ describe('DeliveryTypesService', () => {
       repo.save.mockImplementation(async (e: any) => e);
       const result = await service.update(
         '1',
-        { nameTh: 'จัดส่งปกติ', updatedAt: '2026-08-04T00:00:00.000Z' } as any,
+        { nameTh: 'จัดส่งปกติ', updatedAt: '2026-08-04T00:00:00.000Z' },
         'user-2',
       );
       expect(result.nameTh).toBe('จัดส่งปกติ');

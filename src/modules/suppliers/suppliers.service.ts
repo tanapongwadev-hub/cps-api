@@ -48,7 +48,10 @@ export class SuppliersService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async create(dto: CreateSupplierDto, userId: string): Promise<SupplierResponse> {
+  async create(
+    dto: CreateSupplierDto,
+    userId: string,
+  ): Promise<SupplierResponse> {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(Supplier);
       const normalizedCode = this.normalizeCode(dto.code);
@@ -131,7 +134,8 @@ export class SuppliersService {
   async deactivate(id: string, userId: string): Promise<SupplierResponse> {
     return this.dataSource.transaction(async (manager) => {
       const supplierRepository = manager.getRepository(Supplier);
-      const supplierMaterialRepository = manager.getRepository(SupplierMaterial);
+      const supplierMaterialRepository =
+        manager.getRepository(SupplierMaterial);
       const supplier = await supplierRepository.findOne({
         where: { id },
         lock: { mode: 'pessimistic_write' },
@@ -175,12 +179,17 @@ export class SuppliersService {
 
   async findAll(query: ListSuppliersQueryDto): Promise<{
     items: SupplierResponse[];
-    meta: { page: number; limit: number; totalItems: number; totalPages: number };
+    meta: {
+      page: number;
+      limit: number;
+      totalItems: number;
+      totalPages: number;
+    };
   }> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const queryBuilder: SelectQueryBuilder<Supplier> = this.supplierRepository
-      .createQueryBuilder('supplier');
+    const queryBuilder: SelectQueryBuilder<Supplier> =
+      this.supplierRepository.createQueryBuilder('supplier');
 
     if (query.search) {
       queryBuilder.andWhere(

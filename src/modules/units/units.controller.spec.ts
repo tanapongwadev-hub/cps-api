@@ -39,12 +39,7 @@ describe('UnitsController', () => {
       ['create', '/', RequestMethod.POST, UNIT_PERMISSIONS.CREATE],
       ['update', ':id', RequestMethod.PATCH, UNIT_PERMISSIONS.UPDATE],
       ['deactivate', ':id', RequestMethod.DELETE, UNIT_PERMISSIONS.DELETE],
-      [
-        'restore',
-        ':id/restore',
-        RequestMethod.PATCH,
-        UNIT_PERMISSIONS.UPDATE,
-      ],
+      ['restore', ':id/restore', RequestMethod.PATCH, UNIT_PERMISSIONS.UPDATE],
     ] as const;
 
     expect(Reflect.getMetadata(PATH_METADATA, UnitsController)).toBe('units');
@@ -61,8 +56,10 @@ describe('UnitsController', () => {
     const routeCount = methodNames.filter(
       (name) =>
         name !== 'constructor' &&
-        Reflect.getMetadata(METHOD_METADATA, prototype[name as keyof UnitsController]) !==
-          undefined,
+        Reflect.getMetadata(
+          METHOD_METADATA,
+          prototype[name as keyof UnitsController],
+        ) !== undefined,
     ).length;
     expect(routeCount).toBe(6);
   });

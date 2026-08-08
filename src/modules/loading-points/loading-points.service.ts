@@ -113,10 +113,7 @@ export class LoadingPointsService {
     });
   }
 
-  async deactivate(
-    id: string,
-    userId: string,
-  ): Promise<LoadingPointResponse> {
+  async deactivate(id: string, userId: string): Promise<LoadingPointResponse> {
     return this.setActive(id, false, userId);
   }
 
@@ -126,7 +123,12 @@ export class LoadingPointsService {
 
   async findAll(query: ListLoadingPointsQueryDto): Promise<{
     items: LoadingPointResponse[];
-    meta: { page: number; limit: number; totalItems: number; totalPages: number };
+    meta: {
+      page: number;
+      limit: number;
+      totalItems: number;
+      totalPages: number;
+    };
   }> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;

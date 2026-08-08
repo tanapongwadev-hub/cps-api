@@ -35,12 +35,7 @@ describe('MaterialModelsController', () => {
       ['findAll', '/', RequestMethod.GET, MATERIAL_MODEL_PERMISSIONS.VIEW],
       ['findOne', ':id', RequestMethod.GET, MATERIAL_MODEL_PERMISSIONS.VIEW],
       ['create', '/', RequestMethod.POST, MATERIAL_MODEL_PERMISSIONS.CREATE],
-      [
-        'update',
-        ':id',
-        RequestMethod.PATCH,
-        MATERIAL_MODEL_PERMISSIONS.UPDATE,
-      ],
+      ['update', ':id', RequestMethod.PATCH, MATERIAL_MODEL_PERMISSIONS.UPDATE],
       [
         'deactivate',
         ':id',
@@ -77,7 +72,10 @@ describe('MaterialModelsController', () => {
   it('forwards route parameters, DTOs, and current user IDs', async () => {
     const query = { page: 1 } as any;
     const createDto = { code: 'MD-01', nameTh: 'รุ่น A' } as any;
-    const updateDto = { nameTh: 'x', updatedAt: '2026-08-04T00:00:00.000Z' } as any;
+    const updateDto = {
+      nameTh: 'x',
+      updatedAt: '2026-08-04T00:00:00.000Z',
+    } as any;
 
     await controller.findAll(query);
     await controller.findOne('20');

@@ -9,10 +9,7 @@ export const getEnv = (key: string, defaultValue?: string): string => {
   return value;
 };
 
-export const getEnvNumber = (
-  key: string,
-  defaultValue?: number,
-): number => {
+export const getEnvNumber = (key: string, defaultValue?: number): number => {
   const value = process.env[key];
   if (value === undefined) {
     if (defaultValue === undefined) {
@@ -27,10 +24,7 @@ export const getEnvNumber = (
   return parsed;
 };
 
-export const getEnvBoolean = (
-  key: string,
-  defaultValue?: boolean,
-): boolean => {
+export const getEnvBoolean = (key: string, defaultValue?: boolean): boolean => {
   const value = process.env[key];
   if (value === undefined) {
     if (defaultValue === undefined) {

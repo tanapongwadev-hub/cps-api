@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateAdditionalMasterTables1700000000007
-  implements MigrationInterface
-{
+export class CreateAdditionalMasterTables1700000000007 implements MigrationInterface {
   name = 'CreateAdditionalMasterTables1700000000007';
 
   async up(queryRunner: QueryRunner): Promise<void> {

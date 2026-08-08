@@ -1,4 +1,10 @@
-import { IsString, IsEnum, IsOptional, IsBoolean, IsArray } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsBoolean,
+  IsArray,
+} from 'class-validator';
 import { ScopeType } from '../../../common/enums/scope-type.enum';
 
 export class UpdateRoleDto {

@@ -25,10 +25,37 @@ import { OrganizationsService } from './organizations.service';
 export class OrganizationsController {
   constructor(private readonly service: OrganizationsService) {}
 
-  @Get() @RequirePermissions(ORGANIZATION_PERMISSIONS.VIEW) findAll(@Query() q: ListOrganizationsQueryDto) { return this.service.findAll(q); }
-  @Get(':id') @RequirePermissions(ORGANIZATION_PERMISSIONS.VIEW) findOne(@Param('id') id: string) { return this.service.findOne(id); }
-  @Post() @RequirePermissions(ORGANIZATION_PERMISSIONS.CREATE) create(@Body() dto: CreateOrganizationDto, @CurrentUser('id') userId: string) { return this.service.create(dto, userId); }
-  @Patch(':id') @RequirePermissions(ORGANIZATION_PERMISSIONS.UPDATE) update(@Param('id') id: string, @Body() dto: UpdateOrganizationDto, @CurrentUser('id') userId: string) { return this.service.update(id, dto, userId); }
-  @Delete(':id') @RequirePermissions(ORGANIZATION_PERMISSIONS.DELETE) deactivate(@Param('id') id: string, @CurrentUser('id') userId: string) { return this.service.deactivate(id, userId); }
-  @Patch(':id/restore') @RequirePermissions(ORGANIZATION_PERMISSIONS.UPDATE) restore(@Param('id') id: string, @CurrentUser('id') userId: string) { return this.service.restore(id, userId); }
+  @Get() @RequirePermissions(ORGANIZATION_PERMISSIONS.VIEW) findAll(
+    @Query() q: ListOrganizationsQueryDto,
+  ) {
+    return this.service.findAll(q);
+  }
+  @Get(':id') @RequirePermissions(ORGANIZATION_PERMISSIONS.VIEW) findOne(
+    @Param('id') id: string,
+  ) {
+    return this.service.findOne(id);
+  }
+  @Post() @RequirePermissions(ORGANIZATION_PERMISSIONS.CREATE) create(
+    @Body() dto: CreateOrganizationDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.create(dto, userId);
+  }
+  @Patch(':id') @RequirePermissions(ORGANIZATION_PERMISSIONS.UPDATE) update(
+    @Param('id') id: string,
+    @Body() dto: UpdateOrganizationDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.update(id, dto, userId);
+  }
+  @Delete(':id')
+  @RequirePermissions(ORGANIZATION_PERMISSIONS.DELETE)
+  deactivate(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.service.deactivate(id, userId);
+  }
+  @Patch(':id/restore')
+  @RequirePermissions(ORGANIZATION_PERMISSIONS.UPDATE)
+  restore(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.service.restore(id, userId);
+  }
 }

@@ -114,7 +114,7 @@ describe('SuppliersService', () => {
           code: ' sup-001 ',
           nameTh: ' บริษัท ABC ',
           nameEn: ' ABC Co. ',
-        } as any,
+        },
         'user-1',
       );
       expect(supplierRepository.create).toHaveBeenCalledWith(
@@ -144,7 +144,11 @@ describe('SuppliersService', () => {
     it('rejects with NotFound when id missing', async () => {
       supplierRepository.findOne.mockResolvedValue(null);
       await expect(
-        service.update('99', { updatedAt: new Date().toISOString() } as any, 'u'),
+        service.update(
+          '99',
+          { updatedAt: new Date().toISOString() } as any,
+          'u',
+        ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -173,7 +177,7 @@ describe('SuppliersService', () => {
         {
           nameTh: 'บริษัท XYZ',
           updatedAt: '2026-08-04T00:00:00.000Z',
-        } as any,
+        },
         'user-2',
       );
       expect(result.nameTh).toBe('บริษัท XYZ');

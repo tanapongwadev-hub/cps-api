@@ -119,12 +119,17 @@ export class MaterialModelsService {
 
   async findAll(query: ListMaterialModelsQueryDto): Promise<{
     items: MaterialModelResponse[];
-    meta: { page: number; limit: number; totalItems: number; totalPages: number };
+    meta: {
+      page: number;
+      limit: number;
+      totalItems: number;
+      totalPages: number;
+    };
   }> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const queryBuilder: SelectQueryBuilder<MaterialModel> = this.modelRepository
-      .createQueryBuilder('model');
+    const queryBuilder: SelectQueryBuilder<MaterialModel> =
+      this.modelRepository.createQueryBuilder('model');
 
     if (query.search) {
       queryBuilder.andWhere(
