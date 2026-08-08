@@ -282,17 +282,25 @@ POST /auth/refresh
 
 | Module              | Imports                                                                                                                                                                    | TypeORM Entities                                                                                                                  | Exports                                                                 | Controller              | บทบาทหลัก                                         |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
-| AppModule           | ConfigModule, TypeOrmModule, AuthModule, UsersModule, DepartmentsModule, RolesModule, MenusModule, PermissionsModule, SessionsModule, AuditLogsModule, AccessControlModule, MaterialsModule | —                                                                                                                                 | —                                                                       | `AppController`         | Root module                                       |
+| AppModule           | ConfigModule, TypeOrmModule, AuthModule, UsersModule, DepartmentsModule, RolesModule, MenusModule, PermissionsModule, SessionsModule, AuditLogsModule, AccessControlModule, MaterialsModule, UnitsModule, SuppliersModule, CategoriesModule, DeliveryTypesModule, LoadingPointsModule, MaterialModelsModule, OrganizationsModule, StatusItemsModule | —                                                                                                                                 | —                                                                       | `AppController`         | Root module                                       |
 | AuthModule          | AccessControlModule, TypeOrmModule, PassportModule, JwtModule                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission, Department, Role, Action, RoleAction, Permission, Menu, AuthSession, AuditLog | `AuthService`                                                           | `AuthController`        | Login/logout/refresh/token + department selection |
 | UsersModule         | TypeOrmModule                                                                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission                                                                                | `UsersService`                                                          | `UsersController`       | จัดการผู้ใช้ + assignments                        |
 | DepartmentsModule   | TypeOrmModule                                                                                                                                                              | Department                                                                                                                        | `DepartmentsService`                                                    | `DepartmentsController` | จัดการแผนก                                        |
 | RolesModule         | TypeOrmModule                                                                                                                                                              | Role                                                                                                                              | `RolesService`                                                          | `RolesController`       | จัดการบทบาท                                       |
 | MenusModule         | TypeOrmModule                                                                                                                                                              | Menu, Permission, Action                                                                                                          | `MenusService`                                                          | `MenusController`       | จัดการเมนู + tree                                 |
-| PermissionsModule   | TypeOrmModule                                                                                                                                                              | Permission                                                                                                                        | `PermissionsService`                                                    | `PermissionsController` | ดูรายการสิทธิ์ (read-only)                        |
+| PermissionsModule   | TypeOrmModule                                                                                                                                                              | Permission                                                                                                                        | `PermissionsService`                                                    | `PermissionsController` | CRUD สิทธิ์ + กำหนดแผนกที่ใช้ได้                 |
 | SessionsModule      | TypeOrmModule                                                                                                                                                              | AuthSession                                                                                                                       | `SessionsService`                                                       | `SessionsController`    | จัดการ session / revoke                           |
 | AuditLogsModule     | TypeOrmModule                                                                                                                                                              | AuditLog                                                                                                                          | `AuditLogsService`                                                      | `AuditLogsController`   | ดู audit logs                                     |
 | AccessControlModule | TypeOrmModule                                                                                                                                                              | Permission, RoleAction, UserDepartmentRole, UserDepartmentPermission, Menu                                                        | `AccessControlService`, `EffectivePermissionService`, `MenuTreeService` | —                       | คำนวณสิทธิ์และเมนูที่ user ได้รับ                 |
 | MaterialsModule     | AccessControlModule, TypeOrmModule                                                                                                                                         | Material, SupplierMaterial, Unit, DeliveryType, MaterialModel, LoadingPoint, Supplier                                             | `MaterialsService`, `MaterialImageStorageService`, `PermissionGuard`    | `MaterialsController`   | CRUD Material Master + จัดการรูปภาพ              |
+| UnitsModule         | TypeOrmModule                                                                                                                                                              | Unit                                                                                                                              | `UnitsService`                                                          | `UnitsController`       | CRUD หน่วยนับ                                    |
+| SuppliersModule     | TypeOrmModule                                                                                                                                                              | Supplier                                                                                                                          | `SuppliersService`                                                      | `SuppliersController`   | CRUD Supplier                                     |
+| CategoriesModule    | TypeOrmModule                                                                                                                                                              | Category                                                                                                                          | `CategoriesService`                                                     | `CategoriesController`  | CRUD หมวดหมู่วัตถุดิบ                           |
+| DeliveryTypesModule | TypeOrmModule                                                                                                                                                              | DeliveryType                                                                                                                      | `DeliveryTypesService`                                                  | `DeliveryTypesController` | CRUD รูปแบบการจัดส่ง                           |
+| LoadingPointsModule | TypeOrmModule                                                                                                                                                              | LoadingPoint                                                                                                                      | `LoadingPointsService`                                                  | `LoadingPointsController` | CRUD จุดลงสินค้า                               |
+| MaterialModelsModule | TypeOrmModule                                                                                                                                                             | MaterialModel                                                                                                                     | `MaterialModelsService`                                                 | `MaterialModelsController` | CRUD รุ่นวัตถุดิบ                            |
+| OrganizationsModule  | TypeOrmModule                                                                                                                                                              | Organization                                                                                                                      | `OrganizationsService`                                                   | `OrganizationsController` | CRUD องค์กร                                    |
+| StatusItemsModule  | TypeOrmModule                                                                                                                                                              | StatusItem                                                                                                                        | `StatusItemsService`                                                    | `StatusItemsController`  | CRUD รายการสถานะ                               |
 
 ### 6.1 AuthModule
 
@@ -322,8 +330,8 @@ POST /auth/refresh
 
 ### 6.6 PermissionsModule
 
-- ดูรายการสิทธิ์
-- ไม่มี create/update/delete (จัดการผ่าน seeds)
+- CRUD permission + กำหนดแผนกที่ใช้ได้ (`PUT /permissions/:id/departments`)
+- `GET /permissions/options` — ดึง menus + actions สำหรับ dropdown ในฟอร์มสร้าง/แก้ไข
 
 ### 6.7 SessionsModule
 
@@ -358,6 +366,46 @@ POST /auth/refresh
 - `MaterialImageStorageService` validate MIME type, magic bytes (JPEG/PNG/WEBP), และขนาดไม่เกิน 5 MiB
 - การลบ Material ใช้ soft delete ผ่าน `isActive = false` (เรียก `DELETE /materials/:id` → `PATCH /materials/:id/restore` เพื่อ restore)
 - รายการ Material ใช้ query builder join กับ lookup + supplier mappings และกรองเฉพาะ active suppliers/mappings
+
+### 6.11 UnitsModule
+
+- CRUD หน่วยนับ (เช่น KG, PCS, L)
+- ใช้สิทธิ์ `UNIT_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+
+### 6.12 SuppliersModule
+
+- CRUD ข้อมูลหลัก Supplier
+- ใช้สิทธิ์ `SUPPLIER_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+
+### 6.13 CategoriesModule
+
+- CRUD หมวดหมู่วัตถุดิบ (รองรับ hierarchy ผ่าน `parentId`)
+- ใช้สิทธิ์ `CATEGORY_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+
+### 6.14 DeliveryTypesModule
+
+- CRUD รูปแบบการจัดส่ง (เช่น รถบรรทุก, Tanker, Container)
+- ใช้สิทธิ์ `DELIVERY_TYPE_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+
+### 6.15 LoadingPointsModule
+
+- CRUD จุดรับ/จุดลงวัตถุดิบ (เช่น Receiving Area A, Tank Farm)
+- ใช้สิทธิ์ `LOADING_POINT_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+
+### 6.16 MaterialModelsModule
+
+- CRUD รุ่นหรือแบบวัตถุดิบ
+- ใช้สิทธิ์ `MATERIAL_MODEL_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+
+### 6.17 OrganizationsModule
+
+- CRUD โครงสร้างองค์กร (headquarters/branch/subsidiary/department) รองรับ hierarchy ผ่าน `parentId`
+- ใช้สิทธิ์ `ORGANIZATION_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+
+### 6.18 StatusItemsModule
+
+- CRUD รายการสถานะ (เช่น รอดำเนินการ, กำลังดำเนินการ, เสร็จสิ้น) พร้อม `color` และ `module` สำหรับจัดกลุ่ม
+- ใช้สิทธิ์ `STATUS_ITEM_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
 
 ## 7. Database Migration & Seeding
 

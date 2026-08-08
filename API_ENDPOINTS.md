@@ -115,11 +115,45 @@ Returns persisted, effective menu access grouped by assignment. Inactive or expi
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/roles` | Bearer + SUPER_ADMIN | รายการบทบาท (รองรับ `page`, `limit`, `search`) |
+| GET | `/roles` | Bearer + SUPER_ADMIN | รายการบทบาท (รองรับ `page`, `limit`, `search`, `status`) |
 | GET | `/roles/:id` | Bearer + SUPER_ADMIN | ข้อมูลบทบาท |
 | POST | `/roles` | Bearer + SUPER_ADMIN | สร้างบทบาท |
 | PATCH | `/roles/:id` | Bearer + SUPER_ADMIN | แก้ไขบทบาท |
 | DELETE | `/roles/:id` | Bearer + SUPER_ADMIN | ลบบทบาท |
+
+### Query Parameters ของ `GET /roles`
+
+| Param | Type | Default | หมายเหตุ |
+|---|---|---|---|
+| `page` | int ≥ 1 | `1` | หน้าที่ต้องการ |
+| `limit` | int 1–100 | `20` | จำนวนต่อหน้า |
+| `search` | string | — | ค้นหา `code`, `nameTh`, `nameEn` (ILIKE) |
+| `status` | `active` \| `inactive` | — | กรองตามสถานะ (`active` = isActive true, `inactive` = isActive false) |
+
+Response ของ list รวม `actionCodes`, `permissionCount` และ `userCount` ในแต่ละ role:
+
+```json
+{
+  "items": [
+    {
+      "id": "1",
+      "code": "SUPER_ADMIN",
+      "nameTh": "ผู้ดูแลระบบ",
+      "nameEn": "Super Admin",
+      "scopeType": "SYSTEM",
+      "isActive": true,
+      "isSystem": true,
+      "description": null,
+      "createdAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-01T00:00:00.000Z",
+      "actionCodes": ["VIEW", "CREATE", "UPDATE", "DELETE"],
+      "permissionCount": 4,
+      "userCount": 2
+    }
+  ],
+  "meta": { "page": 1, "limit": 20, "totalItems": 1, "totalPages": 1 }
+}
+```
 
 ## Menus (ต้องเป็น SUPER_ADMIN)
 
@@ -137,8 +171,64 @@ Returns persisted, effective menu access grouped by assignment. Inactive or expi
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
 | GET | `/permissions` | Bearer + SUPER_ADMIN | รายการ permission (รองรับ `page`, `limit`, `search`) พร้อม `departments` |
+| GET | `/permissions/options` | Bearer + SUPER_ADMIN | ดึง menus + actions สำหรับ dropdown ในฟอร์มสร้าง/แก้ไข permission |
 | GET | `/permissions/:id` | Bearer + SUPER_ADMIN | ข้อมูล permission พร้อม `departments` |
+| POST | `/permissions` | Bearer + SUPER_ADMIN | สร้าง permission ใหม่ |
+| PATCH | `/permissions/:id` | Bearer + SUPER_ADMIN | แก้ไข permission |
+| DELETE | `/permissions/:id` | Bearer + SUPER_ADMIN | ลบ permission |
 | PUT | `/permissions/:id/departments` | Bearer + SUPER_ADMIN | กำหนดแผนกที่ใช้ permission ได้ |
+
+### GET `/permissions/options`
+
+คืน menus และ actions ที่ active สำหรับใช้ใน dropdown:
+
+```json
+{
+  "menus": [
+    { "id": "1", "code": "dashboard", "nameTh": "แดชบอร์ด", "nameEn": "Dashboard" }
+  ],
+  "actions": [
+    { "id": "1", "code": "VIEW", "nameTh": "ดู", "nameEn": "View" }
+  ]
+}
+```
+
+### POST `/permissions`
+
+```json
+{
+  "menuId": "1",
+  "actionId": "1",
+  "code": "DASHBOARD_VIEW",
+  "description": "ดูหน้า Dashboard",
+  "isActive": true
+}
+```
+
+| Field | Type | Required | Note |
+|---|---|---|---|
+| `menuId` | string | ✅ | ID ของ menu (ต้องมีอยู่จริง) |
+| `actionId` | string | ✅ | ID ของ action (ต้องมีอยู่จริง) |
+| `code` | string | ✅ | รหัส permission (ต้องไม่ซ้ำ) |
+| `description` | string \| undefined | — | คำอธิบาย |
+| `isActive` | bool | — | default `true` |
+
+### PATCH `/permissions/:id`
+
+ทุก field เป็น optional:
+
+```json
+{
+  "code": "DASHBOARD_VIEW_UPDATED",
+  "description": "ดูหน้า Dashboard (แก้ไข)"
+}
+```
+
+### DELETE `/permissions/:id`
+
+ลบ permission — ไม่ต้องส่ง body คืน `404` ถ้าไม่พบ
+
+### PUT `/permissions/:id/departments`
 
 `departments: []` ใน permission response หมายถึงใช้งานได้ทุกแผนก ส่วนรายการที่มีค่าจะประกอบด้วย `id`, `code`, `nameTh` และ `nameEn`
 

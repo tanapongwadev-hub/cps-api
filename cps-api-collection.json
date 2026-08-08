@@ -1,1083 +1,2123 @@
 {
   "info": {
     "name": "CPS Access Control API",
-    "description": "API Collection for CPS Access Control System with Role-Based Access Control (RBAC)",
+    "description": "API Collection for CPS Access Control System — RBAC with JWT. Base URL: {{baseUrl}}/api/v1",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    {
-      "key": "baseUrl",
-      "value": "http://localhost:3001",
-      "type": "string"
-    },
-    {
-      "key": "accessToken",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "refreshToken",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "departmentSelectionToken",
-      "value": "",
-      "type": "string"
-    }
+    { "key": "baseUrl", "value": "http://localhost:3001", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "departmentSelectionToken", "value": "", "type": "string" }
   ],
   "item": [
     {
-      "name": "Authentication",
+      "name": "1. Authentication",
       "item": [
         {
           "name": "Login",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Public endpoint — authenticates user with username and password.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin@123\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "login"]
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Select Department",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/select-department",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "select-department"]
+            },
+            "description": "Public endpoint — selects active department for user session.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"departmentSelectionToken\": \"{{departmentSelectionToken}}\",\n  \"userDepartmentRoleId\": \"1\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/select-department",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "select-department"]
+              "raw": "{\n  \"departmentSelectionToken\": \"{{departmentSelectionToken}}\",\n  \"userDepartmentRoleId\": 1\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Switch Department",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/switch-department",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "switch-department"]
+            },
+            "description": "Bearer auth — switches active department for current user.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"userDepartmentRoleId\": \"2\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/switch-department",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "switch-department"]
+              "raw": "{\n  \"userDepartmentRoleId\": 1\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Refresh Token",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "refresh"]
+            },
+            "description": "Public endpoint — exchanges a valid refreshToken for a new accessToken.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"refreshToken\": \"your_refresh_token_here\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/refresh",
-              "host": ["{{baseUrl}}"],
-              "path": ["auth", "refresh"]
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Logout",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/logout",
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
               "host": ["{{baseUrl}}"],
-              "path": ["auth", "logout"]
-            }
-          }
+              "path": ["api", "v1", "auth", "logout"]
+            },
+            "description": "Bearer auth — invalidates current session.",
+            "body": { "mode": "raw", "raw": "", "options": { "raw": { "language": "json" } } }
+          },
+          "response": []
         },
         {
           "name": "Get Current User",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/me",
+              "raw": "{{baseUrl}}/api/v1/auth/me",
               "host": ["{{baseUrl}}"],
-              "path": ["auth", "me"]
-            }
-          }
+              "path": ["api", "v1", "auth", "me"]
+            },
+            "description": "Bearer auth — returns the currently authenticated user profile."
+          },
+          "response": []
         },
         {
           "name": "Get User Menus",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/me/menus",
+              "raw": "{{baseUrl}}/api/v1/auth/me/menus",
               "host": ["{{baseUrl}}"],
-              "path": ["auth", "me", "menus"]
-            }
-          }
+              "path": ["api", "v1", "auth", "me", "menus"]
+            },
+            "description": "Bearer auth — returns the authorized menu tree for the current user."
+          },
+          "response": []
         },
         {
           "name": "Get User Permissions",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/auth/me/permissions",
+              "raw": "{{baseUrl}}/api/v1/auth/me/permissions",
               "host": ["{{baseUrl}}"],
-              "path": ["auth", "me", "permissions"]
-            }
-          }
+              "path": ["api", "v1", "auth", "me", "permissions"]
+            },
+            "description": "Bearer auth — returns the flat list of all permitted actions for the current user."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Users",
+      "name": "2. Users",
       "item": [
         {
           "name": "List Users",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users?page=1&limit=20&search=keyword",
+              "raw": "{{baseUrl}}/api/v1/users?page=1&limit=20&search=",
               "host": ["{{baseUrl}}"],
-              "path": ["users"],
+              "path": ["api", "v1", "users"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                },
-                {
-                  "key": "search",
-                  "value": "keyword"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
               ]
-            }
-          }
+            },
+            "description": "SUPER_ADMIN — paginated user list with optional search keyword."
+          },
+          "response": []
         },
         {
           "name": "Get User Details",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/:id",
+              "raw": "{{baseUrl}}/api/v1/users/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["users", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "users", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns full user details including department assignments."
+          },
+          "response": []
         },
         {
           "name": "Create User",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users"]
+            },
+            "description": "SUPER_ADMIN — creates a new user account.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"newuser\",\n  \"password\": \"Password@123\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"email\": \"john@example.com\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/users",
-              "host": ["{{baseUrl}}"],
-              "path": ["users"]
+              "raw": "{\n  \"username\": \"newuser\",\n  \"password\": \"string\",\n  \"firstName\": \"สมชาย\",\n  \"lastName\": \"ใจดี\",\n  \"email\": \"somchai@example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Update User",
           "request": {
             "method": "PATCH",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — updates user firstName / lastName.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Smith\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/users/:id",
-              "host": ["{{baseUrl}}"],
-              "path": ["users", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "raw": "{\n  \"firstName\": \"สมชาย\",\n  \"lastName\": \"ใจงาม\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Update User Status",
           "request": {
             "method": "PATCH",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id", "status"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — activates or locks a user account.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"isActive\": true,\n  \"isLocked\": false\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/users/:id/status",
-              "host": ["{{baseUrl}}"],
-              "path": ["users", ":id", "status"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "raw": "{\n  \"isActive\": true,\n  \"isLocked\": false,\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Reset User Password",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id/reset-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id", "reset-password"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — forces a new password for the user.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"newPassword\": \"NewPassword@123\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/users/:id/reset-password",
-              "host": ["{{baseUrl}}"],
-              "path": ["users", ":id", "reset-password"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "raw": "{\n  \"newPassword\": \"string\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Access Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id/access-summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id", "access-summary"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns a summary of the user's departments, roles, and permissions."
+          },
+          "response": []
         },
         {
           "name": "Get User Assignments",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/:id/assignments",
+              "raw": "{{baseUrl}}/api/v1/users/:id/assignments",
               "host": ["{{baseUrl}}"],
-              "path": ["users", ":id", "assignments"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "users", ":id", "assignments"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — lists all department-role assignments for a user."
+          },
+          "response": []
         },
         {
           "name": "Create User Assignment",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id/assignments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id", "assignments"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — assigns a user to a department with a specific role.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"departmentId\": \"1\",\n  \"roleId\": \"1\",\n  \"permissionIds\": [\"1\", \"2\"]\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/users/:id/assignments",
-              "host": ["{{baseUrl}}"],
-              "path": ["users", ":id", "assignments"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "raw": "{\n  \"departmentId\": 1,\n  \"roleId\": 1\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
+        },
+        {
+          "name": "Update User Assignment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id/assignments/:assignmentId",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id", "assignments", ":assignmentId"],
+              "variable": [
+                { "key": "id", "value": "1" },
+                { "key": "assignmentId", "value": "1" }
+              ]
+            },
+            "description": "SUPER_ADMIN — changes the department or role on an existing assignment.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departmentId\": 2,\n  \"roleId\": 3,\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User Assignment",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id/assignments/:assignmentId",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id", "assignments", ":assignmentId"],
+              "variable": [
+                { "key": "id", "value": "1" },
+                { "key": "assignmentId", "value": "1" }
+              ]
+            },
+            "description": "SUPER_ADMIN — removes a department-role assignment from a user."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "users", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — permanently deletes a user account."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Departments",
+      "name": "3. Departments",
       "item": [
         {
           "name": "List Departments",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments?page=1&limit=20&search=keyword",
+              "raw": "{{baseUrl}}/api/v1/departments?page=1&limit=20&search=",
               "host": ["{{baseUrl}}"],
-              "path": ["departments"],
+              "path": ["api", "v1", "departments"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                },
-                {
-                  "key": "search",
-                  "value": "keyword"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
               ]
-            }
-          }
+            },
+            "description": "SUPER_ADMIN — paginated department list."
+          },
+          "response": []
         },
         {
           "name": "Get Department Details",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/:id",
+              "raw": "{{baseUrl}}/api/v1/departments/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["departments", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "departments", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns department details."
+          },
+          "response": []
         },
         {
           "name": "Create Department",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/departments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "departments"]
+            },
+            "description": "SUPER_ADMIN — creates a new department.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"IT\",\n  \"nameTh\": \"ไอที\",\n  \"nameEn\": \"IT Department\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/departments",
-              "host": ["{{baseUrl}}"],
-              "path": ["departments"]
+              "raw": "{\n  \"code\": \"DEPT001\",\n  \"nameTh\": \"แผนกบัญชี\",\n  \"nameEn\": \"Accounting Department\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Update Department",
           "request": {
             "method": "PATCH",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/departments/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "departments", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — updates department name.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nameTh\": \"แผนกไอที\",\n  \"nameEn\": \"IT Department\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/departments/:id",
-              "host": ["{{baseUrl}}"],
-              "path": ["departments", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "raw": "{\n  \"nameTh\": \"แผนกบัญชีและการเงิน\",\n  \"nameEn\": \"Accounting & Finance\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Delete Department",
           "request": {
             "method": "DELETE",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/:id",
+              "raw": "{{baseUrl}}/api/v1/departments/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["departments", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "departments", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — soft-deletes a department."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Roles",
+      "name": "4. Roles",
       "item": [
         {
           "name": "List Roles",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/roles?page=1&limit=20&search=keyword",
+              "raw": "{{baseUrl}}/api/v1/roles?page=1&limit=20&search=&status=active",
               "host": ["{{baseUrl}}"],
-              "path": ["roles"],
+              "path": ["api", "v1", "roles"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                },
-                {
-                  "key": "search",
-                  "value": "keyword"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" },
+                { "key": "status", "value": "active" }
               ]
-            }
-          }
+            },
+            "description": "SUPER_ADMIN — paginated role list with optional status filter."
+          },
+          "response": []
         },
         {
           "name": "Get Role Details",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/roles/:id",
+              "raw": "{{baseUrl}}/api/v1/roles/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["roles", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "roles", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns role details."
+          },
+          "response": []
         },
         {
           "name": "Create Role",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/roles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "roles"]
+            },
+            "description": "SUPER_ADMIN — creates a new role.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"MANAGER\",\n  \"nameTh\": \"ผู้จัดการ\",\n  \"nameEn\": \"Manager\",\n  \"scopeType\": \"DEPARTMENT\",\n  \"description\": \"Manager role\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/roles",
-              "host": ["{{baseUrl}}"],
-              "path": ["roles"]
+              "raw": "{\n  \"code\": \"ROLE001\",\n  \"nameTh\": \"ผู้จัดการ\",\n  \"nameEn\": \"Manager\",\n  \"scopeType\": \"DEPARTMENT\",\n  \"description\": \"Department-level manager role\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Update Role",
           "request": {
             "method": "PATCH",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/roles/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "roles", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — updates role name.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nameTh\": \"ผู้จัดการหน่วยงาน\",\n  \"description\": \"Updated description\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/roles/:id",
-              "host": ["{{baseUrl}}"],
-              "path": ["roles", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "raw": "{\n  \"nameTh\": \"ผู้จัดการฝ่าย\",\n  \"nameEn\": \"Division Manager\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Delete Role",
           "request": {
             "method": "DELETE",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/roles/:id",
+              "raw": "{{baseUrl}}/api/v1/roles/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["roles", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "roles", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — soft-deletes a role."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Menus",
+      "name": "5. Menus",
       "item": [
         {
           "name": "List Menus",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/menus?page=1&limit=20&search=keyword",
+              "raw": "{{baseUrl}}/api/v1/menus?page=1&limit=20&search=",
               "host": ["{{baseUrl}}"],
-              "path": ["menus"],
+              "path": ["api", "v1", "menus"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                },
-                {
-                  "key": "search",
-                  "value": "keyword"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
               ]
-            }
-          }
+            },
+            "description": "SUPER_ADMIN — paginated menu list."
+          },
+          "response": []
         },
         {
           "name": "Get Menu Tree",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/menus/tree",
+              "raw": "{{baseUrl}}/api/v1/menus/tree",
               "host": ["{{baseUrl}}"],
-              "path": ["menus", "tree"]
-            }
-          }
+              "path": ["api", "v1", "menus", "tree"]
+            },
+            "description": "SUPER_ADMIN — returns the full hierarchical menu tree."
+          },
+          "response": []
         },
         {
           "name": "Get Menu Details",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/menus/:id",
+              "raw": "{{baseUrl}}/api/v1/menus/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["menus", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "menus", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns menu item details."
+          },
+          "response": []
         },
         {
           "name": "Create Menu",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/menus",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "menus"]
+            },
+            "description": "SUPER_ADMIN — creates a new menu item.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"DASHBOARD\",\n  \"nameTh\": \"แดชบอร์ด\",\n  \"nameEn\": \"Dashboard\",\n  \"menuType\": \"MAIN\",\n  \"path\": \"/dashboard\",\n  \"icon\": \"HomeIcon\",\n  \"sortOrder\": 1\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/menus",
-              "host": ["{{baseUrl}}"],
-              "path": ["menus"]
+              "raw": "{\n  \"code\": \"MENU001\",\n  \"nameTh\": \"จัดการผู้ใช้\",\n  \"nameEn\": \"User Management\",\n  \"path\": \"/users\",\n  \"icon\": \"user\",\n  \"sortOrder\": 1,\n  \"parentId\": null,\n  \"menuType\": \"MENU\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Update Menu",
           "request": {
             "method": "PATCH",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/menus/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "menus", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — updates menu name.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nameTh\": \"หน้าหลัก\",\n  \"nameEn\": \"Home\",\n  \"sortOrder\": 2\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/menus/:id",
-              "host": ["{{baseUrl}}"],
-              "path": ["menus", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "raw": "{\n  \"nameTh\": \"จัดการผู้ใช้ระบบ\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
         },
         {
           "name": "Delete Menu",
           "request": {
             "method": "DELETE",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/menus/:id",
+              "raw": "{{baseUrl}}/api/v1/menus/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["menus", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "menus", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — soft-deletes a menu item."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Permissions",
+      "name": "6. Permissions",
       "item": [
         {
           "name": "List Permissions",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/permissions?page=1&limit=20",
+              "raw": "{{baseUrl}}/api/v1/permissions?page=1&limit=20&search=",
               "host": ["{{baseUrl}}"],
-              "path": ["permissions"],
+              "path": ["api", "v1", "permissions"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
               ]
-            }
-          }
+            },
+            "description": "SUPER_ADMIN — paginated permission list."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Permission Options",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/permissions/options",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "permissions", "options"]
+            },
+            "description": "SUPER_ADMIN — returns lookup lists for menus and actions."
+          },
+          "response": []
         },
         {
           "name": "Get Permission Details",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/permissions/:id",
+              "raw": "{{baseUrl}}/api/v1/permissions/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["permissions", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
+              "path": ["api", "v1", "permissions", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns permission details with associated departments."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Permission",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/permissions",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "permissions"]
+            },
+            "description": "SUPER_ADMIN — creates a new permission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"PERM001\",\n  \"nameTh\": \"ดูรายการผู้ใช้\",\n  \"nameEn\": \"View Users\",\n  \"menuId\": 1,\n  \"actionId\": 1,\n  \"isActive\": true\n}",
+              "options": { "raw": { "language": "json" } }
             }
-          }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Permission",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/permissions/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "permissions", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — updates permission name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"ดูรายการผู้ใช้ระบบ\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Permission",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/permissions/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "permissions", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — soft-deletes a permission."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Permission Departments",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/permissions/:id/departments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "permissions", ":id", "departments"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — replaces the list of departments assigned to a permission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departmentIds\": [1, 2, 3]\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Sessions",
+      "name": "7. Sessions",
       "item": [
         {
           "name": "List Sessions",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sessions?page=1&limit=20&userId=1",
+              "raw": "{{baseUrl}}/api/v1/sessions?page=1&limit=20&userId=1",
               "host": ["{{baseUrl}}"],
-              "path": ["sessions"],
+              "path": ["api", "v1", "sessions"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                },
-                {
-                  "key": "userId",
-                  "value": "1"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "userId", "value": "1" }
               ]
-            }
-          }
+            },
+            "description": "SUPER_ADMIN — paginated session list, optionally filtered by userId."
+          },
+          "response": []
         },
         {
           "name": "Get Session Details",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sessions/:id",
+              "raw": "{{baseUrl}}/api/v1/sessions/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["sessions", ":id"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "sessions", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns session details including device and IP info."
+          },
+          "response": []
         },
         {
           "name": "Revoke Session",
           "request": {
             "method": "PATCH",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sessions/:id/revoke",
+              "raw": "{{baseUrl}}/api/v1/sessions/:id/revoke",
               "host": ["{{baseUrl}}"],
-              "path": ["sessions", ":id", "revoke"],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "sessions", ":id", "revoke"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — revokes a single active session."
+          },
+          "response": []
         },
         {
           "name": "Revoke All User Sessions",
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/sessions/revoke-all/:userId",
+              "raw": "{{baseUrl}}/api/v1/sessions/revoke-all/:userId",
               "host": ["{{baseUrl}}"],
-              "path": ["sessions", "revoke-all", ":userId"],
-              "variable": [
-                {
-                  "key": "userId",
-                  "value": "1"
-                }
-              ]
-            }
-          }
+              "path": ["api", "v1", "sessions", "revoke-all", ":userId"],
+              "variable": [{ "key": "userId", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — revokes all active sessions for a specific user."
+          },
+          "response": []
         }
       ]
     },
     {
-      "name": "Audit Logs",
+      "name": "8. Audit Logs",
       "item": [
         {
           "name": "List Audit Logs",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/audit-logs?page=1&limit=20&userId=1&action=CREATE",
+              "raw": "{{baseUrl}}/api/v1/audit-logs?page=1&limit=20&userId=1&action=CREATE",
               "host": ["{{baseUrl}}"],
-              "path": ["audit-logs"],
+              "path": ["api", "v1", "audit-logs"],
               "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "20"
-                },
-                {
-                  "key": "userId",
-                  "value": "1"
-                },
-                {
-                  "key": "action",
-                  "value": "CREATE"
-                }
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "userId", "value": "1" },
+                { "key": "action", "value": "CREATE" }
               ]
-            }
-          }
+            },
+            "description": "SUPER_ADMIN — paginated audit log with optional userId and action filters."
+          },
+          "response": []
         },
         {
           "name": "Get Audit Log Details",
           "request": {
             "method": "GET",
             "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
             ],
             "url": {
-              "raw": "{{baseUrl}}/audit-logs/:id",
+              "raw": "{{baseUrl}}/api/v1/audit-logs/:id",
               "host": ["{{baseUrl}}"],
-              "path": ["audit-logs", ":id"],
-              "variable": [
+              "path": ["api", "v1", "audit-logs", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "SUPER_ADMIN — returns full audit log record with before/after payload."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "9. Materials",
+      "item": [
+        {
+          "name": "List Materials",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials?page=1&limit=20&search=&isActive=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" },
+                { "key": "isActive", "value": "true" }
+              ]
+            },
+            "description": "List materials with optional search and isActive filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Material Lookups",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials/lookups",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials", "lookups"]
+            },
+            "description": "Returns lookup lists for units, delivery types, loading points, and suppliers."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Material Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns full material details including assigned suppliers."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Material",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials"]
+            },
+            "description": "Creates a new material master record.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"MAT001\",\n  \"name\": \"ปูนซีเมนต์\",\n  \"unitId\": 1,\n  \"deliveryTypeId\": 1,\n  \"loadingPointId\": 1,\n  \"isActive\": true,\n  \"supplierIds\": [1, 2]\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Material",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates material name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ปูนซีเมนต์ชนิดพิเศษ\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Material",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a material."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Material",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted material."
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Material Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/materials/images",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "materials", "images"]
+            },
+            "description": "Multipart file upload for material images.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
                 {
-                  "key": "id",
-                  "value": "1"
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Image file to upload"
                 }
               ]
             }
-          }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10. Units",
+      "item": [
+        {
+          "name": "List Units",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/units?page=1&limit=20&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "units"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
+              ]
+            },
+            "description": "List units of measurement."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Unit Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/units/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "units", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns unit details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Unit",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/units",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "units"]
+            },
+            "description": "Creates a new unit of measurement.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"UNIT001\",\n  \"nameTh\": \"กิโลกรัม\",\n  \"nameEn\": \"Kilogram\",\n  \"symbol\": \"kg\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Unit",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/units/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "units", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates unit name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"กิโลกรัม\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Unit",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/units/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "units", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a unit."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Unit",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/units/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "units", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted unit."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11. Suppliers",
+      "item": [
+        {
+          "name": "List Suppliers",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/suppliers?page=1&limit=20&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "suppliers"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
+              ]
+            },
+            "description": "List suppliers."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Supplier Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/suppliers/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "suppliers", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns supplier details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Supplier",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/suppliers",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "suppliers"]
+            },
+            "description": "Creates a new supplier.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"SUP001\",\n  \"nameTh\": \"บริษัท วัสดุก่อสร้าง จำกัด\",\n  \"nameEn\": \"Construction Materials Co., Ltd.\",\n  \"taxId\": \"0105548012345\",\n  \"contactName\": \"นายสมศักดิ์ รักดี\",\n  \"telephone\": \"02-123-4567\",\n  \"email\": \"contact@example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Supplier",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/suppliers/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "suppliers", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates supplier name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"บริษัท วัสดุก่อสร้างชั้นนำ จำกัด\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Supplier",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/suppliers/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "suppliers", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a supplier."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Supplier",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/suppliers/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "suppliers", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted supplier."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "12. Categories",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories?page=1&limit=20&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "categories"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
+              ]
+            },
+            "description": "List material categories."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Category Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "categories", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns category details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Category",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "categories"]
+            },
+            "description": "Creates a new category.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"CAT001\",\n  \"nameTh\": \"วัสดุก่อสร้าง\",\n  \"nameEn\": \"Construction Materials\",\n  \"parentId\": null,\n  \"sortOrder\": 1,\n  \"iconColor\": \"#2196F3\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Category",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "categories", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates category name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"วัสดุก่อสร้างทั่วไป\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Category",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "categories", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a category."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Category",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "categories", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted category."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "13. Delivery Types",
+      "item": [
+        {
+          "name": "List Delivery Types",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/delivery-types?page=1&limit=20&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "delivery-types"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
+              ]
+            },
+            "description": "List delivery types."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Delivery Type Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/delivery-types/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "delivery-types", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns delivery type details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Delivery Type",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/delivery-types",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "delivery-types"]
+            },
+            "description": "Creates a new delivery type.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"DT001\",\n  \"nameTh\": \"จัดส่งทางไปรษณีย์\",\n  \"nameEn\": \"Postal Delivery\",\n  \"description\": \"Standard postal delivery service\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Delivery Type",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/delivery-types/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "delivery-types", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates delivery type name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"จัดส่งทางไปรษณีย์แบบด่วน\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Delivery Type",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/delivery-types/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "delivery-types", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a delivery type."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Delivery Type",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/delivery-types/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "delivery-types", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted delivery type."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "14. Loading Points",
+      "item": [
+        {
+          "name": "List Loading Points",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loading-points?page=1&limit=20&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loading-points"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
+              ]
+            },
+            "description": "List loading points (warehouses / depots)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Loading Point Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loading-points/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loading-points", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns loading point details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Loading Point",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loading-points",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loading-points"]
+            },
+            "description": "Creates a new loading point.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"LP001\",\n  \"nameTh\": \"คลังสินค้ากลาง\",\n  \"nameEn\": \"Central Warehouse\",\n  \"description\": \"Main storage and loading facility\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Loading Point",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loading-points/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loading-points", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates loading point name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"คลังสินค้ากลาง สาขา 1\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Loading Point",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loading-points/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loading-points", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a loading point."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Loading Point",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/loading-points/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "loading-points", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted loading point."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "15. Material Models",
+      "item": [
+        {
+          "name": "List Material Models",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/material-models?page=1&limit=20&search=",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "material-models"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" }
+              ]
+            },
+            "description": "List material models / specifications."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Material Model Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/material-models/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "material-models", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns material model details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Material Model",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/material-models",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "material-models"]
+            },
+            "description": "Creates a new material model.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"MODEL001\",\n  \"nameTh\": \"รุ่น A1\",\n  \"nameEn\": \"Model A1\",\n  \"description\": \"Standard specification model A1\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Material Model",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/material-models/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "material-models", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates material model name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"รุ่น A1 ปรับปรุง\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Material Model",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/material-models/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "material-models", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a material model."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Material Model",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/material-models/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "material-models", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted material model."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "16. Organizations",
+      "item": [
+        {
+          "name": "List Organizations",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations?page=1&limit=20&search=&type=department",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" },
+                { "key": "type", "value": "department" }
+              ]
+            },
+            "description": "List organizations with optional type filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Organization Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns organization details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations"]
+            },
+            "description": "Creates a new organization.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ORG001\",\n  \"nameTh\": \"บริษัท ก่อสร้าง จำกัด\",\n  \"nameEn\": \"Construction Co., Ltd.\",\n  \"type\": \"department\",\n  \"parentId\": null,\n  \"taxId\": \"0105548012345\",\n  \"address\": \"123 ถนนพระราม 4 แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates organization name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"บริษัท ก่อสร้างชั้นนำ จำกัด\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes an organization."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Organization",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/organizations/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "organizations", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted organization."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "17. Status Items",
+      "item": [
+        {
+          "name": "List Status Items",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status-items?page=1&limit=20&search=&module=purchasing",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "status-items"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "" },
+                { "key": "module", "value": "purchasing" }
+              ]
+            },
+            "description": "List status items with optional module filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Status Item Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status-items/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "status-items", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Returns status item details."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Status Item",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status-items",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "status-items"]
+            },
+            "description": "Creates a new status item.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"STATUS001\",\n  \"nameTh\": \"รอดำเนินการ\",\n  \"nameEn\": \"Pending\",\n  \"module\": \"purchasing\",\n  \"color\": \"#FFC107\",\n  \"sortOrder\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Status Item",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status-items/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "status-items", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Updates status item name.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameTh\": \"รอตรวจสอบ\",\n  \"updatedAt\": \"2026-08-08T08:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Status Item",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status-items/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "status-items", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Soft-deletes a status item."
+          },
+          "response": []
+        },
+        {
+          "name": "Restore Status Item",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status-items/:id/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "status-items", ":id", "restore"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Restores a soft-deleted status item."
+          },
+          "response": []
         }
       ]
     }
