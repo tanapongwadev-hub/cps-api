@@ -341,9 +341,10 @@ export async function seed(dataSource: DataSource) {
         code: 'GOODS_RECEIPT',
         name_th: 'รับเข้าวัตถุดิบ',
         name_en: 'Goods Receipt',
-        path: '/goods-receipts',
+        path: '/materials/goods-receipts',
         icon: 'inbox',
         sort_order: 85,
+        parentCode: 'MATERIALS_MANAGEMENTS', // submenu under จัดการวัสดุ
       },
       {
         code: 'REJECT_REASON_MANAGEMENT',
@@ -358,29 +359,66 @@ export async function seed(dataSource: DataSource) {
     const menuIdMap: Record<string, string> = {};
     for (const menu of menus) {
       const existing = await queryRunner.query(
-        `SELECT id FROM iam.menus WHERE code = $1`,
+        `SELECT id, parent_id FROM iam.menus WHERE code = $1`,
         [menu.code],
       );
 
+      // Resolve parent_id from parentCode if specified
+      const parentId = menu.parentCode ? menuIdMap[menu.parentCode] : null;
+      const menuType = parentId ? 'SUB' : 'MAIN';
+
       if (existing.length === 0) {
         const result = await queryRunner.query(
-          `INSERT INTO iam.menus (code, name_th, name_en, menu_type, path, icon, sort_order, is_visible, is_active, created_at, updated_at) 
-           VALUES ($1, $2, $3, 'MAIN', $4, $5, $6, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
+          `INSERT INTO iam.menus (code, name_th, name_en, menu_type, path, icon, sort_order, parent_id, is_visible, is_active, created_at, updated_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
            RETURNING id`,
           [
             menu.code,
             menu.name_th,
             menu.name_en,
+            menuType,
             menu.path,
             menu.icon,
             menu.sort_order,
+            parentId,
           ],
         );
         menuIdMap[menu.code] = result[0].id;
-        console.log(`  ✓ Created menu: ${menu.code}`);
+        console.log(`  ✓ Created menu: ${menu.code}${parentId ? ' (submenu)' : ''}`);
       } else {
-        menuIdMap[menu.code] = existing[0].id;
-        console.log(`  - Menu already exists: ${menu.code}`);
+        const current = existing[0];
+        menuIdMap[menu.code] = current.id;
+        // Update existing menu's parent_id, menu_type, and path if needed
+        const needsParentUpdate = current.parent_id !== parentId;
+        const needsPathUpdate = menu.path && current.path !== menu.path;
+        if (needsParentUpdate || needsPathUpdate) {
+          const sets: string[] = [];
+          const values: unknown[] = [];
+          let idx = 1;
+          if (needsParentUpdate) {
+            sets.push(`parent_id = $${idx++}`);
+            values.push(parentId);
+            sets.push(`menu_type = $${idx++}`);
+            values.push(menuType);
+          }
+          if (needsPathUpdate) {
+            sets.push(`path = $${idx++}`);
+            values.push(menu.path);
+          }
+          values.push(current.id);
+          await queryRunner.query(
+            `UPDATE iam.menus SET ${sets.join(', ')} WHERE id = $${idx}`,
+            values,
+          );
+          if (needsParentUpdate) {
+            console.log(`  ✓ Updated menu parent: ${menu.code}${parentId ? ' → submenu' : ' → main menu'}`);
+          }
+          if (needsPathUpdate) {
+            console.log(`  ✓ Updated menu path: ${menu.code} → ${menu.path}`);
+          }
+        } else {
+          console.log(`  - Menu already exists: ${menu.code}`);
+        }
       }
     }
 

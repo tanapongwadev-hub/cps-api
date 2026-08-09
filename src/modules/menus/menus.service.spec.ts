@@ -20,6 +20,7 @@ describe('MenusService', () => {
     } as unknown as jest.Mocked<Repository<Menu>>;
     permissionRepository = {
       find: jest.fn(),
+      count: jest.fn(),
     } as unknown as jest.Mocked<Repository<Permission>>;
 
     service = new MenusService(
@@ -80,5 +81,31 @@ describe('MenusService', () => {
       BadRequestException,
     );
     expect(menuRepository.remove).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting a menu that still has permissions with a bad request error', async () => {
+    menuRepository.findOne.mockResolvedValue({ id: '1' } as Menu);
+    menuRepository.count.mockResolvedValue(0);
+    permissionRepository.count.mockResolvedValue(1);
+
+    await expect(service.remove('1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(permissionRepository.count).toHaveBeenCalledWith({
+      where: { menuId: '1' },
+    });
+    expect(menuRepository.remove).not.toHaveBeenCalled();
+  });
+
+  it('deletes a menu with no children and no permissions', async () => {
+    const menu = { id: '1' } as Menu;
+    menuRepository.findOne.mockResolvedValue(menu);
+    menuRepository.count.mockResolvedValue(0);
+    permissionRepository.count.mockResolvedValue(0);
+
+    await expect(service.remove('1')).resolves.toEqual({
+      message: 'Menu deleted successfully',
+    });
+    expect(menuRepository.remove).toHaveBeenCalledWith(menu);
   });
 });

@@ -44,6 +44,7 @@ export type MaterialWithSuppliers = Omit<
   Material,
   'supplierMaterials' | 'unit' | 'model' | 'deliveryType' | 'loadingPoint'
 > & {
+  type?: string | null;
   unit?: MaterialLookupResponse | null;
   model?: MaterialLookupResponse | null;
   deliveryType?: MaterialLookupResponse | null;
@@ -119,6 +120,7 @@ export class MaterialsService {
         const material = materialRepository.create({
           code: normalizedCode,
           name: dto.name,
+          type: dto.type ?? null,
           unitId: dto.unitId,
           deliveryTypeId: dto.deliveryTypeId ?? null,
           modelId: dto.modelId ?? null,
@@ -128,6 +130,7 @@ export class MaterialsService {
           imagePath: promotedImagePath ?? null,
           specification: dto.specification ?? null,
           description: dto.description ?? null,
+          packingQuantity: dto.packingQuantity ?? null,
           isActive: dto.isActive ?? true,
           createdBy: userId,
           updatedBy: userId,
@@ -312,6 +315,11 @@ export class MaterialsService {
         loadingPointId: query.loadingPointId,
       });
     }
+    if (query.type) {
+      queryBuilder.andWhere('material.type = :type', {
+        type: query.type,
+      });
+    }
     if (query.supplierId) {
       queryBuilder.andWhere(
         `EXISTS (
@@ -433,6 +441,7 @@ export class MaterialsService {
       'id',
       'code',
       'name',
+      'type',
       'unitId',
       'deliveryTypeId',
       'modelId',
@@ -442,6 +451,7 @@ export class MaterialsService {
       'imagePath',
       'specification',
       'description',
+      'packingQuantity',
       'isActive',
       'createdBy',
       'updatedBy',
@@ -648,6 +658,7 @@ export class MaterialsService {
     if (dto.code !== undefined) material.code = normalizedCode;
     for (const field of [
       'name',
+      'type',
       'unitId',
       'deliveryTypeId',
       'modelId',
@@ -657,6 +668,7 @@ export class MaterialsService {
       'imagePath',
       'specification',
       'description',
+      'packingQuantity',
       'isActive',
     ] as const) {
       if (dto[field] !== undefined) {

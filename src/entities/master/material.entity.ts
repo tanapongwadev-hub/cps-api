@@ -15,6 +15,12 @@ import { MaterialModel } from './material-model.entity';
 import { SupplierMaterial } from './supplier-material.entity';
 import { Unit } from './unit.entity';
 
+export enum MaterialType {
+  PC = 'PC',
+  OF = 'OF',
+  OF_MAT = 'OF_MAT',
+}
+
 @Entity('materials', { schema: 'master' })
 @Index(['code'], { unique: true })
 export class Material {
@@ -26,6 +32,16 @@ export class Material {
 
   @Column({ type: 'varchar', length: 255 })
   name: string;
+
+  @Index()
+  @Column({
+    name: 'type',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+    default: null,
+  })
+  type: MaterialType | null;
 
   @Index()
   @Column({ name: 'unit_id', type: 'bigint' })
@@ -71,6 +87,13 @@ export class Material {
 
   @Column({ type: 'text', nullable: true })
   description: string | null;
+
+  @Column({
+    name: 'packing_quantity',
+    type: 'integer',
+    nullable: true,
+  })
+  packingQuantity: number | null;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;

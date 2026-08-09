@@ -9,6 +9,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { MaterialType } from '../../../entities/master/material.entity';
 
 const POSITIVE_DECIMAL_ID = /^[1-9]\d*$/;
 
@@ -94,6 +95,12 @@ export class ListMaterialsQueryDto {
   @IsString()
   @Matches(POSITIVE_DECIMAL_ID)
   loadingPointId?: string | null;
+
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @IsIn(['PC', 'OF', 'OF_MAT'])
+  type?: MaterialType | null;
 
   @Transform(nullableTrimmedString)
   @IsOptional()

@@ -287,19 +287,36 @@ export class MenusService {
   }
 
   async remove(id: string) {
-    const menu = await this.findOne(id);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    // Check if menu has children
-    const childCount = await this.menuRepository.count({
-      where: { parentId: id },
-    });
+    try {
+      const menu = await this.findOne(id);
 
-    if (childCount > 0) {
-      throw new BadRequestException('Cannot delete menu with child menus');
+      // Check if menu has children
+      const childCount = await this.menuRepository.count({
+        where: { parentId: id },
+      });
+
+      if (childCount > 0) {
+        throw new BadRequestException('Cannot delete menu with child menus');
+      }
+
+      // Delete all permissions associated with this menu
+      await queryRunner.manager.delete(Permission, { menuId: id });
+
+      // Delete the menu
+      await queryRunner.manager.remove(Menu, menu);
+
+      await queryRunner.commitTransaction();
+      return { message: 'Menu and its permissions deleted successfully' };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    await this.menuRepository.remove(menu);
-    return { message: 'Menu deleted successfully' };
   }
 
   private mapMenuType(menuType?: string): 'MAIN' | 'SUB' {

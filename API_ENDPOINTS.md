@@ -265,7 +265,7 @@ Request สำหรับกำหนดแผนก:
 
 | Method | Endpoint | Permission | Description |
 |---|---|---|---|
-| GET | `/materials` | `MATERIAL_VIEW` | รายการ Material (รองรับ `page`, `limit`, `search`, `isActive`, `unitId`, `modelId`, `deliveryTypeId`, `loadingPointId`, `supplierId`, `sortBy`, `sortOrder`) |
+| GET | `/materials` | `MATERIAL_VIEW` | รายการ Material (รองรับ `page`, `limit`, `search`, `isActive`, `type`, `unitId`, `modelId`, `deliveryTypeId`, `loadingPointId`, `supplierId`, `sortBy`, `sortOrder`) |
 | GET | `/materials/lookups` | `MATERIAL_VIEW` | ดึง Lookup Master Data ทั้งหมด (units, suppliers, models, deliveryTypes, loadingPoints) สำหรับสร้างฟอร์ม |
 | GET | `/materials/:id` | `MATERIAL_VIEW` | ข้อมูล Material ตาม id พร้อม suppliers และ lookup relations |
 | POST | `/materials` | `MATERIAL_CREATE` | สร้าง Material ใหม่ |
@@ -282,6 +282,7 @@ Request สำหรับกำหนดแผนก:
 | `limit` | int 1–100 | `20` | จำนวนต่อหน้า |
 | `search` | string | — | ค้นหา `code` หรือ `name` (ILIKE) |
 | `isActive` | bool | — | กรองตามสถานะ |
+| `type` | enum | — | กรองตามประเภท: `PC` \| `OF` \| `OF_MAT` |
 | `unitId` | string (positive int) | — | กรองตาม Unit |
 | `modelId` | string (positive int) | — | กรองตาม Material Model |
 | `deliveryTypeId` | string (positive int) | — | กรองตาม Delivery Type |
@@ -299,6 +300,7 @@ Response:
       "id": "42",
       "code": "MAT-001",
       "name": "น้ำมันปาล์ม",
+      "type": "PC",
       "unitId": "1",
       "deliveryTypeId": "1",
       "modelId": null,
@@ -308,6 +310,7 @@ Response:
       "imagePath": "/uploads/materials/abc.jpg",
       "specification": "...",
       "description": "...",
+      "packingQuantity": 25,
       "isActive": true,
       "createdBy": "1",
       "updatedBy": "1",
@@ -332,6 +335,7 @@ Response:
 {
   "code": "MAT-001",
   "name": "น้ำมันปาล์ม",
+  "type": "PC",
   "unitId": "1",
   "deliveryTypeId": "1",
   "modelId": null,
@@ -341,14 +345,17 @@ Response:
   "imagePath": "/uploads/materials/.tmp/<uuid>.jpg",
   "specification": "...",
   "description": "...",
+  "packingQuantity": 25,
   "isActive": true,
   "supplierIds": ["1", "2"]
 }
 ```
 
 - `code` จะถูก trim + uppercase อัตโนมัติ
+- `type` เป็น optional ค่าที่รองรับ: `PC` \| `OF` \| `OF_MAT` (ประเภทวัตถุดิบ)
 - `imagePath` ต้องเป็น path ที่ได้จาก `POST /materials/images` (ถ้าไม่ส่ง = ไม่มีรูป)
 - `supplierIds` ต้องไม่ซ้ำ และทุก id ต้อง active
+- `packingQuantity` เป็น optional จำนวนเต็ม ≥ 1 (จำนวนต่อแพ็ก/หน่วยบรรจุ) ส่ง `null` เพื่อล้างค่า
 
 ### `PATCH /materials/:id`
 
@@ -357,11 +364,13 @@ Response:
 ```json
 {
   "name": "น้ำมันปาล์ม (ใหม่)",
+  "type": "OF",
   "updatedAt": "2026-08-02T10:00:00.000Z"
 }
 ```
 
 - `updatedAt` ต้องตรงกับค่าปัจจุบัน → ถ้าไม่ตรง backend ตอบ `409 Conflict`
+- `type` สามารถเปลี่ยนได้: `PC` \| `OF` \| `OF_MAT` หรือ `null` เพื่อล้างค่า
 - ถ้าเปลี่ยน `supplierIds` ระบบจะ sync (เพิ่มใหม่ / soft delete ของเดิมที่หายไป / restore ของเดิม)
 - ถ้าเปลี่ยน `imagePath` ระบบจะ promote ไฟล์ใหม่และลบไฟล์เก่า (ถ้าสำเร็จ)
 

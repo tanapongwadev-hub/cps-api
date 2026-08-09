@@ -22,6 +22,7 @@ describe('Material DTOs', () => {
     const dto = plainToInstance(CreateMaterialDto, {
       code: '  MAT-001  ',
       name: '  Steel coil  ',
+      type: '  PC  ',
       unitId: ' 10 ',
       deliveryTypeId: '',
       modelId: ' 20 ',
@@ -39,6 +40,7 @@ describe('Material DTOs', () => {
     expect(dto).toMatchObject({
       code: 'MAT-001',
       name: 'Steel coil',
+      type: 'PC',
       unitId: '10',
       deliveryTypeId: null,
       modelId: '20',
@@ -117,6 +119,7 @@ describe('Material DTOs', () => {
       modelId: '',
       deliveryTypeId: '2',
       loadingPointId: '3',
+      type: '  PC  ',
       supplierId: '4',
       sortBy: 'name',
       sortOrder: 'desc',
@@ -139,6 +142,7 @@ describe('Material DTOs', () => {
       modelId: null,
       deliveryTypeId: '2',
       loadingPointId: '3',
+      type: 'PC',
       supplierId: '4',
       sortBy: 'name',
       sortOrder: 'desc',

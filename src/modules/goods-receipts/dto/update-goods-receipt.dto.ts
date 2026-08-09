@@ -14,7 +14,6 @@ import {
   ISO_DATE,
   POSITIVE_DECIMAL_ID,
   nullableTrimmedString,
-  sourceValue,
   trimString,
 } from './transforms';
 
@@ -44,7 +43,7 @@ export class UpdateGoodsReceiptDto {
   @Type(() => GoodsReceiptItemDto)
   items?: GoodsReceiptItemDto[];
 
-  @Transform(sourceValue)
+  @IsOptional()
   @IsISO8601({ strict: true })
-  updatedAt: string;
+  updatedAt?: string;
 }

@@ -3,13 +3,17 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsInt,
   IsISO8601,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
+  Min,
 } from 'class-validator';
+import { MaterialType } from '../../../entities/master/material.entity';
 
 const POSITIVE_DECIMAL_ID = /^[1-9]\d*$/;
 
@@ -58,6 +62,12 @@ export class UpdateMaterialDto {
   @IsNotEmpty()
   @MaxLength(255)
   name?: string;
+
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @IsIn(['PC', 'OF', 'OF_MAT'])
+  type?: MaterialType | null;
 
   @Transform(trimString)
   @IsOptional()
@@ -110,6 +120,12 @@ export class UpdateMaterialDto {
   @IsOptional()
   @IsString()
   description?: string | null;
+
+  @Transform(sourceValue)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  packingQuantity?: number | null;
 
   @Transform(trimStringArray)
   @IsOptional()

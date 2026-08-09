@@ -167,8 +167,8 @@ export class GoodsReceiptsService implements OnApplicationBootstrap {
         throw new ConflictException('Only a draft goods receipt can be edited');
       }
       if (
-        new Date(dto.updatedAt).getTime() !==
-        new Date(receipt.updatedAt).getTime()
+        dto.updatedAt &&
+        new Date(dto.updatedAt).getTime() !== new Date(receipt.updatedAt).getTime()
       ) {
         throw new ConflictException('Goods receipt has been updated');
       }
