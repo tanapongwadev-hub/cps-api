@@ -698,6 +698,122 @@ Response คือ metadata ที่ต้องส่งกลับใน `at
 | `404` | ไม่พบเอกสาร หรือไม่พบไฟล์แนบ |
 | `409` | `supplierDocNo` ซ้ำกับ supplier เดียวกัน (เอกสารที่ไม่ cancelled), `updatedAt` ไม่ตรง (optimistic lock), หรือ action ไม่ตรงกับสถานะเอกสาร (เช่น post เอกสารที่ posted แล้ว, แก้เอกสารที่ posted, ลบไฟล์แนบของเอกสาร posted) |
 
+## Materials Receiving (รับเข้าวัตถุดิบ + Stock Balance + QR Code)
+
+> ต่างจาก Goods Receipt ตรงที่เป็น **single material per receiving** และ **update stock balance** ทันทีที่ confirm
+> สิทธิ์ที่ใช้: `MATERIALS_RECEIVING_VIEW`, `MATERIALS_RECEIVING_CREATE`, `MATERIALS_RECEIVING_UPDATE`, `MATERIALS_RECEIVING_DELETE`, `MATERIALS_RECEIVING_CONFIRM`, `MATERIALS_RECEIVING_CANCEL`
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| GET | `/materials-receiving` | `MATERIALS_RECEIVING_VIEW` | รายการรับเข้า (รองรับ `page`, `limit`, `search`, `status`, `supplierId`, `materialId`, `internalLotNo`, `receiveDateFrom`, `receiveDateTo`, `hasPackages`, `sortBy`, `sortOrder`) |
+| GET | `/materials-receiving/lookups` | `MATERIALS_RECEIVING_VIEW` | ดึง suppliers / materials (พร้อม packingQuantity) / units สำหรับฟอร์ม |
+| GET | `/materials-receiving/by-lot/:internalLotNo` | `MATERIALS_RECEIVING_VIEW` | ค้นหาด้วย Internal Lot No. (ใช้ตอน scan QR) คืน 404 ถ้าไม่พบ |
+| GET | `/materials-receiving/:id` | `MATERIALS_RECEIVING_VIEW` | รายละเอียดการรับเข้า พร้อม `packages[]` และ relations |
+| POST | `/materials-receiving` | `MATERIALS_RECEIVING_CREATE` | สร้าง draft + generate lot no + คำนวณ package + generate QR (รองรับ `idempotencyKey`) |
+| PATCH | `/materials-receiving/:id` | `MATERIALS_RECEIVING_UPDATE` | แก้ draft (ต้องส่ง `updatedAt` เพื่อทำ optimistic concurrency check) |
+| DELETE | `/materials-receiving/:id` | `MATERIALS_RECEIVING_DELETE` | ลบ draft เท่านั้น |
+| POST | `/materials-receiving/:id/confirm` | `MATERIALS_RECEIVING_CONFIRM` | ยืนยันการรับเข้า → update `stock_balances` + บันทึก `stock_transactions` |
+| POST | `/materials-receiving/:id/cancel` | `MATERIALS_RECEIVING_CANCEL` | ยกเลิก (ถ้าเคย confirm จะ revert stock ด้วย `transactionType=ADJUST`) |
+
+### Internal Lot No. & Supplier Lot No.
+
+| ประเภท | Format | กฎ |
+|---|---|---|
+| Internal Lot No. | `CCI-YYYYMMDD-XXX` | reset ทุกวัน, running 3 หลัก เริ่ม 001, จัดสรรผ่าน `material_receiving_lot_counters` ด้วย `pessimistic_write` lock |
+| Supplier Lot No. | `SUP-YYYYMMDD` | generate จาก `supplierProductionDate` (ไม่มี running number) |
+
+ตัวอย่าง:
+```text
+วันที่ 2026-08-09, รายการแรก: CCI-20260809-001
+วันที่ 2026-08-09, รายการที่สอง: CCI-20260809-002
+วันที่ 2026-08-10, รายการแรก: CCI-20260810-001   (running reset)
+
+Supplier Production Date 2026-08-01 → SUP-20260801
+```
+
+### Package Calculation
+
+```
+packageCount = CEIL(receiveQuantity / materials.packingQuantity)
+```
+
+ตัวอย่าง `packingQuantity=200`, `receiveQuantity=1050` → 6 packages (5×200 + 1×50), และ `SUM(packages.quantity) = 1050`
+
+### QR Code
+
+QR Code (`qr_code`) เก็บเป็น base64 PNG ขนาด ~150px และ `qr_payload` เก็บข้อมูล JSONB ที่ scan ได้:
+
+```json
+{
+  "version": "1.0",
+  "internalLotNo": "CCI-20260809-001",
+  "materialCode": "MAT-A",
+  "receiveQuantity": "1000",
+  "supplierLotNo": "SUP-20260801"
+}
+```
+
+`internalLotNo` เป็นค่าหลักสำหรับ identify และค้นหากลับ ใช้ `GET /materials-receiving/by-lot/:internalLotNo`
+
+### Query Parameters ของ `GET /materials-receiving`
+
+| Param | Type | Default | หมายเหตุ |
+|---|---|---|---|
+| `page` | int ≥ 1 | `1` | หน้าที่ต้องการ |
+| `limit` | int 1–100 | `20` | จำนวนต่อหน้า |
+| `search` | string | — | ค้นหา `internalLotNo`, `supplierLotNo`, `material.code` (ILIKE) |
+| `status` | enum | — | `draft` \| `confirmed` \| `cancelled` |
+| `supplierId` | string (positive int) | — | กรองตาม supplier |
+| `materialId` | string (positive int) | — | กรองตาม material |
+| `internalLotNo` | `CCI-YYYYMMDD-XXX` | — | match แบบ exact |
+| `receiveDateFrom` / `receiveDateTo` | `YYYY-MM-DD` | — | ช่วงวันที่รับ |
+| `hasPackages` | bool | — | กรองตามการมี/ไม่มี package detail |
+| `sortBy` | enum | `receiveDate` | `internalLotNo` \| `receiveDate` \| `supplierLotNo` \| `createdAt` \| `updatedAt` |
+| `sortOrder` | enum | `desc` | `asc` \| `desc` |
+
+### `POST /materials-receiving`
+
+```json
+{
+  "materialId": "3",
+  "supplierId": "2",
+  "receiveQuantity": "1000",
+  "supplierProductionDate": "2026-08-01",
+  "receiveDate": "2026-08-09",
+  "idempotencyKey": "order-20260809-001",
+  "remark": "ฝากรับที่จุด A"
+}
+```
+
+- `idempotencyKey` (optional) — ถ้าส่ง ระบบจะคืนใบรับเดิมที่สร้างด้วย key นี้แล้ว (ถ้ามี) เพื่อกันการสร้างซ้ำจาก retry
+- `packingQuantityOverride` (optional) — ใช้กรณี materials.packing_quantity ยังว่าง หรือต้องการ snapshot ค่าต่างหาก
+- ทุกครั้งที่สร้าง ระบบจะ: validate material + supplier + supplier_material mapping → snapshot `packingQuantity` → คำนวณ `packageCount` → generate `internalLotNo` (lock lot counter) → generate `supplierLotNo` → generate QR (base64 PNG) → save receiving + packages ทั้งหมดภายใน transaction เดียว
+
+### `POST /materials-receiving/:id/confirm`
+
+ยืนยันการรับเข้า (draft → confirmed) และ update stock:
+- ล็อก `stock_balances` แถวของ material นั้นด้วย `pessimistic_write` แล้วบวก `receiveQuantity`
+- บันทึก `stock_transactions` ที่ `transactionType=RECEIVE`, `referenceType=MATERIAL_RECEIVING`, `referenceLotNo=internalLotNo`
+- กรอก `confirmedBy`, `confirmedAt`
+
+### `POST /materials-receiving/:id/cancel`
+
+```json
+{ "cancelReason": "รับผิด material" }
+```
+
+- ถ้าเคย confirm → revert stock balance (ลบ receiveQuantity) + บันทึก `stock_transactions` ที่ `transactionType=ADJUST`, `quantityOut=receiveQuantity`
+- ถ้ายังเป็น draft → เปลี่ยนสถานะอย่างเดียว ไม่แตะ stock
+- `cancelReason` ต้องไม่ว่าง
+
+### Error ที่พบบ่อยของ Materials Receiving
+
+| Code | เมื่อไหร่ |
+|---|---|
+| `400` | validation ไม่ผ่าน, `receiveQuantity ≤ 0`, `receiveDate` เป็นอนาคต, material/supplier ไม่ active, material ไม่ได้ map กับ supplier ใน `supplier_materials`, `materials.packing_quantity` ว่างและไม่ส่ง `packingQuantityOverride` |
+| `404` | ไม่พบ material receiving หรือ internal lot no |
+| `409` | `internalLotNo` ซ้ำ (race condition), `idempotencyKey` ซ้ำ, `updatedAt` ไม่ตรง (optimistic lock), หรือ action ไม่ตรงสถานะ (เช่น confirm draft ที่ confirm แล้ว, cancel cancelled, แก้/ลบ receiving ที่ confirmed) |
+
 ## Root
 
 | Method | Endpoint | Auth | Description |

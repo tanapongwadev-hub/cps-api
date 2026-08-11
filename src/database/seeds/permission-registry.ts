@@ -4,6 +4,7 @@ import { GOODS_RECEIPT_PERMISSIONS } from '../../modules/goods-receipts/goods-re
 import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
+import { MATERIALS_RECEIVING_PERMISSIONS } from '../../modules/materials-receiving/materials-receiving-permissions';
 import { ORGANIZATION_PERMISSIONS } from '../../modules/organizations/organization-permissions';
 import { REJECT_REASON_PERMISSIONS } from '../../modules/reject-reasons/reject-reason-permissions';
 import { STATUS_ITEM_PERMISSIONS } from '../../modules/status-items/status-item-permissions';
@@ -21,6 +22,21 @@ export const DEFAULT_ACTION_CODES = [
 /** action เพิ่มเติมที่ใช้กับเอกสารธุรกรรม */
 export const DOCUMENT_ACTION_CODES = [
   ...DEFAULT_ACTION_CODES,
+  'POST',
+  'CANCEL',
+] as const;
+
+/**
+ * action สำหรับ Materials Receiving
+ * - POST   -> CONFIRM (เปลี่ยนสถานะ draft -> confirmed และ update stock)
+ * - CANCEL -> CANCEL (ยกเลิกใบรับ และ revert stock ถ้าเคย confirm)
+ * ใช้ POST/CANCEL action เดิมได้ แต่ permission code แยกเพื่อให้สิทธิ์ละเอียดกว่า
+ */
+export const MATERIALS_RECEIVING_ACTION_CODES = [
+  'CREATE',
+  'READ',
+  'UPDATE',
+  'DELETE',
   'POST',
   'CANCEL',
 ] as const;
@@ -67,11 +83,17 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     POST: GOODS_RECEIPT_PERMISSIONS.POST,
     CANCEL: GOODS_RECEIPT_PERMISSIONS.CANCEL,
   },
+  MATERIALS_RECEIVING: {
+    ...fromCrud(MATERIALS_RECEIVING_PERMISSIONS),
+    POST: MATERIALS_RECEIVING_PERMISSIONS.CONFIRM,
+    CANCEL: MATERIALS_RECEIVING_PERMISSIONS.CANCEL,
+  },
 };
 
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
 export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
   GOODS_RECEIPT: DOCUMENT_ACTION_CODES,
+  MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
 };
 
 export function resolveActionCodes(menuCode: string): readonly string[] {

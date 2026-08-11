@@ -37,7 +37,8 @@ CPS Access Control เป็นระบบจัดการสิทธิ์�
 ### 1.1 Domain Requirement Documents
 
 - [Material Master Requirements](docs/wiki/material-master.md) — ข้อมูลหลักวัตถุดิบ, Supplier และ Master Data ที่เกี่ยวข้อง
-- [Goods Receipt Requirements](docs/wiki/goods-receipt.md) — เอกสารรับเข้าวัตถุดิบ, ขอบเขตที่ตัดออก และกฎธุรกิจ
+- [Goods Receipt Requirements](docs/wiki/goods-receipt.md) — เอกสารรับเข้าวัตถุดิบ, ขอบเขตที่ตัดออก และกฎธุรกรรม
+- [Materials Receiving Spec](#35-inventory-entities--materials-receiving--stock-balance-5-ตารางเพิ่ม) — รับเข้าวัตถุดิบ (single material) + package breakdown + QR + stock balance
 
 ## 2. สถาปัตยกรรม (Architecture)
 
@@ -194,6 +195,43 @@ Schema `inventory` เก็บเอกสารธุรกรรม แยก
 - ยังไม่มี stock ledger หรือยอดคงเหลือในเฟสนี้ (ดูเหตุผลใน [Goods Receipt Requirements §2.2](docs/wiki/goods-receipt.md))
 
 รายละเอียด requirement ทั้งหมดอยู่ใน [Goods Receipt Requirements](docs/wiki/goods-receipt.md)
+
+### 3.5 Inventory Entities — Materials Receiving + Stock Balance (5 ตารางเพิ่ม)
+
+Schema `inventory` เก็บ transaction เพิ่มเติมจาก Goods Receipt — เน้น **single material per receiving** + **update stock balance** + **QR code** ทันทีที่ confirm
+
+| Table | คำอธิบาย | ความสัมพันธ์ |
+|---|---|---|
+| `inventory.material_receivings` | หัวเอกสารรับเข้า (1 material/1 ใบ) | FK `master.organizations`, `master.suppliers`, `master.materials`, `master.units` |
+| `inventory.material_receiving_packages` | รายละเอียดแต่ละบรรจุภัณฑ์ | `ON DELETE CASCADE` จาก receiving |
+| `inventory.material_receiving_lot_counters` | ตัวรันเลข lot ภายใน (CCI-YYYYMMDD-XXX) | Unique `(lot_date)` |
+| `inventory.stock_balances` | ยอดคงเหลือต่อ Material (snapshot) | Unique `(material_id)`, FK `master.materials` |
+| `inventory.stock_transactions` | ประวัติการเคลื่อนไหวสต็อก | FK `master.materials` |
+
+```text
+master.materials  ──┐
+                     ├──< inventory.material_receivings ──< material_receiving_packages
+master.suppliers ────┤                              │
+                     │                              ├──< stock_transactions
+master.units ───────┤
+                     │                              │
+                     └──> inventory.stock_balances─┘
+                              │
+                              └──< stock_transactions
+```
+
+ข้อกำหนดสำคัญ:
+
+- **Internal Lot No.** = `CCI-YYYYMMDD-XXX` — generate ผ่าน `material_receiving_lot_counters` ด้วย `pessimistic_write` lock, reset running number ทุกวัน, UNIQUE constraint เป็น defense in depth
+- **Supplier Lot No.** = `SUP-YYYYMMDD` — generate จาก `supplier_production_date` (ไม่มี running number)
+- **Package Count** = `CEIL(receiveQuantity / packingQuantity)` — `packing_quantity` snapshot เก็นไว้ตอนรับเข้า เพื่อกันไม่ให้ยอดเพี้ยนเมื่อ master เปลี่ยน
+- **QR Code** เก็บเป็น base64 PNG ใน `qr_code` และ JSONB payload ใน `qr_payload` (version 1.0) — scan แล้วใช้ internal lot no ค้นหากลับ
+- **Idempotency** ผ่าน optional `idempotency_key` พร้อม UNIQUE partial index
+- **Concurrency** — `stock_balances` update ใช้ `SELECT FOR UPDATE` ทุกครั้ง, transaction เดียวรวม receiving + packages + stock balance + stock transaction
+- **Stock balance** บวกเมื่อ `confirm`, ลบเมื่อ `cancel` ที่เคย confirm (พร้อม `stock_transactions` ที่ `transactionType=ADJUST`)
+- สถานะ: `draft` → `confirmed` → `cancelled` (แก้/ลบได้เฉพาะ draft, cancel confirmed จะ revert stock)
+
+API endpoints: `GET/POST/PATCH/DELETE /materials-receiving` + `POST /materials-receiving/:id/confirm` + `POST /materials-receiving/:id/cancel` + `GET /materials-receiving/by-lot/:internalLotNo`
 
 ## 4. กระบวนการเข้าสู่ระบบ (Authentication Flow)
 

@@ -25,6 +25,7 @@ import { StatusItemsModule } from './modules/status-items/status-items.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { RejectReasonsModule } from './modules/reject-reasons/reject-reasons.module';
 import { GoodsReceiptsModule } from './modules/goods-receipts/goods-receipts.module';
+import { MaterialsReceivingModule } from './modules/materials-receiving/materials-receiving.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { GoodsReceiptsModule } from './modules/goods-receipts/goods-receipts.mod
     OrganizationsModule,
     RejectReasonsModule,
     GoodsReceiptsModule,
+    MaterialsReceivingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

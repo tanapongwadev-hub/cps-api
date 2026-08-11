@@ -339,11 +339,20 @@ export async function seed(dataSource: DataSource) {
       },
       {
         code: 'GOODS_RECEIPT',
-        name_th: 'รับเข้าวัตถุดิบ',
+        name_th: 'รับเข้าวัตถุดิบ (เอกสาร)',
         name_en: 'Goods Receipt',
         path: '/materials/goods-receipts',
         icon: 'inbox',
         sort_order: 85,
+        parentCode: 'MATERIALS_MANAGEMENTS', // submenu under จัดการวัสดุ
+      },
+      {
+        code: 'MATERIALS_RECEIVING',
+        name_th: 'รับเข้าวัตถุดิบ',
+        name_en: 'Materials Receiving',
+        path: '/materials/materials-receiving',
+        icon: 'package-plus',
+        sort_order: 86,
         parentCode: 'MATERIALS_MANAGEMENTS', // submenu under จัดการวัสดุ
       },
       {
