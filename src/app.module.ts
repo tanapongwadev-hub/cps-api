@@ -26,6 +26,7 @@ import { OrganizationsModule } from './modules/organizations/organizations.modul
 import { RejectReasonsModule } from './modules/reject-reasons/reject-reasons.module';
 import { GoodsReceiptsModule } from './modules/goods-receipts/goods-receipts.module';
 import { MaterialsReceivingModule } from './modules/materials-receiving/materials-receiving.module';
+import { StockBalancesModule } from './modules/stock-balances/stock-balances.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { MaterialsReceivingModule } from './modules/materials-receiving/material
     RejectReasonsModule,
     GoodsReceiptsModule,
     MaterialsReceivingModule,
+    StockBalancesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

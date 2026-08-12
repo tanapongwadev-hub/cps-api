@@ -409,6 +409,34 @@ Response:
 
 > ทุก lookup จะคืนเฉพาะ `isActive = true` เรียงตาม `code ASC`
 
+## Stock Balances (ยอดคงเหลือวัสดุ)
+
+> ดึงยอดคงเหลือวัสดุตาม stock_balances table
+> สิทธิ์ที่ใช้: `MATERIALS_RECEIVING_VIEW`
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| GET | `/stock-balances` | `MATERIAL_VIEW` | รายการยอดคงเหลือทั้งหมด |
+| GET | `/stock-balances/:materialId` | `MATERIAL_VIEW` | ยอดคงเหลือของวัสดุตาม id |
+
+### Response ของ `GET /stock-balances/:materialId`
+
+```json
+{
+  "materialId": "42",
+  "materialCode": "MAT-001",
+  "materialName": "น้ำมันปาล์ม",
+  "quantity": "1000.0000",
+  "unitCode": "KG",
+  "unitNameTh": "กิโลกรัม",
+  "lastMovementAt": "2026-08-09T10:30:00.000Z"
+}
+```
+
+- `quantity` คืน string เพื่อรักษา precision (max 4 ตำแหน่งทศนิยม)
+- `lastMovementAt` คืน `null` ถ้ายังไม่มีการเคลื่อนไหว
+- คืน `404 Not Found` ถ้าไม่พบ material
+
 ## Master Data (CRUD pattern เดียวกันทั้ง 9 resource)
 
 Guard: `JwtAuthGuard` + `ActiveAssignmentGuard` + `PermissionGuard` — ต้องส่ง Bearer token, ต้องมี active assignment และต้องมี permission ตามตาราง
