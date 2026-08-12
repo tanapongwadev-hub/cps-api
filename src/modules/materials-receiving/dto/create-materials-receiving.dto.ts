@@ -23,10 +23,15 @@ export class CreateMaterialsReceivingDto {
   @Matches(POSITIVE_DECIMAL_ID, { message: 'materialId must be a valid id' })
   materialId: string;
 
-  @Transform(trimString)
+  /**
+   * Supplier — optional; if omitted the service auto-derives from material's supplier list.
+   * Required when material has more than one active supplier.
+   */
+  @Transform(nullableTrimmedString)
+  @IsOptional()
   @IsString()
   @Matches(POSITIVE_DECIMAL_ID, { message: 'supplierId must be a valid id' })
-  supplierId: string;
+  supplierId?: string;
 
   @Transform(decimalString)
   @IsString()

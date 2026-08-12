@@ -10,6 +10,16 @@ import {
 } from 'typeorm';
 import { MaterialReceiving } from './material-receiving.entity';
 
+export const PACKAGE_STATUSES = [
+  'pending',
+  'in_stock',
+  'issued',
+  'damaged',
+  'returned',
+] as const;
+
+export type PackageStatus = (typeof PACKAGE_STATUSES)[number];
+
 @Entity('material_receiving_packages', { schema: 'inventory' })
 @Index(['materialReceivingId', 'packageNo'], { unique: true })
 export class MaterialReceivingPackage {
@@ -23,8 +33,23 @@ export class MaterialReceivingPackage {
   @Column({ name: 'package_no', type: 'integer' })
   packageNo: number;
 
+  /**
+   * LOT-CCI-DETAIL — e.g. CCI-2026H1300001-01
+   * Populated from the receiving's internal lot no + sequential package suffix.
+   */
+  @Index({ unique: true })
+  @Column({ name: 'lot_detail_no', type: 'varchar', length: 40, nullable: true })
+  lotDetailNo: string | null;
+
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   quantity: string;
+
+  @Column({ name: 'qr_code', type: 'text', nullable: true })
+  qrCode: string | null;
+
+  @Index()
+  @Column({ type: 'varchar', length: 20, default: 'pending' })
+  status: PackageStatus;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;

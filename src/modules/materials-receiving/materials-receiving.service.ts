@@ -21,6 +21,8 @@ import {
   MaterialReceiving,
   QrPayload,
 } from '../../entities/inventory/material-receiving.entity';
+
+/** Package QR Payload — encoded as pipe-delimited string for scan reliability */
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
 import { StockTransaction } from '../../entities/inventory/stock-transaction.entity';
 import { Material } from '../../entities/master/material.entity';
@@ -49,11 +51,42 @@ const DECIMAL_SCALE = 4;
 const LOT_PREFIX = 'CCI';
 /** Supplier Lot No. prefix */
 const SUPPLIER_LOT_PREFIX = 'SUP';
+/** Run No. prefix (Material Receiving) */
+const RUN_NO_PREFIX = 'MR';
 /** QR schema version (เพิ่มเมื่อ contract เปลี่ยน) */
 const QR_PAYLOAD_VERSION = '1.0';
 
 const SUPPLIER_MAPPING_ERROR =
   'Material is not linked to supplier. Link them in Material Master first.';
+
+/**
+ * Month → letter mapping for LOT codes.
+ * 1=A, 2=B, 3=C, 4=D, 5=E, 6=F, 7=G, 8=H, 9=I, 10=J, 11=K, 12=L
+ */
+const MONTH_LETTER_MAP: Record<number, string> = {
+  1: 'A',
+  2: 'B',
+  3: 'C',
+  4: 'D',
+  5: 'E',
+  6: 'F',
+  7: 'G',
+  8: 'H',
+  9: 'I',
+  10: 'J',
+  11: 'K',
+  12: 'L',
+};
+
+/**
+ * Build the date-portion of a LOT code.
+ * e.g. "2026-08-13" → "2026H13"
+ */
+function lotDatePart(dateStr: string): string {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const monthLetter = MONTH_LETTER_MAP[month] ?? String(month);
+  return `${year}${monthLetter}${String(day).padStart(2, '0')}`;
+}
 
 @Injectable()
 export class MaterialsReceivingService implements OnApplicationBootstrap {
@@ -117,10 +150,9 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         }
       }
 
-      // 2) Validate active material + supplier + supplier_material mapping
+      // 2) Validate active material + derive or validate supplier
       const material = await this.assertActiveMaterial(manager, dto.materialId);
-      await this.assertActiveSupplier(manager, dto.supplierId);
-      await this.assertSupplierMaterialMapping(
+      const supplierId = await this.resolveSupplier(
         manager,
         dto.materialId,
         dto.supplierId,
@@ -157,10 +189,13 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         dto.receiveDate,
       );
 
-      // 6) Generate supplier lot no
+      // 6) Generate run no (concurrency-safe)
+      const runNo = await this.allocateRunNo(manager, dto.receiveDate);
+
+      // 7) Generate supplier lot no
       const supplierLotNo = this.buildSupplierLotNo(dto.supplierProductionDate);
 
-      // 7) Generate QR payload + base64 PNG (using internalLotNo as primary key)
+      // 8) Generate QR payload + base64 PNG (using internalLotNo as primary key)
       const qrPayload: QrPayload = {
         version: QR_PAYLOAD_VERSION,
         internalLotNo,
@@ -170,15 +205,22 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       };
       const qrCode = await this.generateQrCode(internalLotNo);
 
-      // 8) Snapshot material code/name (เผื่ออนาคต master เปลี่ยน)
+      // 9) Generate QR codes for each package
+      const packageQrCodes = await this.generatePackageQrCodes(
+        packages,
+        internalLotNo,
+      );
+
+      // 10) Snapshot material code/name (เผื่ออนาคต master เปลี่ยน)
       const organizationId = await this.resolveOrganizationId(manager);
 
-      // 9) Save receiving
+      // 11) Save receiving
       const receivingRepository = manager.getRepository(MaterialReceiving);
       const receiving = receivingRepository.create({
+        runNo,
         internalLotNo,
         organizationId,
-        supplierId: dto.supplierId,
+        supplierId,
         materialId: dto.materialId,
         unitId: material.unitId,
         receiveQuantity,
@@ -197,15 +239,19 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       });
       const saved = await this.saveReceiving(receivingRepository, receiving);
 
-      // 10) Save package breakdown
+      // 12) Save package breakdown with LOT-DETAIL and QR codes
       const packageRepository = manager.getRepository(MaterialReceivingPackage);
-      const packageRows = packages.map((pkg) =>
-        packageRepository.create({
+      const packageRows = packages.map((pkg) => {
+        const lotDetailNo = this.buildLotDetailNo(internalLotNo, pkg.packageNo);
+        return packageRepository.create({
           materialReceivingId: saved.id,
           packageNo: pkg.packageNo,
+          lotDetailNo,
           quantity: pkg.quantity,
-        }),
-      );
+          qrCode: packageQrCodes.get(pkg.packageNo) ?? null,
+          status: 'pending',
+        });
+      });
       await packageRepository.save(packageRows);
 
       return saved;
@@ -246,14 +292,10 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         manager,
         receiving.materialId,
       );
-      const supplierId = dto.supplierId ?? receiving.supplierId;
-      if (dto.supplierId) {
-        await this.assertActiveSupplier(manager, dto.supplierId);
-      }
-      await this.assertSupplierMaterialMapping(
+      const supplierId = await this.resolveSupplier(
         manager,
         receiving.materialId,
-        supplierId,
+        dto.supplierId,
       );
 
       const newReceiveQuantity =
@@ -285,13 +327,23 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
           MaterialReceivingPackage,
         );
         await packageRepository.delete({ materialReceivingId: id });
-        const packageRows = packages.map((pkg) =>
-          packageRepository.create({
+        const packageQrCodes = await this.generatePackageQrCodes(
+          packages,
+          receiving.internalLotNo,
+        );
+        const packageRows = packages.map((pkg) => {
+          const lotDetailNo = this.buildLotDetailNo(
+            receiving.internalLotNo,
+            pkg.packageNo,
+          );
+          return packageRepository.create({
             materialReceivingId: id,
             packageNo: pkg.packageNo,
+            lotDetailNo,
             quantity: pkg.quantity,
-          }),
-        );
+            qrCode: packageQrCodes.get(pkg.packageNo) ?? null,
+          });
+        });
         await packageRepository.save(packageRows);
       }
 
@@ -401,6 +453,13 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         createdBy: userId,
       });
       await stockTransactionRepository.save(transaction);
+
+      // Update all package status to in_stock
+      const packageRepository = manager.getRepository(MaterialReceivingPackage);
+      await packageRepository.update(
+        { materialReceivingId: id },
+        { status: 'in_stock' },
+      );
 
       receiving.status = 'confirmed';
       receiving.confirmedBy = userId;
@@ -544,6 +603,36 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     return this.receivingRepository.findOne({ where: { internalLotNo } });
   }
 
+  /**
+   * Return the base64 QR code for a specific package.
+   */
+  async getPackageQrCode(packageId: string): Promise<string | null> {
+    const pkg = await this.packageRepository.findOne({ where: { id: packageId } });
+    return pkg?.qrCode ?? null;
+  }
+
+  /**
+   * Return active suppliers linked to a given material.
+   * Used by the frontend to determine if supplierId is required in the create form.
+   */
+  async getSuppliersByMaterial(materialId: string) {
+    await this.assertActiveMaterial(this.receivingRepository.manager, materialId);
+    const mappings = await this.receivingRepository.manager
+      .getRepository(SupplierMaterial)
+      .find({
+        where: { materialId, isActive: true },
+        relations: ['supplier'],
+        order: { supplier: { code: 'ASC' } },
+      });
+
+    return mappings.map((m) => ({
+      supplierId: m.supplier.id,
+      code: m.supplier.code,
+      nameTh: m.supplier.nameTh,
+      nameEn: m.supplier.nameEn,
+    }));
+  }
+
   async getMaterialLookups() {
     const [suppliers, materials, units] = await Promise.all([
       this.supplierRepository.find({
@@ -582,7 +671,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     const queryBuilder = this.receivingRepository
       .createQueryBuilder('receiving')
       .leftJoinAndSelect('receiving.supplier', 'supplier')
-      .leftJoinAndSelect('receiving.material', 'material');
+      .leftJoinAndSelect('receiving.material', 'material')
+      .leftJoinAndSelect('receiving.packages', 'packages');
     if (query.search) {
       queryBuilder.andWhere(
         '(receiving.internal_lot_no ILIKE :search OR receiving.supplier_lot_no ILIKE :search OR material.code ILIKE :search)',
@@ -630,6 +720,45 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   /**
+   * จัดสรร Run No. แบบ MR-YYYYMMDD-XXXX
+   * - ใช้ lot counter เดียวกันกับ internal lot เพื่อความง่าย
+   * - Running number reset ทุกวัน
+   */
+  private async allocateRunNo(
+    manager: EntityManager,
+    receiveDate: string,
+  ): Promise<string> {
+    const counterRepository = manager.getRepository(
+      MaterialReceivingLotCounter,
+    );
+    const where = { lotDate: receiveDate };
+    let counter = await counterRepository.findOne({
+      where,
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!counter) {
+      await manager.query(
+        `INSERT INTO inventory.material_receiving_lot_counters
+           (lot_date, last_number)
+         VALUES ($1, 0)
+         ON CONFLICT (lot_date) DO NOTHING`,
+        [receiveDate],
+      );
+      counter = await counterRepository.findOne({
+        where,
+        lock: { mode: 'pessimistic_write' },
+      });
+    }
+    if (!counter) {
+      throw new ConflictException('Failed to allocate run number');
+    }
+    counter.lastNumber += 1;
+    await counterRepository.save(counter);
+    const datePart = receiveDate.replace(/-/g, '');
+    return `${RUN_NO_PREFIX}-${datePart}-${String(counter.lastNumber).padStart(4, '0')}`;
+  }
+
+  /**
    * จัดสรร Internal Lot No. แบบ CCI-YYYYMMDD-XXX
    * - ใช้ material_receiving_lot_counters (lock แบบ SELECT FOR UPDATE)
    *   เพื่อกัน duplicate แม้มี request เข้าพร้อมกัน
@@ -667,14 +796,58 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     }
     counter.lastNumber += 1;
     await counterRepository.save(counter);
-    const datePart = receiveDate.replace(/-/g, '');
-    return `${LOT_PREFIX}-${datePart}-${String(counter.lastNumber).padStart(3, '0')}`;
+    return `${LOT_PREFIX}-${lotDatePart(receiveDate)}${String(counter.lastNumber).padStart(5, '0')}`;
   }
 
-  /** SUP-YYYYMMDD (ไม่มี running number) */
+  /**
+   * Build Supplier Lot No. format: SUP-YYYY[M]DD
+   * e.g. SUP-2026H13
+   */
   private buildSupplierLotNo(productionDate: string): string {
-    const datePart = productionDate.replace(/-/g, '');
-    return `${SUPPLIER_LOT_PREFIX}-${datePart}`;
+    return `${SUPPLIER_LOT_PREFIX}-${lotDatePart(productionDate)}`;
+  }
+
+  /**
+   * Build LOT-CCI-DETAIL for each package.
+   * Format: {LOT_HEADER}-{PKGNO}  (3-digit package)
+   * e.g. CCI-2026H1200001-001
+   */
+  private buildLotDetailNo(internalLotNo: string, packageNo: number): string {
+    return `${internalLotNo}-${String(packageNo).padStart(3, '0')}`;
+  }
+
+  /**
+   * Resolve supplierId from DTO:
+   * - If supplied, validate it exists and is linked to the material.
+   * - If omitted, auto-derive from material's supplier list:
+   *   - 1 match → use it (default)
+   *   - 0 matches → throw
+   *   - 2+ matches → throw (frontend must pick one)
+   */
+  private async resolveSupplier(
+    manager: EntityManager,
+    materialId: string,
+    supplierId?: string,
+  ): Promise<string> {
+    if (supplierId) {
+      await this.assertActiveSupplier(manager, supplierId);
+      await this.assertSupplierMaterialMapping(manager, materialId, supplierId);
+      return supplierId;
+    }
+
+    const mappings = await manager.getRepository(SupplierMaterial).find({
+      where: { materialId, isActive: true },
+    });
+
+    if (mappings.length === 0) {
+      throw new BadRequestException(SUPPLIER_MAPPING_ERROR);
+    }
+    if (mappings.length > 1) {
+      throw new BadRequestException(
+        `Material has ${mappings.length} active suppliers. Please specify supplierId explicitly.`,
+      );
+    }
+    return mappings[0].supplierId;
   }
 
   /** packageCount = CEIL(receiveQuantity / packingQuantity) */
@@ -728,6 +901,32 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       );
       throw new BadRequestException('Failed to generate QR code');
     }
+  }
+
+  /**
+   * Generate QR codes for all packages.
+   * Each package QR encodes only its LOT-CCI-DETAIL (e.g. CCI-2026H1200001-001),
+   * using the same plain-text generation as the header QR.
+   */
+  private async generatePackageQrCodes(
+    packages: { packageNo: number; quantity: string }[],
+    internalLotNo: string,
+  ): Promise<Map<number, string>> {
+    const qrCodes = new Map<number, string>();
+    try {
+      for (const pkg of packages) {
+        const lotDetailNo = this.buildLotDetailNo(internalLotNo, pkg.packageNo);
+        const qrCode = await this.generateQrCode(lotDetailNo);
+        qrCodes.set(pkg.packageNo, qrCode);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate package QR codes for ${internalLotNo}`,
+        error as Error,
+      );
+      throw new BadRequestException('Failed to generate package QR codes');
+    }
+    return qrCodes;
   }
 
   private assertPositiveQuantity(quantity: string): void {
@@ -858,6 +1057,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   private toListResponse(receiving: MaterialReceiving) {
     return {
       id: receiving.id,
+      runNo: receiving.runNo,
       internalLotNo: receiving.internalLotNo,
       organizationId: receiving.organizationId,
       supplierId: receiving.supplierId,
@@ -887,6 +1087,16 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
             code: receiving.material.code,
             name: receiving.material.name,
           }
+        : null,
+      packages: receiving.packages
+        ? receiving.packages.map((pkg) => ({
+            id: pkg.id,
+            packageNo: pkg.packageNo,
+            lotDetailNo: pkg.lotDetailNo,
+            quantity: pkg.quantity,
+            qrCode: pkg.qrCode,
+            status: pkg.status,
+          }))
         : null,
     };
   }

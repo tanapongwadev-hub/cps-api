@@ -743,18 +743,19 @@ Response คือ metadata ที่ต้องส่งกลับใน `at
 | POST | `/materials-receiving/:id/confirm` | `MATERIALS_RECEIVING_CONFIRM` | ยืนยันการรับเข้า → update `stock_balances` + บันทึก `stock_transactions` |
 | POST | `/materials-receiving/:id/cancel` | `MATERIALS_RECEIVING_CANCEL` | ยกเลิก (ถ้าเคย confirm จะ revert stock ด้วย `transactionType=ADJUST`) |
 
-### Internal Lot No. & Supplier Lot No.
+### Internal Lot No., Run No. & Supplier Lot No.
 
 | ประเภท | Format | กฎ |
 |---|---|---|
+| Run No. | `MR-YYYYMMDD-XXXX` | เลขรันสำหรับแต่ละใบ, reset ทุกวัน, running 4 หลัก เริ่ม 0001 |
 | Internal Lot No. | `CCI-YYYYMMDD-XXX` | reset ทุกวัน, running 3 หลัก เริ่ม 001, จัดสรรผ่าน `material_receiving_lot_counters` ด้วย `pessimistic_write` lock |
 | Supplier Lot No. | `SUP-YYYYMMDD` | generate จาก `supplierProductionDate` (ไม่มี running number) |
 
 ตัวอย่าง:
 ```text
-วันที่ 2026-08-09, รายการแรก: CCI-20260809-001
-วันที่ 2026-08-09, รายการที่สอง: CCI-20260809-002
-วันที่ 2026-08-10, รายการแรก: CCI-20260810-001   (running reset)
+วันที่ 2026-08-09, รายการแรก: MR-20260809-0001, CCI-20260809-001
+วันที่ 2026-08-09, รายการที่สอง: MR-20260809-0002, CCI-20260809-002
+วันที่ 2026-08-10, รายการแรก: MR-20260810-0001, CCI-20260810-001   (running reset)
 
 Supplier Production Date 2026-08-01 → SUP-20260801
 ```
@@ -769,6 +770,7 @@ packageCount = CEIL(receiveQuantity / materials.packingQuantity)
 
 ### QR Code
 
+#### Receiving QR (qr_code)
 QR Code (`qr_code`) เก็บเป็น base64 PNG ขนาด ~150px และ `qr_payload` เก็บข้อมูล JSONB ที่ scan ได้:
 
 ```json
@@ -782,6 +784,31 @@ QR Code (`qr_code`) เก็บเป็น base64 PNG ขนาด ~150px แ�
 ```
 
 `internalLotNo` เป็นค่าหลักสำหรับ identify และค้นหากลับ ใช้ `GET /materials-receiving/by-lot/:internalLotNo`
+
+#### Package QR (qr_code ใน packages[])
+แต่ละกล่องมี QR Code แยกสำหรับ tracking status:
+
+```json
+{
+  "version": "1.0",
+  "internalLotNo": "CCI-20260809-001",
+  "packageNo": 1,
+  "quantity": "200.0000",
+  "status": "pending"
+}
+```
+
+### Package Status Tracking
+
+แต่ละ package มี status เพื่อ track การเคลื่อนไหว:
+
+| Status | ความหมาย | เปลี่ยนเมื่อ |
+|---|---|---|
+| `pending` | รอดำเนินการ | สร้างใบรับ (default) |
+| `in_stock` | อยู่ในสต็อก | confirm สำเร็จ |
+| `issued` | เบิกออกแล้ว | เมื่อมีการเบิกใช้ |
+| `damaged` | เสียหาย | เมื่อรายงานความเสียหาย |
+| `returned` | คืน supplier | เมื่อส่งคืน |
 
 ### Query Parameters ของ `GET /materials-receiving`
 
@@ -815,13 +842,14 @@ QR Code (`qr_code`) เก็บเป็น base64 PNG ขนาด ~150px แ�
 
 - `idempotencyKey` (optional) — ถ้าส่ง ระบบจะคืนใบรับเดิมที่สร้างด้วย key นี้แล้ว (ถ้ามี) เพื่อกันการสร้างซ้ำจาก retry
 - `packingQuantityOverride` (optional) — ใช้กรณี materials.packing_quantity ยังว่าง หรือต้องการ snapshot ค่าต่างหาก
-- ทุกครั้งที่สร้าง ระบบจะ: validate material + supplier + supplier_material mapping → snapshot `packingQuantity` → คำนวณ `packageCount` → generate `internalLotNo` (lock lot counter) → generate `supplierLotNo` → generate QR (base64 PNG) → save receiving + packages ทั้งหมดภายใน transaction เดียว
+- ทุกครั้งที่สร้าง ระบบจะ: validate material + supplier + supplier_material mapping → snapshot `packingQuantity` → คำนวณ `packageCount` → generate `runNo` (lock lot counter) → generate `internalLotNo` (lock lot counter) → generate `supplierLotNo` → generate QR สำหรับใบรับ + QR สำหรับแต่ละ package (base64 PNG) → save receiving + packages ทั้งหมดภายใน transaction เดียว
 
 ### `POST /materials-receiving/:id/confirm`
 
 ยืนยันการรับเข้า (draft → confirmed) และ update stock:
 - ล็อก `stock_balances` แถวของ material นั้นด้วย `pessimistic_write` แล้วบวก `receiveQuantity`
 - บันทึก `stock_transactions` ที่ `transactionType=RECEIVE`, `referenceType=MATERIAL_RECEIVING`, `referenceLotNo=internalLotNo`
+- อัปเดต package status ทั้งหมดเป็น `in_stock`
 - กรอก `confirmedBy`, `confirmedAt`
 
 ### `POST /materials-receiving/:id/cancel`

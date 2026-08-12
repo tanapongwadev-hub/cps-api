@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,8 +11,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
@@ -41,6 +44,15 @@ export class MaterialsReceivingController {
   @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
   getLookups() {
     return this.materialsReceivingService.getMaterialLookups();
+  }
+
+  @Get('suppliers')
+  @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
+  getSuppliersByMaterial(@Query('materialId') materialId: string) {
+    if (!materialId) {
+      throw new BadRequestException('materialId query param is required');
+    }
+    return this.materialsReceivingService.getSuppliersByMaterial(materialId);
   }
 
   @Get('by-lot/:internalLotNo')
@@ -100,5 +112,23 @@ export class MaterialsReceivingController {
     @CurrentUser('id') userId: string,
   ) {
     return this.materialsReceivingService.cancel(id, dto, userId);
+  }
+
+  @Get('packages/:packageId/qr')
+  @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
+  async getPackageQr(@Param('packageId') packageId: string, @Res() res: Response) {
+    const base64 = await this.materialsReceivingService.getPackageQrCode(packageId);
+    if (!base64) {
+      throw new NotFoundException('QR code not found');
+    }
+    // base64 format: "data:image/png;base64,iVBORw0..."
+    const matches = base64.match(/^data:image\/png;base64,(.+)$/);
+    if (!matches) {
+      throw new NotFoundException('Invalid QR code format');
+    }
+    const buffer = Buffer.from(matches[1], 'base64');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `inline; filename="qr-${packageId}.png"`);
+    res.send(buffer);
   }
 }

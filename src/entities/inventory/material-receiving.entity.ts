@@ -42,6 +42,9 @@ export class MaterialReceiving {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id: string;
 
+  @Column({ name: 'run_no', type: 'varchar', length: 20, nullable: true })
+  runNo: string | null;
+
   @Column({ name: 'internal_lot_no', type: 'varchar', length: 30 })
   internalLotNo: string;
 
