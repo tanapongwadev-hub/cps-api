@@ -36,6 +36,20 @@ export interface QrPayload {
   supplierLotNo: string | null;
 }
 
+/**
+ * QR Payload สำหรับชุดจำนวนชิ้นที่ใช้ได้ (piecesQuantity)
+ * ใช้สำหรับ material_type = PIPE / SHEET / COIL เท่านั้น
+ * อ้างอิง internalLotNo + runNo เดียวกันกับ QR หลัก แต่ payload มี piecesQuantity
+ */
+export interface PiecesQrPayload {
+  version: string;
+  internalLotNo: string;
+  runNo: string | null;
+  materialCode: string;
+  piecesQuantity: string;
+  materialType: string;
+}
+
 @Entity('material_receivings', { schema: 'inventory' })
 @Index(['internalLotNo'], { unique: true })
 export class MaterialReceiving {
@@ -106,13 +120,63 @@ export class MaterialReceiving {
   @Column({ type: 'varchar', length: 20, default: 'draft' })
   status: MaterialReceivingStatus;
 
+  /** เลขที่ PO — header ของเอกสาร (optional) */
+  @Index()
+  @Column({ name: 'po_no', type: 'varchar', length: 30, nullable: true })
+  poNo: string | null;
+
+  /**
+   * Snapshot of material.materialType at the time of receiving
+   * (PCS / PIPE / SHEET / COIL). Used to decide how `piecesQuantity` is computed.
+   */
+  @Column({ name: 'material_type', type: 'varchar', length: 20, nullable: true })
+  materialType: string | null;
+
+  /**
+   * Snapshot of material.ratio at the time of receiving.
+   * Required when materialType is PIPE / SHEET / COIL.
+   */
+  @Column({ name: 'ratio', type: 'integer', nullable: true })
+  ratio: number | null;
+
+  /**
+   * จำนวนชิ้นที่ใช้ได้จริง:
+   *   - PCS  → null
+   *   - PIPE / SHEET / COIL → receive_quantity * ratio
+   * เก็บทั้ง receive_quantity (ต้นทาง) และ pieces_quantity (ชิ้นที่ใช้ได้)
+   * เพื่อรองรับการ reconcile ยอดภายหลัง
+   */
   @Column({
-    name: 'idempotency_key',
-    type: 'varchar',
-    length: 80,
+    name: 'pieces_quantity',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
     nullable: true,
   })
-  idempotencyKey: string | null;
+  piecesQuantity: string | null;
+
+  /**
+   * QR Code ชุดที่ 2 สำหรับ piecesQuantity
+   * ใช้สำหรับ material_type = PIPE / SHEET / COIL เท่านั้น
+   * อ้างอิง internalLotNo + runNo เดียวกันกับ QR หลัก
+   */
+  @Column({ name: 'pieces_qr_code', type: 'text', nullable: true })
+  piecesQrCode: string | null;
+
+  /**
+   * Payload ของ pieces QR Code (JSON)
+   * เก็บข้อมูลเพิ่มเติม: runNo, materialType, piecesQuantity
+   */
+  @Column({ name: 'pieces_qr_payload', type: 'jsonb', nullable: true })
+  piecesQrPayload: PiecesQrPayload | null;
+
+  /** Path ของไฟล์แนบ (รูปภาพ / เอกสาร PO) — optional */
+  @Column({ name: 'attachment_url', type: 'varchar', length: 500, nullable: true })
+  attachmentUrl: string | null;
+
+  /** ชื่อไฟล์เดิมของไฟล์แนบ */
+  @Column({ name: 'attachment_name', type: 'varchar', length: 255, nullable: true })
+  attachmentName: string | null;
 
   @Column({ type: 'text', nullable: true })
   remark: string | null;

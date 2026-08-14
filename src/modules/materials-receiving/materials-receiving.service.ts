@@ -26,6 +26,7 @@ import {
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
 import { StockTransaction } from '../../entities/inventory/stock-transaction.entity';
 import { Material } from '../../entities/master/material.entity';
+import { MaterialShape } from '../../entities/master/material.entity';
 import { Organization } from '../../entities/master/organization.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
@@ -55,6 +56,8 @@ const SUPPLIER_LOT_PREFIX = 'SUP';
 const RUN_NO_PREFIX = 'MR';
 /** QR schema version (เพิ่มเมื่อ contract เปลี่ยน) */
 const QR_PAYLOAD_VERSION = '1.0';
+/** QR schema version for pieces QR (material type = PIPE / SHEET / COIL) */
+const PIECES_QR_PAYLOAD_VERSION = '2.0';
 
 const SUPPLIER_MAPPING_ERROR =
   'Material is not linked to supplier. Link them in Material Master first.';
@@ -140,23 +143,22 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     this.assertReceiveDateNotFuture(dto.receiveDate);
 
     const result = await this.dataSource.transaction(async (manager) => {
-      // 1) Idempotency: ถ้าเคยสร้างด้วย key นี้แล้ว คืนของเดิม
-      if (dto.idempotencyKey) {
-        const existing = await manager
-          .getRepository(MaterialReceiving)
-          .findOne({ where: { idempotencyKey: dto.idempotencyKey } });
-        if (existing) {
-          return existing;
-        }
-      }
-
-      // 2) Validate active material + derive or validate supplier
+      // 1) Validate active material + derive or validate supplier
       const material = await this.assertActiveMaterial(manager, dto.materialId);
       const supplierId = await this.resolveSupplier(
         manager,
         dto.materialId,
         dto.supplierId,
       );
+
+      // 2) Snapshot material shape + ratio (override-able per receive)
+      const materialType = material.materialType ?? null;
+      const ratio = dto.ratioOverride ?? material.ratio ?? null;
+      if (this.requiresRatio(materialType) && (ratio === null || ratio < 1)) {
+        throw new BadRequestException(
+          `Material shape ${materialType} requires a ratio. Set ratio on the material or supply ratioOverride.`,
+        );
+      }
 
       // 3) Snapshot packing quantity (override หรือจาก master)
       const packingQuantity =
@@ -183,6 +185,13 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         packageCount,
       );
 
+      // 4.5) Calculate piecesQuantity (ชิ้นที่ใช้ได้จริง) — only for PIPE/SHEET/COIL
+      const piecesQuantity = this.computePiecesQuantity(
+        receiveQuantity,
+        materialType,
+        ratio,
+      );
+
       // 5) Generate internal lot no (concurrency-safe via lot counter lock)
       const internalLotNo = await this.allocateInternalLotNo(
         manager,
@@ -204,6 +213,21 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         supplierLotNo,
       };
       const qrCode = await this.generateQrCode(internalLotNo);
+
+      // 8.5) Generate pieces QR Code (PIPE / SHEET / COIL only)
+      const [piecesQrCode, piecesQrPayload] = this.requiresRatio(materialType)
+        ? await Promise.all([
+            this.generatePiecesQrCode(internalLotNo),
+            Promise.resolve({
+              version: PIECES_QR_PAYLOAD_VERSION,
+              internalLotNo,
+              runNo,
+              materialCode: material.code,
+              piecesQuantity: piecesQuantity!,
+              materialType: materialType!,
+            } as const),
+          ])
+        : [null, null];
 
       // 9) Generate QR codes for each package
       const packageQrCodes = await this.generatePackageQrCodes(
@@ -232,7 +256,14 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         qrCode,
         qrPayload,
         status: 'draft',
-        idempotencyKey: dto.idempotencyKey ?? null,
+        poNo: dto.poNo ?? null,
+        materialType,
+        ratio,
+        piecesQuantity,
+        piecesQrCode,
+        piecesQrPayload,
+        attachmentUrl: dto.attachmentUrl ?? null,
+        attachmentName: dto.attachmentName ?? null,
         remark: dto.remark ?? null,
         createdBy: userId,
         updatedBy: userId,
@@ -310,6 +341,24 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         packingQuantity,
       );
 
+      // Recompute materialType/ratio if receiveQuantity or ratioOverride changes
+      const newMaterialType =
+        receiving.materialType ?? material.materialType ?? null;
+      const newRatio =
+        dto.ratioOverride !== undefined
+          ? dto.ratioOverride
+          : (receiving.ratio ?? material.ratio ?? null);
+      if (this.requiresRatio(newMaterialType) && (newRatio === null || newRatio < 1)) {
+        throw new BadRequestException(
+          `Material shape ${newMaterialType} requires a ratio`,
+        );
+      }
+      const newPiecesQuantity = this.computePiecesQuantity(
+        newReceiveQuantity,
+        newMaterialType,
+        newRatio,
+      );
+
       // ถ้าวันที่ supplier ผลิตเปลี่ยน ต้องออก supplier lot ใหม่
       const supplierProductionDate =
         dto.supplierProductionDate ?? receiving.supplierProductionDate;
@@ -359,6 +408,28 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
           ? await this.generateQrCode(receiving.internalLotNo)
           : receiving.qrCode;
 
+      // Regenerate pieces QR when piecesQuantity changes or materialType changes
+      const needsPiecesQr = this.requiresRatio(newMaterialType);
+      const piecesQrChanged =
+        dto.receiveQuantity !== undefined ||
+        dto.ratioOverride !== undefined ||
+        dto.packingQuantityOverride !== undefined ||
+        (needsPiecesQr && !this.requiresRatio(receiving.materialType ?? null)) ||
+        (!needsPiecesQr && this.requiresRatio(receiving.materialType ?? null));
+      const [newPiecesQrCode, newPiecesQrPayload] = needsPiecesQr && piecesQrChanged
+        ? await Promise.all([
+            this.generatePiecesQrCode(receiving.internalLotNo),
+            Promise.resolve({
+              version: PIECES_QR_PAYLOAD_VERSION,
+              internalLotNo: receiving.internalLotNo,
+              runNo: receiving.runNo,
+              materialCode: material.code,
+              piecesQuantity: newPiecesQuantity!,
+              materialType: newMaterialType!,
+            } as const),
+          ])
+        : [receiving.piecesQrCode, receiving.piecesQrPayload];
+
       receiving.supplierId = supplierId;
       receiving.receiveQuantity = newReceiveQuantity;
       receiving.packingQuantity = packingQuantity;
@@ -366,6 +437,20 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       receiving.supplierProductionDate = supplierProductionDate;
       receiving.supplierLotNo = supplierLotNo;
       receiving.receiveDate = dto.receiveDate ?? receiving.receiveDate;
+      receiving.poNo = dto.poNo !== undefined ? dto.poNo : receiving.poNo;
+      receiving.materialType = newMaterialType;
+      receiving.ratio = newRatio;
+      receiving.piecesQuantity = newPiecesQuantity;
+      receiving.piecesQrCode = newPiecesQrCode;
+      receiving.piecesQrPayload = newPiecesQrPayload;
+      receiving.attachmentUrl =
+        dto.attachmentUrl !== undefined
+          ? dto.attachmentUrl
+          : receiving.attachmentUrl;
+      receiving.attachmentName =
+        dto.attachmentName !== undefined
+          ? dto.attachmentName
+          : receiving.attachmentName;
       receiving.remark =
         dto.remark !== undefined ? dto.remark : receiving.remark;
       receiving.qrPayload = updatedQrPayload;
@@ -612,8 +697,21 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   /**
+   * Return the base64 pieces QR code for a material receiving.
+   * Only exists for material_type = PIPE / SHEET / COIL.
+   */
+  async getPiecesQrCode(id: string): Promise<string | null> {
+    const receiving = await this.receivingRepository.findOne({ where: { id } });
+    return receiving?.piecesQrCode ?? null;
+  }
+
+  /**
    * Return active suppliers linked to a given material.
    * Used by the frontend to determine if supplierId is required in the create form.
+   *
+   * Returns `{ id, code, nameTh, nameEn }` to stay consistent with the
+   * frontend `MaterialsReceivingSupplier` interface (which uses `id`,
+   * matching the convention used by Material / Unit / MaterialSupplier).
    */
   async getSuppliersByMaterial(materialId: string) {
     await this.assertActiveMaterial(this.receivingRepository.manager, materialId);
@@ -626,7 +724,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       });
 
     return mappings.map((m) => ({
-      supplierId: m.supplier.id,
+      id: m.supplier.id,
       code: m.supplier.code,
       nameTh: m.supplier.nameTh,
       nameEn: m.supplier.nameEn,
@@ -656,6 +754,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         code: m.code,
         name: m.name,
         packingQuantity: m.packingQuantity,
+        materialType: m.materialType ?? null,
+        ratio: m.ratio ?? null,
         unitId: m.unitId,
         unit: m.unitId,
       })),
@@ -863,6 +963,40 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     return Math.ceil(qty / packingQuantity);
   }
 
+  /** Material shapes that require a `ratio` value (cut per piece). */
+  private requiresRatio(materialType: string | null): boolean {
+    return (
+      materialType === MaterialShape.PIPE ||
+      materialType === MaterialShape.SHEET ||
+      materialType === MaterialShape.COIL
+    );
+  }
+
+  /**
+   * คำนวณจำนวนชิ้นที่ใช้ได้จริง (piecesQuantity)
+   *   - PCS  → null (1 ชิ้น = 1 ชิ้น, ใช้ receiveQuantity แทน)
+   *   - PIPE / SHEET / COIL → receiveQuantity × ratio (เก็บทั้งต้นทางและชิ้นสุดท้าย)
+   * คืนเป็น string ที่ scaled ตาม DECIMAL_SCALE เพื่อเก็บใน numeric column
+   */
+  private computePiecesQuantity(
+    receiveQuantity: string,
+    materialType: string | null,
+    ratio: number | null,
+  ): string | null {
+    if (!this.requiresRatio(materialType)) {
+      return null;
+    }
+    if (ratio === null || ratio < 1) {
+      throw new BadRequestException(
+        `Cannot compute piecesQuantity without a valid ratio for materialType=${materialType}`,
+      );
+    }
+    const qty =
+      Number(this.toScaled(receiveQuantity)) / Math.pow(10, DECIMAL_SCALE);
+    const pieces = qty * ratio;
+    return pieces.toFixed(DECIMAL_SCALE);
+  }
+
   /**
    * คำนวณ breakdown: package 1..N-1 เต็ม packingQuantity, package สุดท้ายเอาเศษ
    * SUM(package.quantity) === receiveQuantity เสมอ
@@ -900,6 +1034,28 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         error as Error,
       );
       throw new BadRequestException('Failed to generate QR code');
+    }
+  }
+
+  /**
+   * Generate pieces QR Code for PIPE / SHEET / COIL materials.
+   * Encodes internalLotNo (same as main QR) — pieces-specific metadata
+   * is carried in piecesQrPayload so scanners can differentiate.
+   */
+  private async generatePiecesQrCode(internalLotNo: string): Promise<string> {
+    try {
+      return await QRCode.toDataURL(internalLotNo, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        scale: 6,
+        type: 'image/png',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to generate pieces QR code for ${internalLotNo}`,
+        error as Error,
+      );
+      throw new BadRequestException('Failed to generate pieces QR code');
     }
   }
 
@@ -1066,10 +1222,18 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       receiveQuantity: receiving.receiveQuantity,
       packingQuantity: receiving.packingQuantity,
       packageCount: receiving.packageCount,
+      piecesQuantity: receiving.piecesQuantity,
       supplierLotNo: receiving.supplierLotNo,
       supplierProductionDate: receiving.supplierProductionDate,
       receiveDate: receiving.receiveDate,
       status: receiving.status,
+      poNo: receiving.poNo,
+      materialType: receiving.materialType,
+      ratio: receiving.ratio,
+      piecesQrCode: receiving.piecesQrCode,
+      piecesQrPayload: receiving.piecesQrPayload,
+      attachmentUrl: receiving.attachmentUrl,
+      attachmentName: receiving.attachmentName,
       remark: receiving.remark,
       confirmedBy: receiving.confirmedBy,
       confirmedAt: receiving.confirmedAt,

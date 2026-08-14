@@ -56,6 +56,15 @@ describe('Material entity', () => {
       length: 255,
       nullable: true,
     });
+    expect(column('materialType')?.options).toMatchObject({
+      name: 'material_type',
+      type: 'enum',
+      nullable: true,
+    });
+    expect(column('ratio')?.options).toMatchObject({
+      type: 'integer',
+      nullable: true,
+    });
     expect(column('scale')?.options).toMatchObject({
       type: 'varchar',
       length: 255,

@@ -23,6 +23,8 @@ describe('Material DTOs', () => {
       code: '  MAT-001  ',
       name: '  Steel coil  ',
       type: '  PC  ',
+      materialType: '  PIPE  ',
+      ratio: 4,
       unitId: ' 10 ',
       deliveryTypeId: '',
       modelId: ' 20 ',
@@ -41,6 +43,8 @@ describe('Material DTOs', () => {
       code: 'MAT-001',
       name: 'Steel coil',
       type: 'PC',
+      materialType: 'PIPE',
+      ratio: 4,
       unitId: '10',
       deliveryTypeId: null,
       modelId: '20',
@@ -74,6 +78,7 @@ describe('Material DTOs', () => {
         'unitId',
         'deliveryTypeId',
         'supplierIds',
+        'materialType',
       ]),
     );
   });
@@ -120,6 +125,7 @@ describe('Material DTOs', () => {
       deliveryTypeId: '2',
       loadingPointId: '3',
       type: '  PC  ',
+      materialType: '  PIPE  ',
       supplierId: '4',
       sortBy: 'name',
       sortOrder: 'desc',
@@ -143,10 +149,82 @@ describe('Material DTOs', () => {
       deliveryTypeId: '2',
       loadingPointId: '3',
       type: 'PC',
+      materialType: 'PIPE',
       supplierId: '4',
       sortBy: 'name',
       sortOrder: 'desc',
     });
+  });
+
+  it('rejects unsupported materialType and non-positive ratio', async () => {
+    const badMaterialType = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-002',
+      name: 'Steel',
+      unitId: '1',
+      materialType: 'WIRE',
+    });
+    const badRatio = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-003',
+      name: 'Steel',
+      unitId: '1',
+      ratio: 0,
+    });
+
+    const materialTypeErrors = (await validate(badMaterialType)).map(
+      (error) => error.property,
+    );
+    const ratioErrors = (await validate(badRatio)).map(
+      (error) => error.property,
+    );
+
+    expect(materialTypeErrors).toContain('materialType');
+    expect(ratioErrors).toContain('ratio');
+  });
+
+  it('requires ratio when creating with PIPE / SHEET / COIL but not for PCS', async () => {
+    const pipeMissingRatio = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-P1',
+      name: 'Rebar',
+      unitId: '1',
+      materialType: 'PIPE',
+    });
+    const pcsWithRatio = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-P2',
+      name: 'Bolt',
+      unitId: '1',
+      materialType: 'PCS',
+      ratio: 4,
+    });
+    const pcsWithoutRatio = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-P3',
+      name: 'Bolt',
+      unitId: '1',
+      materialType: 'PCS',
+    });
+    const sheetWithRatio = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-P4',
+      name: 'Plate',
+      unitId: '1',
+      materialType: 'SHEET',
+      ratio: 2,
+    });
+
+    const pipeErrors = (await validate(pipeMissingRatio)).map(
+      (error) => error.property,
+    );
+    const pcsWithErrors = (await validate(pcsWithRatio)).map(
+      (error) => error.property,
+    );
+    const pcsWithoutErrors = await validate(pcsWithoutRatio);
+    const sheetErrors = await validate(sheetWithRatio);
+
+    expect(pipeErrors).toContain('ratio');
+    // PCS + ratio → ratio is not validated (service will reject it)
+    expect(pcsWithErrors).toEqual([]);
+    // PCS + no ratio → valid
+    expect(pcsWithoutErrors).toEqual([]);
+    // SHEET + ratio → valid
+    expect(sheetErrors).toEqual([]);
   });
 
   it('parses false and rejects malformed booleans through the production pipe', async () => {
@@ -170,12 +248,23 @@ describe('Material DTOs', () => {
   it.each([
     {
       dto: CreateMaterialDto,
-      valid: { code: 'MAT-001', name: 'Steel', unitId: '7' },
-      numericId: { code: 'MAT-001', name: 'Steel', unitId: 7 },
+      valid: {
+        code: 'MAT-001',
+        name: 'Steel',
+        unitId: '7',
+        materialType: 'PCS',
+      },
+      numericId: {
+        code: 'MAT-001',
+        name: 'Steel',
+        unitId: 7,
+        materialType: 'PCS',
+      },
       stringBoolean: {
         code: 'MAT-001',
         name: 'Steel',
         unitId: '7',
+        materialType: 'PCS',
         isActive: 'false',
       },
     },

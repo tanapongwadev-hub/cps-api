@@ -12,8 +12,12 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
-import { MaterialType } from '../../../entities/master/material.entity';
+import {
+  MaterialShape,
+  MaterialType,
+} from '../../../entities/master/material.entity';
 
 const POSITIVE_DECIMAL_ID = /^[1-9]\d*$/;
 
@@ -68,6 +72,31 @@ export class UpdateMaterialDto {
   @IsString()
   @IsIn(['PC', 'OF', 'OF_MAT'])
   type?: MaterialType | null;
+
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @IsIn(['PCS', 'PIPE', 'SHEET', 'COIL'])
+  materialType?: MaterialShape | null;
+
+  /**
+   * `ratio` is required when changing `materialType` to PIPE / SHEET / COIL.
+   * For PCS, ratio must be omitted (and the service will force it to null).
+   * When `materialType` is not provided, ratio is validated only if it is sent.
+   * If the client omits `ratio` while `materialType` is PIPE/SHEET/COIL, the
+   * service layer (`resolveUpdateRatio`) will reject the request.
+   */
+  @Transform(sourceValue)
+  @IsOptional()
+  @ValidateIf(
+    (o: UpdateMaterialDto) =>
+      o.materialType === undefined ||
+      o.materialType === null ||
+      o.materialType !== MaterialShape.PCS,
+  )
+  @IsInt({ message: 'ratio must be an integer number' })
+  @Min(1, { message: 'ratio must be >= 1' })
+  ratio?: number | null;
 
   @Transform(trimString)
   @IsOptional()

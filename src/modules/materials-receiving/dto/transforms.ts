@@ -15,8 +15,8 @@ export const INTERNAL_LOT_NO_PATTERN = /^CCI-\d{8}-\d{3}$/;
 /** Supplier Lot No.: SUP-YYYYMMDD */
 export const SUPPLIER_LOT_NO_PATTERN = /^SUP-\d{8}$/;
 
-/** idempotency key ของ client: ตัวอักษร/ตัวเลข/dash/underscore ความยาว 8–80 ตัว */
-export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,80}$/;
+/** PO No. — ตัวอักษร/ตัวเลข/dash/underscore/space ความยาว 1–30 ตัว */
+export const PO_NO_PATTERN = /^[A-Za-z0-9_/ \-]{1,30}$/;
 
 export function sourceValue(params: TransformFnParams): unknown {
   const source: unknown = params.obj;

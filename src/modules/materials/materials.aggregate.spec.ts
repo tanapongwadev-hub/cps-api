@@ -9,6 +9,7 @@ import { DeliveryType } from '../../entities/master/delivery-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
 import { Material } from '../../entities/master/material.entity';
+import { MaterialShape } from '../../entities/master/material.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
@@ -89,6 +90,7 @@ describe('MaterialsService aggregate commands', () => {
     code: ' mat-001 ',
     name: 'Steel coil',
     unitId: '1',
+    materialType: MaterialShape.PCS,
     deliveryTypeId: null,
     modelId: null,
     loadingPointId: null,
@@ -255,7 +257,7 @@ describe('MaterialsService aggregate commands', () => {
           code: 'MAT-001',
           imagePath: promotedPath,
           supplierMaterials: [],
-        } as Material),
+        } as unknown as Material),
       );
 
     await expect(
@@ -271,7 +273,7 @@ describe('MaterialsService aggregate commands', () => {
       name: 'Committed command state',
       isActive: true,
       supplierMaterials: [],
-    } as Material;
+    } as unknown as Material;
     const concurrentlyChangedState = {
       ...transactionalState,
       name: 'Concurrent later state',
@@ -365,7 +367,7 @@ describe('MaterialsService aggregate commands', () => {
           code: 'MAT-001',
           isActive: true,
           supplierMaterials: [],
-        } as Material),
+        } as unknown as Material),
       );
 
     await service.create(
@@ -427,6 +429,46 @@ describe('MaterialsService aggregate commands', () => {
     expect(materials.save).not.toHaveBeenCalled();
   });
 
+  it('rejects create with materialType = PIPE and missing ratio', async () => {
+    const dto = { ...createDto(), materialType: MaterialShape.PIPE };
+    await expect(service.create(dto, '7')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(materials.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects create with materialType = PCS when ratio is provided', async () => {
+    const dto = {
+      ...createDto(),
+      materialType: MaterialShape.PCS,
+      ratio: 4,
+    };
+    await expect(service.create(dto, '7')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(materials.save).not.toHaveBeenCalled();
+  });
+
+  it('creates with materialType = PCS and no ratio', async () => {
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(
+        detailBuilder({
+          id: '20',
+          code: 'MAT-PCS',
+          materialType: 'PCS',
+          ratio: null,
+          supplierMaterials: [],
+        } as unknown as Material),
+      );
+
+    const dto = { ...createDto(), materialType: MaterialShape.PCS };
+    await expect(service.create(dto, '7')).resolves.toMatchObject({
+      ratio: null,
+    });
+    expect(materials.save!.mock.calls[0][0].ratio).toBeNull();
+  });
+
   it('treats percent and underscore in a code as literals, not wildcards', async () => {
     const codeBuilder = singleRowBuilder(null);
     const returned = {
@@ -435,7 +477,7 @@ describe('MaterialsService aggregate commands', () => {
       name: 'Steel coil',
       isActive: true,
       supplierMaterials: [],
-    } as Material;
+    } as unknown as Material;
     materials.findOne!.mockResolvedValueOnce({
       id: '99',
       code: 'MATXX01',

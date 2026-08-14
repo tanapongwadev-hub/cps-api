@@ -10,6 +10,7 @@ import {
 import {
   DECIMAL_18_4,
   ISO_DATE,
+  PO_NO_PATTERN,
   POSITIVE_DECIMAL_ID,
   decimalString,
   nullableTrimmedString,
@@ -52,11 +53,43 @@ export class UpdateMaterialsReceivingDto {
   })
   receiveDate?: string;
 
+  /** เลขที่ PO — header ของเอกสาร (optional) */
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  @Matches(PO_NO_PATTERN, {
+    message: 'poNo must be 1-30 chars of letters, numbers, dash, underscore, slash or space',
+  })
+  poNo?: string | null;
+
   @Transform(({ value }) => value as number | undefined)
   @IsOptional()
   @IsInt()
   @Min(1)
   packingQuantityOverride?: number;
+
+  /**
+   * Optional: override `ratio` at update time.
+   * Only meaningful for materialType = PIPE / SHEET / COIL.
+   */
+  @Transform(({ value }) => value as number | undefined)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  ratioOverride?: number;
+
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentUrl?: string | null;
+
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  attachmentName?: string | null;
 
   @Transform(nullableTrimmedString)
   @IsOptional()

@@ -15,7 +15,7 @@ import { MaterialReceivingPackage } from '../../entities/inventory/material-rece
 import { MaterialReceiving } from '../../entities/inventory/material-receiving.entity';
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
 import { StockTransaction } from '../../entities/inventory/stock-transaction.entity';
-import { Material } from '../../entities/master/material.entity';
+import { Material, MaterialShape } from '../../entities/master/material.entity';
 import { Organization } from '../../entities/master/organization.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
@@ -104,6 +104,9 @@ function makeReceiving(overrides: Partial<MaterialReceiving> = {}) {
     receiveQuantity: '1000',
     packingQuantity: 200,
     packageCount: 5,
+    piecesQuantity: null,
+    piecesQrCode: null,
+    piecesQrPayload: null,
     supplierLotNo: 'SUP-20260801',
     supplierProductionDate: '2026-08-01',
     receiveDate: TODAY,
@@ -116,7 +119,11 @@ function makeReceiving(overrides: Partial<MaterialReceiving> = {}) {
       supplierLotNo: 'SUP-20260801',
     },
     status: 'draft',
-    idempotencyKey: null,
+    poNo: null,
+    materialType: null,
+    ratio: null,
+    attachmentUrl: null,
+    attachmentName: null,
     remark: null,
     confirmedBy: null,
     confirmedAt: null,
@@ -500,22 +507,65 @@ describe('MaterialsReceivingService', () => {
       expect(Number(last.quantity)).toBe(50);
     });
 
-    it('returns existing receiving when idempotencyKey matches', async () => {
-      const { service, dataSource, repos } = setup();
-      const existing = makeReceiving({
-        idempotencyKey: 'idem-1234567',
-        internalLotNo: 'CCI-20260809-001',
+    it('creates a receiving with poNo and material snapshot', async () => {
+      const { service, repos } = setup();
+      repos.materialRepo.findOne.mockResolvedValue(
+        makeMaterial({ materialType: MaterialShape.PIPE, ratio: 4 }),
+      );
+      repos.supplierRepo.findOne.mockResolvedValue(makeSupplier());
+      repos.supplierMaterialRepo.findOne.mockResolvedValue({
+        materialId: '3',
+        supplierId: '2',
+        isActive: true,
       });
-      repos.receivingRepo.findOne.mockResolvedValue(existing);
-      dataSource.transaction.mockImplementationOnce(
-        async (cb: (m: unknown) => unknown) =>
-          cb(makeManager({ [MaterialReceiving.name]: repos.receivingRepo })),
+      repos.organizationRepo.findOne.mockResolvedValue(makeOrganization());
+      await service.create({ ...baseDto, poNo: 'PO-2026-001' }, '9');
+      const receivingSaved = repos.receivingRepo.save.mock.calls[0][0];
+      expect(receivingSaved.poNo).toBe('PO-2026-001');
+      expect(receivingSaved.materialType).toBe(MaterialShape.PIPE);
+      expect(receivingSaved.ratio).toBe(4);
+    });
+
+    it('computes piecesQuantity for PIPE materials', async () => {
+      const { service, repos } = setup();
+      // receiveQuantity = 1000, ratio = 4 -> piecesQuantity = 4000
+      repos.materialRepo.findOne.mockResolvedValue(
+        makeMaterial({ materialType: MaterialShape.PIPE, ratio: 4 }),
       );
-      const result = await service.create(
-        { ...baseDto, idempotencyKey: 'idem-1234567' },
-        '9',
+      repos.supplierRepo.findOne.mockResolvedValue(makeSupplier());
+      repos.supplierMaterialRepo.findOne.mockResolvedValue({
+        materialId: '3',
+        supplierId: '2',
+        isActive: true,
+      });
+      repos.organizationRepo.findOne.mockResolvedValue(makeOrganization());
+      await service.create({ ...baseDto }, '9');
+      const receivingSaved = repos.receivingRepo.save.mock.calls[0][0];
+      expect(receivingSaved.piecesQuantity).toBe('4000.0000');
+      expect(receivingSaved.piecesQrCode).toBeTruthy();
+      expect(receivingSaved.piecesQrPayload).toBeTruthy();
+      expect(receivingSaved.piecesQrPayload.version).toBe('2.0');
+      expect(receivingSaved.piecesQrPayload.piecesQuantity).toBe('4000.0000');
+      expect(receivingSaved.piecesQrPayload.materialType).toBe('PIPE');
+    });
+
+    it('leaves piecesQuantity null for PCS materials', async () => {
+      const { service, repos } = setup();
+      repos.materialRepo.findOne.mockResolvedValue(
+        makeMaterial({ materialType: MaterialShape.PCS, ratio: null }),
       );
-      expect(result.id).toBe('10');
+      repos.supplierRepo.findOne.mockResolvedValue(makeSupplier());
+      repos.supplierMaterialRepo.findOne.mockResolvedValue({
+        materialId: '3',
+        supplierId: '2',
+        isActive: true,
+      });
+      repos.organizationRepo.findOne.mockResolvedValue(makeOrganization());
+      await service.create({ ...baseDto }, '9');
+      const receivingSaved = repos.receivingRepo.save.mock.calls[0][0];
+      expect(receivingSaved.piecesQuantity).toBeNull();
+      expect(receivingSaved.piecesQrCode).toBeNull();
+      expect(receivingSaved.piecesQrPayload).toBeNull();
     });
   });
 

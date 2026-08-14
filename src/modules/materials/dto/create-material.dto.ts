@@ -11,8 +11,12 @@ import {
   Matches,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
-import { MaterialType } from '../../../entities/master/material.entity';
+import {
+  MaterialShape,
+  MaterialType,
+} from '../../../entities/master/material.entity';
 
 const POSITIVE_DECIMAL_ID = /^[1-9]\d*$/;
 
@@ -65,6 +69,28 @@ export class CreateMaterialDto {
   @IsString()
   @IsIn(['PC', 'OF', 'OF_MAT'])
   type?: MaterialType | null;
+
+  @Transform(trimString)
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['PCS', 'PIPE', 'SHEET', 'COIL'])
+  materialType: MaterialShape;
+
+  /**
+   * `ratio` is required when `materialType` is PIPE / SHEET / COIL.
+   * For PCS, ratio must be omitted (and the service will force it to null).
+   * When `materialType` is null/undefined, ratio is validated only if it is sent.
+   */
+  @Transform(sourceValue)
+  @ValidateIf(
+    (o: CreateMaterialDto) =>
+      o.materialType === undefined ||
+      o.materialType === null ||
+      o.materialType !== MaterialShape.PCS,
+  )
+  @IsInt({ message: 'ratio is required and must be an integer when materialType is PIPE / SHEET / COIL' })
+  @Min(1, { message: 'ratio must be >= 1' })
+  ratio?: number | null;
 
   @Transform(trimString)
   @IsString()

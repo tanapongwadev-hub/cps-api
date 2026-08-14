@@ -9,8 +9,8 @@ import {
 } from 'class-validator';
 import {
   DECIMAL_18_4,
-  IDEMPOTENCY_KEY_PATTERN,
   ISO_DATE,
+  PO_NO_PATTERN,
   POSITIVE_DECIMAL_ID,
   decimalString,
   nullableTrimmedString,
@@ -55,15 +55,15 @@ export class CreateMaterialsReceivingDto {
   })
   receiveDate: string;
 
+  /** เลขที่ PO — header ของเอกสาร (optional) */
   @Transform(nullableTrimmedString)
   @IsOptional()
   @IsString()
-  @MaxLength(80)
-  @Matches(IDEMPOTENCY_KEY_PATTERN, {
-    message:
-      'idempotencyKey must be 8-80 chars of letters, numbers, dash or underscore',
+  @MaxLength(30)
+  @Matches(PO_NO_PATTERN, {
+    message: 'poNo must be 1-30 chars of letters, numbers, dash, underscore, slash or space',
   })
-  idempotencyKey?: string | null;
+  poNo?: string | null;
 
   @Transform(nullableTrimmedString)
   @IsOptional()
@@ -79,4 +79,29 @@ export class CreateMaterialsReceivingDto {
   @IsInt()
   @Min(1)
   packingQuantityOverride?: number;
+
+  /**
+   * Optional: override `ratio` at receive time (snapshot).
+   * If omitted, the service reads from `materials.ratio`.
+   * Only meaningful for materialType = PIPE / SHEET / COIL.
+   */
+  @Transform(({ value }) => value as number | undefined)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  ratioOverride?: number;
+
+  /** Path ของไฟล์แนบ (uploaded แล้ว — เช่น /uploads/materials-receiving/xxx.pdf) */
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  attachmentUrl?: string | null;
+
+  /** ชื่อไฟล์เดิมของไฟล์แนบ (สำหรับ download) */
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  attachmentName?: string | null;
 }

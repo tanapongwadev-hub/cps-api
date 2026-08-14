@@ -10,7 +10,10 @@ import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
-import { Material } from '../../entities/master/material.entity';
+import {
+  Material,
+  MaterialShape,
+} from '../../entities/master/material.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
@@ -45,6 +48,8 @@ export type MaterialWithSuppliers = Omit<
   'supplierMaterials' | 'unit' | 'model' | 'deliveryType' | 'loadingPoint'
 > & {
   type?: string | null;
+  materialType?: string | null;
+  ratio?: number | null;
   unit?: MaterialLookupResponse | null;
   model?: MaterialLookupResponse | null;
   deliveryType?: MaterialLookupResponse | null;
@@ -81,6 +86,7 @@ export class MaterialsService {
     userId: string,
   ): Promise<MaterialWithSuppliers> {
     this.assertUniqueSupplierIds(dto.supplierIds);
+    const resolvedRatio = this.resolveRatio(dto.materialType, dto.ratio);
     let promotedImagePath: string | undefined;
     try {
       return await this.getDataSource().transaction(async (manager) => {
@@ -121,6 +127,8 @@ export class MaterialsService {
           code: normalizedCode,
           name: dto.name,
           type: dto.type ?? null,
+          materialType: dto.materialType ?? null,
+          ratio: resolvedRatio,
           unitId: dto.unitId,
           deliveryTypeId: dto.deliveryTypeId ?? null,
           modelId: dto.modelId ?? null,
@@ -244,6 +252,19 @@ export class MaterialsService {
           }
         }
 
+        const resolvedRatio = this.resolveUpdateRatio(
+          material,
+          dto.materialType,
+          dto.ratio,
+        );
+        if (
+          dto.materialType !== undefined ||
+          dto.ratio !== undefined ||
+          resolvedRatio !== material.ratio
+        ) {
+          effectiveDto = { ...effectiveDto, ratio: resolvedRatio };
+        }
+
         this.applyUpdate(material, effectiveDto, normalizedCode, userId);
         await this.saveMaterial(materialRepository, material);
         if (dto.supplierIds !== undefined) {
@@ -318,6 +339,11 @@ export class MaterialsService {
     if (query.type) {
       queryBuilder.andWhere('material.type = :type', {
         type: query.type,
+      });
+    }
+    if (query.materialType) {
+      queryBuilder.andWhere('material.materialType = :materialType', {
+        materialType: query.materialType,
       });
     }
     if (query.supplierId) {
@@ -442,6 +468,8 @@ export class MaterialsService {
       'code',
       'name',
       'type',
+      'materialType',
+      'ratio',
       'unitId',
       'deliveryTypeId',
       'modelId',
@@ -533,6 +561,91 @@ export class MaterialsService {
 
   private normalizeCode(code: string): string {
     return code.trim().toUpperCase();
+  }
+
+  /**
+   * Enforce the rule:
+   *   - `materialType = PCS`           => `ratio` must be null
+   *   - `materialType = PIPE/SHEET/COIL` => `ratio` must be a positive integer
+   *
+   * Used by `create` where `materialType` and `ratio` are passed as-is from the DTO.
+   */
+  private resolveRatio(
+    materialType: MaterialShape | null | undefined,
+    ratio: number | null | undefined,
+  ): number | null {
+    if (materialType === MaterialShape.PCS) {
+      if (ratio !== undefined && ratio !== null) {
+        throw new BadRequestException(
+          'ratio must be null when materialType is PCS',
+        );
+      }
+      return null;
+    }
+    if (materialType === null || materialType === undefined) {
+      if (ratio !== undefined && ratio !== null && ratio < 1) {
+        throw new BadRequestException('ratio must be >= 1');
+      }
+      return ratio ?? null;
+    }
+    // materialType is PIPE / SHEET / COIL
+    if (ratio === undefined || ratio === null) {
+      throw new BadRequestException(
+        `ratio is required when materialType is ${materialType}`,
+      );
+    }
+    if (ratio < 1) {
+      throw new BadRequestException('ratio must be >= 1');
+    }
+    return ratio;
+  }
+
+  /**
+   * Used by `update`. The effective materialType = `dto.materialType` if provided,
+   * otherwise the existing `material.materialType`. The returned ratio is what
+   * the entity should end up with, and may overwrite `dto.ratio` before persistence.
+   */
+  private resolveUpdateRatio(
+    material: Material,
+    dtoMaterialType: MaterialShape | null | undefined,
+    dtoRatio: number | null | undefined,
+  ): number | null {
+    const effectiveMaterialType =
+      dtoMaterialType !== undefined ? dtoMaterialType : material.materialType;
+
+    if (effectiveMaterialType === MaterialShape.PCS) {
+      if (dtoRatio !== undefined && dtoRatio !== null) {
+        throw new BadRequestException(
+          'ratio must be null when materialType is PCS',
+        );
+      }
+      return null;
+    }
+    if (effectiveMaterialType === null || effectiveMaterialType === undefined) {
+      if (dtoRatio === undefined) return material.ratio ?? null;
+      if (dtoRatio !== null && dtoRatio < 1) {
+        throw new BadRequestException('ratio must be >= 1');
+      }
+      return dtoRatio ?? null;
+    }
+    // PIPE / SHEET / COIL
+    if (dtoRatio === null) {
+      throw new BadRequestException(
+        `ratio is required when materialType is ${effectiveMaterialType}`,
+      );
+    }
+    if (dtoRatio === undefined) {
+      if (material.ratio === null || material.ratio === undefined) {
+        throw new BadRequestException(
+          `ratio is required when materialType is ${effectiveMaterialType}`,
+        );
+      }
+      return material.ratio;
+    }
+    if (dtoRatio < 1) {
+      throw new BadRequestException('ratio must be >= 1');
+    }
+    return dtoRatio;
   }
 
   private assertUniqueSupplierIds(supplierIds?: string[]): void {
@@ -659,6 +772,8 @@ export class MaterialsService {
     for (const field of [
       'name',
       'type',
+      'materialType',
+      'ratio',
       'unitId',
       'deliveryTypeId',
       'modelId',

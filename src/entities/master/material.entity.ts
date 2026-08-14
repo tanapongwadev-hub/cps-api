@@ -21,6 +21,26 @@ export enum MaterialType {
   OF_MAT = 'OF_MAT',
 }
 
+/**
+ * Material shape — describes how the material is physically delivered.
+ *
+ * - PCS  : discrete pieces (countable per-unit items)
+ * - PIPE : pipe / bar stock (e.g. rebar) where 1 ชิ้นยาว can be cut into N ชิ้น
+ * - SHEET: flat sheet
+ * - COIL : coil / roll
+ *
+ * `ratio` is used in combination with PIPE / bar stock:
+ * it indicates how many pieces a single bar/pipe can be cut into.
+ * For example: receive 3 bars of material B with ratio = 4
+ *   -> 3 * 4 = 12 usable pieces.
+ */
+export enum MaterialShape {
+  PCS = 'PCS',
+  PIPE = 'PIPE',
+  SHEET = 'SHEET',
+  COIL = 'COIL',
+}
+
 @Entity('materials', { schema: 'master' })
 @Index(['code'], { unique: true })
 export class Material {
@@ -42,6 +62,25 @@ export class Material {
     default: null,
   })
   type: MaterialType | null;
+
+  @Index()
+  @Column({
+    name: 'material_type',
+    type: 'enum',
+    enum: MaterialShape,
+    enumName: 'materials_material_type_enum',
+    nullable: true,
+    default: null,
+  })
+  materialType: MaterialShape | null;
+
+  /**
+   * Number of pieces a single physical unit (e.g. one bar / pipe) can be cut into.
+   * Used together with `materialType = PIPE` (or other divisible shapes).
+   * Must be >= 1 when set.
+   */
+  @Column({ type: 'integer', nullable: true, default: null })
+  ratio: number | null;
 
   @Index()
   @Column({ name: 'unit_id', type: 'bigint' })

@@ -131,4 +131,25 @@ export class MaterialsReceivingController {
     res.setHeader('Content-Disposition', `inline; filename="qr-${packageId}.png"`);
     res.send(buffer);
   }
+
+  /**
+   * Download the pieces QR code for a material receiving.
+   * Only available for material_type = PIPE / SHEET / COIL.
+   */
+  @Get(':id/pieces-qr')
+  @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
+  async getPiecesQr(@Param('id') id: string, @Res() res: Response) {
+    const base64 = await this.materialsReceivingService.getPiecesQrCode(id);
+    if (!base64) {
+      throw new NotFoundException('Pieces QR code not found (not applicable for this material type)');
+    }
+    const matches = base64.match(/^data:image\/png;base64,(.+)$/);
+    if (!matches) {
+      throw new NotFoundException('Invalid QR code format');
+    }
+    const buffer = Buffer.from(matches[1], 'base64');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `inline; filename="pieces-qr-${id}.png"`);
+    res.send(buffer);
+  }
 }
