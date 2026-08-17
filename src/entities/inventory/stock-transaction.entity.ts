@@ -14,6 +14,7 @@ export type StockTransactionType = (typeof STOCK_TRANSACTION_TYPES)[number];
 
 export const STOCK_TRANSACTION_REFERENCE_TYPES = [
   'MATERIAL_RECEIVING',
+  'MATERIALS_DISBURSEMENT',
 ] as const;
 export type StockTransactionReferenceType =
   (typeof STOCK_TRANSACTION_REFERENCE_TYPES)[number];

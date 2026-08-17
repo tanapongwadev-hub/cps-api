@@ -4,6 +4,7 @@ import { GOODS_RECEIPT_PERMISSIONS } from '../../modules/goods-receipts/goods-re
 import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
+import { MATERIALS_DISBURSEMENT_PERMISSIONS } from '../../modules/materials-disbursement/materials-disbursement-permissions';
 import { MATERIALS_RECEIVING_PERMISSIONS } from '../../modules/materials-receiving/materials-receiving-permissions';
 import { ORGANIZATION_PERMISSIONS } from '../../modules/organizations/organization-permissions';
 import { REJECT_REASON_PERMISSIONS } from '../../modules/reject-reasons/reject-reason-permissions';
@@ -33,6 +34,20 @@ export const DOCUMENT_ACTION_CODES = [
  * ใช้ POST/CANCEL action เดิมได้ แต่ permission code แยกเพื่อให้สิทธิ์ละเอียดกว่า
  */
 export const MATERIALS_RECEIVING_ACTION_CODES = [
+  'CREATE',
+  'READ',
+  'UPDATE',
+  'DELETE',
+  'POST',
+  'CANCEL',
+] as const;
+
+/**
+ * action สำหรับ Materials Disbursement
+ * - POST   -> CONFIRM (จ่ายวัตถุดิบ + FIFO)
+ * - CANCEL -> CANCEL (ยกเลิกและ revert stock)
+ */
+export const MATERIALS_DISBURSEMENT_ACTION_CODES = [
   'CREATE',
   'READ',
   'UPDATE',
@@ -88,12 +103,18 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     POST: MATERIALS_RECEIVING_PERMISSIONS.CONFIRM,
     CANCEL: MATERIALS_RECEIVING_PERMISSIONS.CANCEL,
   },
+  MATERIALS_DISBURSEMENT: {
+    ...fromCrud(MATERIALS_DISBURSEMENT_PERMISSIONS),
+    POST: MATERIALS_DISBURSEMENT_PERMISSIONS.CONFIRM,
+    CANCEL: MATERIALS_DISBURSEMENT_PERMISSIONS.CANCEL,
+  },
 };
 
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
 export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
   GOODS_RECEIPT: DOCUMENT_ACTION_CODES,
   MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
+  MATERIALS_DISBURSEMENT: MATERIALS_DISBURSEMENT_ACTION_CODES,
 };
 
 export function resolveActionCodes(menuCode: string): readonly string[] {
