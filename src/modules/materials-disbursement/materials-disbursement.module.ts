@@ -9,7 +9,7 @@ import { Material } from '../../entities/master/material.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { AccessControlModule } from '../access-control/access-control.module';
 import { MaterialsDisbursementController } from './materials-disbursement.controller';
-import { MaterialsDisbursementItem } from './material-disbursement-item.entity';
+import { MaterialDisbursementItem } from './material-disbursement-item.entity';
 import { MaterialDisbursementPackage } from './material-disbursement-package.entity';
 import { MaterialsDisbursement } from './materials-disbursement.entity';
 import { MaterialsDisbursementService } from './materials-disbursement.service';

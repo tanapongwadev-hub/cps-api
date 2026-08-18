@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { MaterialReceivingPackage } from '../../entities/inventory/material-receiving-package.entity';
 import { MaterialReceiving } from '../../entities/inventory/material-receiving.entity';
 import { MaterialsDisbursementCounter } from '../../entities/inventory/materials-disbursement-counter.entity';
@@ -168,12 +168,15 @@ export class MaterialsDisbursementService {
         }
 
         // Delete existing items and packages
-        await manager.getRepository(MaterialDisbursementPackage).delete({
-          disbursementItemId: manager
-            .getRepository(MaterialDisbursementItem)
-            .find({ where: { disbursementId: id } })
-            .then((items) => items.map((i) => i.id)),
-        });
+        const existingItems = await manager
+          .getRepository(MaterialDisbursementItem)
+          .find({ where: { disbursementId: id } });
+        const existingItemIds = existingItems.map((i) => i.id);
+        if (existingItemIds.length > 0) {
+          await manager.getRepository(MaterialDisbursementPackage).delete({
+            disbursementItemId: In(existingItemIds),
+          });
+        }
         await manager.getRepository(MaterialDisbursementItem).delete({ disbursementId: id });
 
         // Create new items
@@ -336,7 +339,7 @@ export class MaterialsDisbursementService {
     const limit = query.limit ?? 20;
     const queryBuilder = this.createListQuery(query);
 
-    const sortColumn = SORT_COLUMNS[query.sortBy] ?? SORT_COLUMNS.disbursementDate;
+    const sortColumn = SORT_COLUMNS[query.sortBy ?? 'disbursementDate'];
     const sortOrder = query.sortOrder === 'asc' ? 'ASC' : 'DESC';
 
     const [disbursements, totalItems] = await queryBuilder
@@ -437,14 +440,13 @@ export class MaterialsDisbursementService {
       .getRepository(MaterialReceivingPackage)
       .createQueryBuilder('pkg')
       .leftJoin('pkg.materialReceiving', 'receiving')
-      .where('pkg.materialReceivingId IN (
+      .where(`pkg.materialReceivingId IN (
         SELECT mr.id FROM inventory.material_receivings mr
         WHERE mr.materialId = :materialId
-      )', { materialId: item.materialId })
+      )`, { materialId: item.materialId })
       .andWhere('pkg.status = :status', { status: 'in_stock' })
       .orderBy('receiving.receiveDate', 'ASC')
       .addOrderBy('pkg.id', 'ASC')
-      .setParameter('materialId', item.materialId)
       .getMany();
 
     const totalAvailable = packages.reduce(
