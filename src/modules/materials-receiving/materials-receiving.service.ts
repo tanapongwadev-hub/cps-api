@@ -38,6 +38,11 @@ import {
   MaterialsReceivingSortBy,
 } from './dto/list-materials-receiving-query.dto';
 import { UpdateMaterialsReceivingDto } from './dto/update-materials-receiving.dto';
+import { ReportMaterialsReceivingQueryDto } from './dto/report-materials-receiving.dto';
+import {
+  UnifiedReportQueryDto,
+  UnifiedReportRow,
+} from './dto/unified-report.dto';
 
 const SORT_COLUMNS: Record<MaterialsReceivingSortBy, string> = {
   internalLotNo: 'receiving.internalLotNo',
@@ -646,6 +651,293 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         limit,
         totalItems,
         totalPages: Math.ceil(totalItems / limit),
+      },
+    };
+  }
+
+  /**
+   * รายงานรับเข้าวัสดุเพื่อสอบกลับ
+   * แสดง: เลขที่ใบรับ, วันรับ, วันผลิต supplier, ชื่อ supplier,
+   *        รหัส/ชื่อวัสดุ, ประเภทวัสดุ, จำนวน, หน่วย, จำนวน package, PO, สถานะ
+   */
+  async generateReport(query: ReportMaterialsReceivingQueryDto) {
+    const qb = this.receivingRepository
+      .createQueryBuilder('receiving')
+      .leftJoinAndSelect('receiving.supplier', 'supplier')
+      .leftJoinAndSelect('receiving.material', 'material')
+      .leftJoinAndSelect('receiving.organization', 'organization')
+      .leftJoinAndSelect('receiving.unit', 'unit')
+      .select([
+        'receiving.id',
+        'receiving.runNo',
+        'receiving.internalLotNo',
+        'receiving.receiveDate',
+        'receiving.supplierProductionDate',
+        'receiving.receiveQuantity',
+        'receiving.packingQuantity',
+        'receiving.packageCount',
+        'receiving.poNo',
+        'receiving.status',
+        'receiving.confirmedAt',
+        'receiving.createdBy',
+        'receiving.createdAt',
+        'supplier.id',
+        'supplier.code',
+        'supplier.nameTh',
+        'supplier.nameEn',
+        'material.id',
+        'material.code',
+        'material.name',
+        'material.materialType',
+        'organization.id',
+        'organization.nameTh',
+        'organization.nameEn',
+        'unit.id',
+        'unit.symbol',
+      ])
+      .orderBy('receiving.receiveDate', 'DESC')
+      .addOrderBy('receiving.internalLotNo', 'DESC');
+
+    if (query.startDate) {
+      qb.andWhere('receiving.receiveDate >= :startDate', {
+        startDate: query.startDate,
+      });
+    }
+    if (query.endDate) {
+      qb.andWhere('receiving.receiveDate <= :endDate', {
+        endDate: query.endDate,
+      });
+    }
+    if (query.status) {
+      qb.andWhere('receiving.status = :status', { status: query.status });
+    }
+    if (query.supplierId) {
+      qb.andWhere('receiving.supplierId = :supplierId', {
+        supplierId: query.supplierId,
+      });
+    }
+    if (query.materialId) {
+      qb.andWhere('receiving.materialId = :materialId', {
+        materialId: query.materialId,
+      });
+    }
+    if (query.organizationId) {
+      qb.andWhere('receiving.organizationId = :organizationId', {
+        organizationId: query.organizationId,
+      });
+    }
+
+    const rows = await qb.getMany();
+
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        runNo: r.runNo,
+        internalLotNo: r.internalLotNo,
+        receiveDate: r.receiveDate,
+        supplierProductionDate: r.supplierProductionDate,
+        supplierCode: r.supplier?.code ?? '',
+        supplierName: r.supplier?.nameTh ?? r.supplier?.nameEn ?? '',
+        materialCode: r.material?.code ?? '',
+        materialName: r.material?.name ?? '',
+        materialType: r.material?.materialType ?? null,
+        receiveQuantity: r.receiveQuantity,
+        unitSymbol: r.unit?.symbol ?? '',
+        packingQuantity: r.packingQuantity,
+        packageCount: r.packageCount,
+        poNo: r.poNo,
+        status: r.status,
+        organizationName:
+          r.organization?.nameTh ?? r.organization?.nameEn ?? '',
+        confirmedAt: r.confirmedAt?.toISOString() ?? null,
+        createdBy: r.createdBy,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      meta: {
+        totalItems: rows.length,
+        generatedAt: new Date().toISOString(),
+        filters: query,
+      },
+    };
+  }
+
+  /**
+   * รายงานรวม รับเข้า + จ่ายออก วัสดุ
+   * แสดง lot ต้นทาง (รับเข้า) และ lot ที่ถูกหัด FIFO (จ่ายออก)
+   * วิ่ง raw SQL เพื่อรวมข้อมูลจากทั้งสองตารางใน query เดียว
+   *
+   * @param query.period — 'today' | 'this_month' | 'this_year' | 'custom'
+   *   ถ้า period ถูกตั้ง จะใช้ช่วงวันอัตโนมัติ แทน startDate/endDate
+   */
+  async generateUnifiedReport(query: UnifiedReportQueryDto) {
+    const rows: UnifiedReportRow[] = [];
+
+    // ── Resolve effective date range from period ─────────────────────────────
+    const today = new Date();
+    let effectiveStartDate = query.startDate;
+    let effectiveEndDate = query.endDate;
+
+    if (query.period && query.period !== 'custom') {
+      const y = today.getFullYear();
+      const m = today.getMonth(); // 0-based
+
+      if (query.period === 'today') {
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        effectiveStartDate = fmt(today);
+        effectiveEndDate = fmt(today);
+      } else if (query.period === 'this_month') {
+        const start = new Date(y, m, 1);
+        const end = new Date(y, m + 1, 0); // last day of month
+        effectiveStartDate = start.toISOString().slice(0, 10);
+        effectiveEndDate = end.toISOString().slice(0, 10);
+      } else if (query.period === 'this_year') {
+        effectiveStartDate = `${y}-01-01`;
+        effectiveEndDate = `${y}-12-31`;
+      }
+    }
+
+    const showReceive = !query.type || query.type === 'receive' || query.type === 'both';
+    const showDisbursement = !query.type || query.type === 'disbursement' || query.type === 'both';
+
+    const receiveDateCondition = (prefix: string) => {
+      const parts: string[] = [];
+      const start = effectiveStartDate;
+      const end = effectiveEndDate;
+      if (start) parts.push(`${prefix}.receive_date >= '${start}'`);
+      if (end) parts.push(`${prefix}.receive_date <= '${end}'`);
+      return parts.length > 0 ? `AND ${parts.join(' AND ')}` : '';
+    };
+
+    const disburseDateCondition = (prefix: string) => {
+      const parts: string[] = [];
+      // สำหรับ disbursement ใช้ effective dates เดียวกัน หรือ custom ถ้าระบุแยก
+      const start = query.startDateDisbursement ?? effectiveStartDate;
+      const end = query.endDateDisbursement ?? effectiveEndDate;
+      if (start) parts.push(`${prefix}.disbursement_date >= '${start}'`);
+      if (end) parts.push(`${prefix}.disbursement_date <= '${end}'`);
+      return parts.length > 0 ? `AND ${parts.join(' AND ')}` : '';
+    };
+
+    const materialCondition = (matAlias: string) =>
+      query.materialId
+        ? `AND ${matAlias}.id = '${query.materialId}'`
+        : '';
+
+    // ── 1) Receiving rows ─────────────────────────────────────────────────────
+    if (showReceive) {
+      const receiveSql = `
+        SELECT
+          'receive' AS "docType",
+          mr.receive_date::TEXT AS "docDate",
+          mr.internal_lot_no AS "docNo",
+          m.code AS "materialCode",
+          m.name AS "materialName",
+          mr.material_type::TEXT AS "materialType",
+          COALESCE(u.symbol::TEXT, '') AS "unitSymbol",
+          mr.receive_quantity::TEXT AS "quantityIn",
+          NULL::TEXT AS "quantityOut",
+          COALESCE(mr.supplier_production_date::TEXT, '') AS "subLabel",
+          NULL::TEXT AS "sourceLotNo",
+          COALESCE(mr.po_no, '') AS "poNo",
+          COALESCE(s.name_th, '') AS "supplierName",
+          mr.status,
+          CASE mr.status
+            WHEN 'draft' THEN 'ฉบับร่าง'
+            WHEN 'confirmed' THEN 'ยืนยันแล้ว'
+            WHEN 'cancelled' THEN 'ยกเลิก'
+            ELSE mr.status
+          END AS "statusLabel"
+        FROM inventory.material_receivings mr
+        LEFT JOIN master.materials m ON m.id = mr.material_id
+        LEFT JOIN master.units u ON u.id = mr.unit_id
+        LEFT JOIN master.suppliers s ON s.id = mr.supplier_id
+        WHERE 1=1 ${receiveDateCondition('mr')} ${materialCondition('m')}
+        ORDER BY mr.receive_date DESC, mr.internal_lot_no DESC
+      `;
+      const receiveRows = await this.dataSource.query(receiveSql);
+      rows.push(...receiveRows);
+    }
+
+    // ── 2) Disbursement rows ─────────────────────────────────────────────────
+    if (showDisbursement) {
+      // Aggregate: one row per disbursement document (one material per doc)
+      // If a doc has multiple materials, pick the primary one with highest qty
+      const disburseSql = `
+        SELECT
+          'disbursement' AS "docType",
+          md.disbursement_date::TEXT AS "docDate",
+          md.disbursement_no AS "docNo",
+          COALESCE(agg.material_code, '') AS "materialCode",
+          COALESCE(agg.material_name, '') AS "materialName",
+          COALESCE(agg.material_type::TEXT, '') AS "materialType",
+          COALESCE(agg.unit_symbol::TEXT, '') AS "unitSymbol",
+          NULL::TEXT AS "quantityIn",
+          COALESCE(agg.total_quantity_out, 0)::TEXT AS "quantityOut",
+          CASE md.disbursement_type
+            WHEN 'stock_cut' THEN 'ตัดสต็อก'
+            WHEN 'production' THEN 'เบิกเพื่อผลิต'
+            ELSE md.disbursement_type
+          END AS "subLabel",
+          COALESCE(agg.source_lots, '') AS "sourceLotNo",
+          COALESCE(md.reason, '') AS "poNo",
+          '' AS "supplierName",
+          md.status,
+          CASE md.status
+            WHEN 'draft' THEN 'ฉบับร่าง'
+            WHEN 'confirmed' THEN 'ยืนยันแล้ว'
+            WHEN 'cancelled' THEN 'ยกเลิก'
+            ELSE md.status
+          END AS "statusLabel"
+        FROM inventory.materials_disbursements md
+        LEFT JOIN LATERAL (
+          SELECT
+            m.code AS material_code,
+            m.name AS material_name,
+            m.material_type,
+            u.symbol AS unit_symbol,
+            SUM(mdi.disbursed_quantity) AS total_quantity_out,
+            STRING_AGG(DISTINCT mrpkg.source_lot, ', ' ORDER BY mrpkg.source_lot) AS source_lots
+          FROM inventory.material_disbursement_items mdi
+          JOIN master.materials m ON m.id = mdi.material_id
+          LEFT JOIN master.units u ON u.id = m.unit_id
+          LEFT JOIN LATERAL (
+            SELECT DISTINCT mr.internal_lot_no AS source_lot
+            FROM inventory.material_disbursement_packages mdp2
+            JOIN inventory.material_receiving_packages mrp2 ON mrp2.id = mdp2.package_id
+            JOIN inventory.material_receivings mr ON mr.id = mrp2.material_receiving_id
+            WHERE mdp2.disbursement_item_id = mdi.id
+          ) mrpkg ON TRUE
+          WHERE mdi.disbursement_id = md.id
+            ${materialCondition('m')}
+          GROUP BY m.id, m.code, m.name, m.material_type, u.symbol
+        ) agg ON TRUE
+        WHERE 1=1 ${disburseDateCondition('md')}
+          AND agg.material_code IS NOT NULL
+        ORDER BY md.disbursement_date DESC, md.disbursement_no DESC
+      `;
+      const disburseRows = await this.dataSource.query(disburseSql);
+      rows.push(...disburseRows);
+    }
+
+    // Sort combined rows by date desc, then doc no desc (handle nulls)
+    rows.sort((a, b) => {
+      const aDate = a.docDate ?? '';
+      const bDate = b.docDate ?? '';
+      const dateCompare = bDate.localeCompare(aDate);
+      if (dateCompare !== 0) return dateCompare;
+      const aNo = a.docNo ?? '';
+      const bNo = b.docNo ?? '';
+      return bNo.localeCompare(aNo);
+    });
+
+    return {
+      items: rows,
+      meta: {
+        totalItems: rows.length,
+        totalReceive: rows.filter((r) => r.docType === 'receive').length,
+        totalDisbursement: rows.filter((r) => r.docType === 'disbursement').length,
+        generatedAt: new Date().toISOString(),
+        filters: query,
       },
     };
   }

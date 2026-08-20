@@ -23,7 +23,9 @@ import { PermissionGuard } from '../../common/guards/permission.guard';
 import { CancelMaterialsReceivingDto } from './dto/cancel-materials-receiving.dto';
 import { CreateMaterialsReceivingDto } from './dto/create-materials-receiving.dto';
 import { ListMaterialsReceivingQueryDto } from './dto/list-materials-receiving-query.dto';
+import { ReportMaterialsReceivingQueryDto } from './dto/report-materials-receiving.dto';
 import { UpdateMaterialsReceivingDto } from './dto/update-materials-receiving.dto';
+import { UnifiedReportQueryDto } from './dto/unified-report.dto';
 import { MATERIALS_RECEIVING_PERMISSIONS } from './materials-receiving-permissions';
 import { MaterialsReceivingService } from './materials-receiving.service';
 
@@ -38,6 +40,20 @@ export class MaterialsReceivingController {
   @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
   findAll(@Query() query: ListMaterialsReceivingQueryDto) {
     return this.materialsReceivingService.findAll(query);
+  }
+
+  /** รายงานรับเข้าวัสดุเพื่อสอบกลับ */
+  @Get('report')
+  @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
+  generateReport(@Query() query: ReportMaterialsReceivingQueryDto) {
+    return this.materialsReceivingService.generateReport(query);
+  }
+
+  /** รายงานรวม รับเข้า + จ่ายออก */
+  @Get('unified-report')
+  @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
+  generateUnifiedReport(@Query() query: UnifiedReportQueryDto) {
+    return this.materialsReceivingService.generateUnifiedReport(query);
   }
 
   @Get('lookups')

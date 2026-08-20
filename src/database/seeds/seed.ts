@@ -356,6 +356,42 @@ export async function seed(dataSource: DataSource) {
         parentCode: 'MATERIALS_MANAGEMENTS', // submenu under จัดการวัสดุ
       },
       {
+        code: 'MATERIALS_DISBURSEMENT',
+        name_th: 'จ่ายออกวัสดุ',
+        name_en: 'Materials Disbursement',
+        path: '/materials/materials-disbursement',
+        icon: 'scissors',
+        sort_order: 87,
+        parentCode: 'MATERIALS_MANAGEMENTS', // submenu under จัดการวัสดุ
+      },
+      {
+        code: 'MATERIALS_RECEIVING_REPORT',
+        name_th: 'รายงานรับเข้า',
+        name_en: 'Receiving Report',
+        path: '/materials/materials-receiving/report',
+        icon: 'file-bar-chart',
+        sort_order: 88,
+        parentCode: 'MATERIALS_RECEIVING',
+      },
+      {
+        code: 'MATERIALS_DISBURSEMENT_REPORT',
+        name_th: 'รายงานจ่ายออก',
+        name_en: 'Disbursement Report',
+        path: '/materials/materials-disbursement/report',
+        icon: 'file-bar-chart',
+        sort_order: 89,
+        parentCode: 'MATERIALS_DISBURSEMENT',
+      },
+      {
+        code: 'MATERIALS_REPORT',
+        name_th: 'รายงานวัสดุคงคลัง',
+        name_en: 'Materials Stock Report',
+        path: '/materials/materials-report',
+        icon: 'file-bar-chart',
+        sort_order: 90,
+        parentCode: 'MATERIALS_MANAGEMENTS',
+      },
+      {
         code: 'REJECT_REASON_MANAGEMENT',
         name_th: 'จัดการเหตุผลการปฏิเสธ',
         name_en: 'Reject Reason Management',

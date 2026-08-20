@@ -18,6 +18,7 @@ import {
   DISBURSEMENT_SORT_COLUMNS,
   DisbursementSortBy,
 } from './dto/list-materials-disbursement-query.dto';
+import { ReportMaterialsDisbursementQueryDto } from './dto/report-materials-disbursement.dto';
 import { MaterialsDisbursement } from './materials-disbursement.entity';
 import { MaterialDisbursementItem } from './material-disbursement-item.entity';
 import { MaterialDisbursementPackage } from './material-disbursement-package.entity';
@@ -360,6 +361,125 @@ export class MaterialsDisbursementService {
     };
   }
 
+  /**
+   * รายงานจ่ายออกวัสดุเพื่อสอบกลับ
+   * แสดง: เลขที่ใบจ่าย, วันจ่าย, ประเภท, เหตุผล, รายละเอียดวัสดุ,
+   *        จำนวนที่เบิก/จ่ายจริง, หน่วย, สถานะ,
+   *        lot ต้นทาง (จาก FIFO), วันยืนยัน/ยกเลิก
+   */
+  async generateReport(query: ReportMaterialsDisbursementQueryDto) {
+    const DISBURSEMENT_TYPE_LABELS: Record<string, string> = {
+      stock_cut: 'ตัดสต็อก',
+      production: 'เบิกเพื่อผลิต',
+    };
+
+    const STATUS_LABELS: Record<string, string> = {
+      draft: 'แนวปฏิบัติ',
+      confirmed: 'ยืนยันแล้ว',
+      cancelled: 'ยกเลิก',
+    };
+
+    const qb = this.disbursementRepository
+      .createQueryBuilder('disbursement')
+      .leftJoinAndSelect('disbursement.items', 'items')
+      .leftJoinAndSelect('items.material', 'material')
+      .leftJoinAndSelect('material.unit', 'unit')
+      .leftJoinAndSelect('items.packages', 'itemPackages')
+      .leftJoinAndSelect('itemPackages.package', 'receivingPackage')
+      .leftJoinAndSelect('receivingPackage.materialReceiving', 'receiving')
+      .select([
+        'disbursement.id',
+        'disbursement.disbursementNo',
+        'disbursement.disbursementType',
+        'disbursement.disbursementDate',
+        'disbursement.reason',
+        'disbursement.status',
+        'disbursement.confirmedAt',
+        'disbursement.cancelledAt',
+        'disbursement.cancelReason',
+        'disbursement.createdBy',
+        'disbursement.createdAt',
+        'items.id',
+        'items.requestedQuantity',
+        'items.disbursedQuantity',
+        'items.materialId',
+        'material.code',
+        'material.name',
+        'material.materialType',
+        'unit.symbol',
+        'receiving.internalLotNo',
+      ])
+      .orderBy('disbursement.disbursementDate', 'DESC')
+      .addOrderBy('disbursement.disbursementNo', 'DESC');
+
+    if (query.startDate) {
+      qb.andWhere('disbursement.disbursementDate >= :startDate', {
+        startDate: query.startDate,
+      });
+    }
+    if (query.endDate) {
+      qb.andWhere('disbursement.disbursementDate <= :endDate', {
+        endDate: query.endDate,
+      });
+    }
+    if (query.status) {
+      qb.andWhere('disbursement.status = :status', { status: query.status });
+    }
+    if (query.disbursementType) {
+      qb.andWhere('disbursement.disbursementType = :disbursementType', {
+        disbursementType: query.disbursementType,
+      });
+    }
+
+    const rows = await qb.getMany();
+
+    return {
+      items: rows.flatMap((d) =>
+        (d.items ?? []).map((item) => {
+          // รวบรวม lot ที่ถูกหัดจาก FIFO packages
+          const sourceLots = (
+            (item.packages ?? []) as Array<{
+              package?: { materialReceiving?: { internalLotNo: string } };
+            }>
+          )
+            .map((pkg) => pkg.package?.materialReceiving?.internalLotNo)
+            .filter(Boolean) as string[];
+
+          return {
+            id: d.id,
+            disbursementNo: d.disbursementNo,
+            disbursementDate: d.disbursementDate,
+            disbursementType: d.disbursementType,
+            disbursementTypeLabel:
+              DISBURSEMENT_TYPE_LABELS[d.disbursementType] ?? d.disbursementType,
+            reason: d.reason,
+            materialCode: item.material?.code ?? '',
+            materialName: item.material?.name ?? '',
+            materialType: item.material?.materialType ?? null,
+            requestedQuantity: item.requestedQuantity,
+            disbursedQuantity: item.disbursedQuantity,
+            unitSymbol: (item.material as any)?.unit?.symbol ?? '',
+            status: d.status,
+            statusLabel: STATUS_LABELS[d.status] ?? d.status,
+            sourceLotNo:
+              sourceLots.length > 0 ? sourceLots.join(', ') : null,
+            confirmedAt: d.confirmedAt?.toISOString() ?? null,
+            cancelledAt: d.cancelledAt?.toISOString() ?? null,
+            cancelReason: d.cancelReason,
+            createdBy: d.createdBy,
+            createdAt: d.createdAt.toISOString(),
+          };
+        }),
+      ),
+      meta: {
+        totalItems: rows.reduce((sum, d) => sum + (d.items?.length ?? 0), 0),
+        totalDocuments: rows.length,
+        generatedAt: new Date().toISOString(),
+        filters: query,
+      },
+    };
+  }
+
   async findOne(id: string): Promise<any> {
     const disbursement = await this.disbursementRepository
       .createQueryBuilder('disbursement')
@@ -442,7 +562,7 @@ export class MaterialsDisbursementService {
       .leftJoin('pkg.materialReceiving', 'receiving')
       .where(`pkg.materialReceivingId IN (
         SELECT mr.id FROM inventory.material_receivings mr
-        WHERE mr.materialId = :materialId
+        WHERE mr.material_id = :materialId
       )`, { materialId: item.materialId })
       .andWhere('pkg.status = :status', { status: 'in_stock' })
       .orderBy('receiving.receiveDate', 'ASC')
@@ -517,10 +637,10 @@ export class MaterialsDisbursementService {
           referenceType: 'MATERIALS_DISBURSEMENT',
           referenceId: item.disbursementId,
           referenceLotNo: receiving?.internalLotNo ?? null,
-          quantityBefore: this.fromScaled(this.toScaled(quantityBefore) + totalDisbursed),
+          quantityBefore: this.fromScaled(this.toScaled(quantityBefore) - totalDisbursed),
           quantityIn: this.fromScaled(0n),
           quantityOut: this.fromScaled(qtyToDeduct),
-          quantityAfter: this.fromScaled(this.toScaled(quantityBefore) + totalDisbursed + qtyToDeduct),
+          quantityAfter: this.fromScaled(this.toScaled(quantityBefore) - totalDisbursed - qtyToDeduct),
           transactionDate: new Date(),
           remark: `Disbursed from ${disbursementNo}`,
           createdBy: userId,

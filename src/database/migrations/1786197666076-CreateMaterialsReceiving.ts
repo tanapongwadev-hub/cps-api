@@ -212,7 +212,7 @@ export class CreateMaterialsReceiving1786197666076 implements MigrationInterface
         CONSTRAINT chk_stock_transactions_type
           CHECK (transaction_type IN ('RECEIVE', 'ISSUE', 'ADJUST')),
         CONSTRAINT chk_stock_transactions_ref_type
-          CHECK (reference_type IN ('MATERIAL_RECEIVING')),
+          CHECK (reference_type IN ('MATERIAL_RECEIVING', 'MATERIALS_DISBURSEMENT')),
         CONSTRAINT chk_stock_transactions_qty_sign
           CHECK (quantity_before >= 0 AND quantity_in >= 0 AND quantity_out >= 0 AND quantity_after >= 0),
         CONSTRAINT chk_stock_transactions_in_or_out

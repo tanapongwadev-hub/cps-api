@@ -19,6 +19,7 @@ import { PermissionGuard } from '../../common/guards/permission.guard';
 import { CancelMaterialsDisbursementDto } from './dto/cancel-materials-disbursement.dto';
 import { CreateMaterialsDisbursementDto } from './dto/create-materials-disbursement.dto';
 import { ListMaterialsDisbursementQueryDto } from './dto/list-materials-disbursement-query.dto';
+import { ReportMaterialsDisbursementQueryDto } from './dto/report-materials-disbursement.dto';
 import { UpdateMaterialsDisbursementDto } from './dto/update-materials-disbursement.dto';
 import { MATERIALS_DISBURSEMENT_PERMISSIONS } from './materials-disbursement-permissions';
 import { MaterialsDisbursementService } from './materials-disbursement.service';
@@ -34,6 +35,13 @@ export class MaterialsDisbursementController {
   @RequirePermissions(MATERIALS_DISBURSEMENT_PERMISSIONS.VIEW)
   findAll(@Query() query: ListMaterialsDisbursementQueryDto) {
     return this.disbursementService.findAll(query);
+  }
+
+  /** รายงานจ่ายออกวัสดุเพื่อสอบกลับ */
+  @Get('report')
+  @RequirePermissions(MATERIALS_DISBURSEMENT_PERMISSIONS.VIEW)
+  generateReport(@Query() query: ReportMaterialsDisbursementQueryDto) {
+    return this.disbursementService.generateReport(query);
   }
 
   @Get('lookups')

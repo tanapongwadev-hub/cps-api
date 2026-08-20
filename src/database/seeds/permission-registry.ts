@@ -108,6 +108,17 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     POST: MATERIALS_DISBURSEMENT_PERMISSIONS.CONFIRM,
     CANCEL: MATERIALS_DISBURSEMENT_PERMISSIONS.CANCEL,
   },
+  // Report menus — read-only (VIEW only)
+  MATERIALS_RECEIVING_REPORT: {
+    READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
+  },
+  MATERIALS_DISBURSEMENT_REPORT: {
+    READ: `${MATERIALS_DISBURSEMENT_PERMISSIONS.VIEW}`,
+  },
+  // Unified materials stock report — read-only
+  MATERIALS_REPORT: {
+    READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
+  },
 };
 
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
@@ -115,6 +126,10 @@ export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
   GOODS_RECEIPT: DOCUMENT_ACTION_CODES,
   MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
   MATERIALS_DISBURSEMENT: MATERIALS_DISBURSEMENT_ACTION_CODES,
+  // Report menus — read-only
+  MATERIALS_RECEIVING_REPORT: ['READ'],
+  MATERIALS_DISBURSEMENT_REPORT: ['READ'],
+  MATERIALS_REPORT: ['READ'],
 };
 
 export function resolveActionCodes(menuCode: string): readonly string[] {
