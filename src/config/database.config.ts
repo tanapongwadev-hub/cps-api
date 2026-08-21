@@ -12,7 +12,7 @@ export const getDatabaseConfig = () => ({
   database: getEnv('DB_DATABASE', 'cps_database'),
   schema: getEnv('DB_SCHEMA', 'iam'),
   synchronize: false,
-  logging: getEnvBoolean('DB_LOGGING', process.env.NODE_ENV === 'development'),
+  logging: getEnvBoolean('DB_LOGGING', false),
 });
 
 export const databaseConfig = registerAs(

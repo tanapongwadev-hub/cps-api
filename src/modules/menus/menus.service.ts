@@ -273,6 +273,9 @@ export class MenusService {
       menu.isActive = updateMenuDto.isActive;
 
     if (updateMenuDto.parentId !== undefined) {
+      // CRITICAL: Clear the parent relation too, otherwise TypeORM will try
+      // to re-attach the old parent object on save.
+      menu.parent = null;
       menu.parentId = (updateMenuDto.parentId || null) as string;
       menu.menuType = updateMenuDto.parentId
         ? 'SUB'
@@ -319,8 +322,10 @@ export class MenusService {
     }
   }
 
-  private mapMenuType(menuType?: string): 'MAIN' | 'SUB' {
-    return menuType === 'MAIN' ? 'MAIN' : 'SUB';
+  private mapMenuType(menuType?: string): 'MAIN' | 'SUB' | 'BUTTON' {
+    if (menuType === 'MAIN' || menuType === 'BUTTON') return menuType;
+    // MENU (frontend) and SUB (entity / legacy) both map to SUB on save.
+    return 'SUB';
   }
 
   private buildMenuEntity(

@@ -31,10 +31,10 @@ export class Menu {
   @Column({
     name: 'menu_type',
     type: 'enum',
-    enum: ['MAIN', 'SUB'],
+    enum: ['MAIN', 'SUB', 'BUTTON'],
     default: 'MAIN',
   })
-  menuType: 'MAIN' | 'SUB';
+  menuType: 'MAIN' | 'SUB' | 'BUTTON';
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   path: string;
@@ -65,5 +65,5 @@ export class Menu {
 
   @ManyToOne(() => Menu, { nullable: true })
   @JoinColumn({ name: 'parent_id' })
-  parent: Menu;
+  parent: Menu | null;
 }

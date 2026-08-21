@@ -9,7 +9,9 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-const MENU_TYPES = ['MAIN', 'MENU', 'BUTTON'] as const;
+// Accept both the legacy UI enum (MAIN | MENU | BUTTON) and the
+// entity enum (MAIN | SUB) — the service normalises to MAIN | SUB before save.
+const MENU_TYPES = ['MAIN', 'MENU', 'BUTTON', 'SUB'] as const;
 
 export class CreateMenuPermissionDto {
   @IsString()
