@@ -274,6 +274,23 @@ export async function seed(dataSource: DataSource) {
         sort_order: 80,
       },
       {
+        code: 'PRODUCTS_LIST',
+        name_th: 'ชิ้นส่วนยานยนต์',
+        name_en: 'Automotive Parts',
+        path: '/products',
+        icon: 'car',
+        sort_order: 95,
+      },
+      {
+        code: 'BOMS',
+        name_th: 'สูตรการประกอบ (BOM)',
+        name_en: 'Bill of Materials',
+        path: '/products',
+        icon: 'git-branch',
+        sort_order: 96,
+        parentCode: 'PRODUCTS_LIST',
+      },
+      {
         code: 'UNIT_MANAGEMENT',
         name_th: 'จัดการหน่วยนับ',
         name_en: 'Unit Management',
@@ -336,15 +353,6 @@ export async function seed(dataSource: DataSource) {
         path: '/master-data/organizations',
         icon: 'building',
         sort_order: 97,
-      },
-      {
-        code: 'GOODS_RECEIPT',
-        name_th: 'รับเข้าวัตถุดิบ (เอกสาร)',
-        name_en: 'Goods Receipt',
-        path: '/materials/goods-receipts',
-        icon: 'inbox',
-        sort_order: 85,
-        parentCode: 'MATERIALS_MANAGEMENTS', // submenu under จัดการวัสดุ
       },
       {
         code: 'MATERIALS_RECEIVING',

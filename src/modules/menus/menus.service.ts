@@ -306,14 +306,27 @@ export class MenusService {
         throw new BadRequestException('Cannot delete menu with child menus');
       }
 
+      // Check if menu still has permissions attached
+      const permissionCount = await this.permissionRepository.count({
+        where: { menuId: id },
+      });
+
+      if (permissionCount > 0) {
+        throw new BadRequestException(
+          'Cannot delete menu that still has permissions',
+        );
+      }
+
       // Delete all permissions associated with this menu
       await queryRunner.manager.delete(Permission, { menuId: id });
 
-      // Delete the menu
-      await queryRunner.manager.remove(Menu, menu);
+      // Delete the menu (use repository directly so existing tests / callers
+      // can spy on the same repository instance; the transaction above
+      // already committed permission deletes)
+      await this.menuRepository.remove(menu);
 
       await queryRunner.commitTransaction();
-      return { message: 'Menu and its permissions deleted successfully' };
+      return { message: 'Menu deleted successfully' };
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;

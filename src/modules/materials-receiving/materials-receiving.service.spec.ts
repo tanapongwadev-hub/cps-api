@@ -37,6 +37,7 @@ interface RepoMock {
   findOne: jest.Mock;
   count: jest.Mock;
   delete: jest.Mock;
+  update: jest.Mock;
   createQueryBuilder: jest.Mock;
 }
 
@@ -48,6 +49,7 @@ function makeRepo(overrides: Partial<RepoMock> = {}): RepoMock {
     findOne: jest.fn(() => Promise.resolve(null)),
     count: jest.fn(() => Promise.resolve(0)),
     delete: jest.fn(() => Promise.resolve({ affected: 1 })),
+    update: jest.fn(() => Promise.resolve({ affected: 1 })),
     createQueryBuilder: jest.fn(),
     ...overrides,
   };
@@ -672,6 +674,7 @@ describe('MaterialsReceivingService', () => {
           cb(
             makeManager({
               [MaterialReceiving.name]: repos.receivingRepo,
+              [MaterialReceivingPackage.name]: repos.packageRepo,
               [StockBalance.name]: repos.stockBalanceRepo,
               [StockTransaction.name]: repos.stockTransactionRepo,
             }),

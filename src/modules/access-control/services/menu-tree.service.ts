@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-export type MenuTreeType = 'MAIN' | 'SUB';
+export type MenuTreeType = 'MAIN' | 'SUB' | 'BUTTON';
 
 export interface MenuResponse {
   id: string;

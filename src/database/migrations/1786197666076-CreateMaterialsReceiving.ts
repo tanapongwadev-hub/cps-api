@@ -197,10 +197,10 @@ export class CreateMaterialsReceiving1786197666076 implements MigrationInterface
       CREATE TABLE inventory.stock_transactions (
         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         material_id BIGINT NOT NULL,
-        transaction_type VARCHAR(20) NOT NULL,
-        reference_type VARCHAR(30) NOT NULL,
+        transaction_type VARCHAR(30) NOT NULL,
+        reference_type VARCHAR(40) NOT NULL,
         reference_id BIGINT,
-        reference_lot_no VARCHAR(30),
+        reference_lot_no VARCHAR(40),
         quantity_before NUMERIC(18,4) NOT NULL,
         quantity_in NUMERIC(18,4) NOT NULL DEFAULT 0,
         quantity_out NUMERIC(18,4) NOT NULL DEFAULT 0,
@@ -212,7 +212,7 @@ export class CreateMaterialsReceiving1786197666076 implements MigrationInterface
         CONSTRAINT chk_stock_transactions_type
           CHECK (transaction_type IN ('RECEIVE', 'ISSUE', 'ADJUST')),
         CONSTRAINT chk_stock_transactions_ref_type
-          CHECK (reference_type IN ('MATERIAL_RECEIVING', 'MATERIALS_DISBURSEMENT')),
+          CHECK (reference_type IN ('MATERIAL_RECEIVING')),
         CONSTRAINT chk_stock_transactions_qty_sign
           CHECK (quantity_before >= 0 AND quantity_in >= 0 AND quantity_out >= 0 AND quantity_after >= 0),
         CONSTRAINT chk_stock_transactions_in_or_out

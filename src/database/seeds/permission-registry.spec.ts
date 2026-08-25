@@ -1,6 +1,5 @@
 import { CATEGORY_PERMISSIONS } from '../../modules/categories/category-permissions';
 import { DELIVERY_TYPE_PERMISSIONS } from '../../modules/delivery-types/delivery-type-permissions';
-import { GOODS_RECEIPT_PERMISSIONS } from '../../modules/goods-receipts/goods-receipt-permissions';
 import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
@@ -11,7 +10,6 @@ import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissio
 import { UNIT_PERMISSIONS } from '../../modules/units/unit-permissions';
 import {
   DEFAULT_ACTION_CODES,
-  DOCUMENT_ACTION_CODES,
   resolveActionCodes,
   resolvePermissionCode,
 } from './permission-registry';
@@ -91,19 +89,6 @@ describe('permission registry', () => {
     );
     expect(resolvePermissionCode('UNIT_MANAGEMENT', 'READ')).toBe(
       UNIT_PERMISSIONS.VIEW,
-    );
-  });
-
-  it('gives the goods receipt menu the document action set', () => {
-    expect(resolveActionCodes('GOODS_RECEIPT')).toEqual(DOCUMENT_ACTION_CODES);
-    expect(resolvePermissionCode('GOODS_RECEIPT', 'POST')).toBe(
-      GOODS_RECEIPT_PERMISSIONS.POST,
-    );
-    expect(resolvePermissionCode('GOODS_RECEIPT', 'CANCEL')).toBe(
-      GOODS_RECEIPT_PERMISSIONS.CANCEL,
-    );
-    expect(resolvePermissionCode('GOODS_RECEIPT', 'READ')).toBe(
-      GOODS_RECEIPT_PERMISSIONS.VIEW,
     );
   });
 

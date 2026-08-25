@@ -24,10 +24,11 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { StatusItemsModule } from './modules/status-items/status-items.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { RejectReasonsModule } from './modules/reject-reasons/reject-reasons.module';
-import { GoodsReceiptsModule } from './modules/goods-receipts/goods-receipts.module';
 import { MaterialsReceivingModule } from './modules/materials-receiving/materials-receiving.module';
 import { MaterialsDisbursementModule } from './modules/materials-disbursement/materials-disbursement.module';
 import { StockBalancesModule } from './modules/stock-balances/stock-balances.module';
+import { ProductsModule } from './modules/products/products.module';
+import { BomsModule } from './modules/boms/boms.module';
 
 @Module({
   imports: [
@@ -62,10 +63,11 @@ import { StockBalancesModule } from './modules/stock-balances/stock-balances.mod
     StatusItemsModule,
     OrganizationsModule,
     RejectReasonsModule,
-    GoodsReceiptsModule,
     MaterialsReceivingModule,
     MaterialsDisbursementModule,
     StockBalancesModule,
+    ProductsModule,
+    BomsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

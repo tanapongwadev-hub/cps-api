@@ -28,13 +28,24 @@ jest.mock('@nestjs/core', () => ({
   },
 }));
 
-jest.mock('@nestjs/swagger', () => ({
-  DocumentBuilder: jest.fn(() => mockDocumentBuilder),
-  SwaggerModule: {
-    createDocument: jest.fn().mockReturnValue({}),
-    setup: jest.fn(),
-  },
-}));
+// Re-export PartialType as an identity class so DTOs that `extend
+// PartialType(...)` keep working under the swagger mock.
+// We define the helper inside the factory because Jest hoists jest.mock
+// above all `const`/`let` declarations, so a top-level binding wouldn't be
+// initialized when the factory runs.
+jest.mock('@nestjs/swagger', () => {
+  const identity = <T>(cls: T) => cls;
+  return {
+    DocumentBuilder: jest.fn(() => mockDocumentBuilder),
+    SwaggerModule: {
+      createDocument: jest.fn().mockReturnValue({}),
+      setup: jest.fn(),
+    },
+    PartialType: identity,
+    OmitType: identity,
+    PickType: identity,
+  };
+});
 
 describe('bootstrap static uploads', () => {
   beforeEach(() => {

@@ -1,892 +1,179 @@
-# API Endpoints - Frontend Reference
+# API Endpoints (cps-api)
 
-> Base URL: ตัวแปร `baseUrl` เช่น `http://localhost:3001/api/v1`
-> Authorization: ส่ง `Authorization: Bearer <accessToken>` สำหรับ endpoints ที่ต้อง authentication
+Base path: `/api/v1`  ·  Auth: `Bearer <accessToken>`  ·  Schema: `master` (business), `iam` (auth/menus/permissions)
 
-## Authentication
+> All endpoints require `Authorization: Bearer <token>` unless marked **Public**. Permissions are documented per-route. SUPER_ADMIN bypasses all permission checks.
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| POST | `/auth/login` | Public | เข้าสู่ระบบ (`username`, `password`) |
-| POST | `/auth/select-department` | Public (ต้องใช้ `departmentSelectionToken` จาก `/auth/login` + `userDepartmentRoleId`) | เลือก department/role หลัง login |
-| POST | `/auth/switch-department` | Bearer | เปลี่ยน department/role ระหว่างใช้งาน (`userDepartmentRoleId`) |
-| POST | `/auth/refresh` หรือ `/auth/refresh-token` | Public | refresh access token ด้วย `refreshToken` (ทั้งสอง path เป็น alias) |
-| POST | `/auth/logout` | Bearer | ออกจากระบบ (revoke session ปัจจุบัน) |
-| GET | `/auth/me` | Bearer | ข้อมูลผู้ใช้ปัจจุบัน รวม departments, roles และ `accessControl: { menus, permissions }` |
-| GET | `/auth/me/menus` | Bearer | ดึงเมนูของผู้ใช้ปัจจุบัน |
-| GET | `/auth/me/permissions` | Bearer | ดึงสิทธิ์ของผู้ใช้ปัจจุบัน |
+## Conventions
 
-## Users (ต้องเป็น SUPER_ADMIN)
+- Response envelope (when not auto-unwrapped by an interceptor):
+  ```json
+  { "success": true, "message": "OK", "data": <T>, "timestamp": "..." }
+  ```
+- Errors use NestJS HTTP exceptions; body shape:
+  ```json
+  { "statusCode": 400, "message": "Validation failed", "error": "Bad Request" }
+  ```
+- IDs are `bigint` (string in JSON). All `*_id` columns are foreign keys.
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/users` | Bearer + SUPER_ADMIN | รายการผู้ใช้ (รองรับ `page`, `limit`, `search`) |
-| GET | `/users/:id` | Bearer + SUPER_ADMIN | ข้อมูลผู้ใช้ตาม id |
-| POST | `/users` | Bearer + SUPER_ADMIN | สร้างผู้ใช้ใหม่ |
-| PATCH | `/users/:id` | Bearer + SUPER_ADMIN | แก้ไขข้อมูลผู้ใช้ |
-| PATCH | `/users/:id/status` | Bearer + SUPER_ADMIN | อัปเดตสถานะผู้ใช้ (active/locked) |
-| POST | `/users/:id/reset-password` | Bearer + SUPER_ADMIN | รีเซ็ตรหัสผ่าน |
-| GET | `/users/:id/access-summary` | Bearer + SUPER_ADMIN | Effective menu access grouped by assignment |
-| GET | `/users/:id/assignments` | Bearer + SUPER_ADMIN | ดึง assignments ของผู้ใช้ |
-| POST | `/users/:id/assignments` | Bearer + SUPER_ADMIN | สร้าง assignment ใหม่ |
-| PATCH | `/users/:id/assignments/:assignmentId` | Bearer + SUPER_ADMIN | แก้ไข assignment รายรายการ |
-| DELETE | `/users/:id/assignments/:assignmentId` | Bearer + SUPER_ADMIN | ลบ assignment รายรายการ |
-| DELETE | `/users/:id` | Bearer + SUPER_ADMIN | ลบผู้ใช้ |
+---
 
-### GET `/users/:id/access-summary`
+## 1. Auth (`/api/v1/auth`) — `auth` module
 
-Returns persisted, effective menu access grouped by assignment. Inactive or expired assignments are returned with empty `permissions`, `menus`, and `menuCount: 0`. System assignments have `department: null`. Menu-tree nodes serialize `menuType` as `MAIN | SUB`, matching the persisted menu discriminator.
+| Method | Path | Auth | Permission | Notes |
+|---|---|---|---|---|
+| POST | `/auth/login` | Public | — | Returns `{ authentication: { accessToken, refreshToken, ... }, user, currentDepartmentRole, accessControl: { menus, permissions } }` |
+| POST | `/auth/select-department` | Bearer | — | After login, pick a department if user has multiple |
+| POST | `/auth/switch-department` | Bearer | — | Switch active department/role |
+| POST | `/auth/refresh` | Public | — | Refresh access token |
+| POST | `/auth/refresh-token` | Public | — | Alias of `/refresh` |
+| POST | `/auth/logout` | Bearer | — | Revoke current session |
+| GET  | `/auth/me` | Bearer | — | Current user profile |
+| GET  | `/auth/me/menus` | Bearer | — | Menus visible to current user |
+| GET  | `/auth/me/permissions` | Bearer | — | Permissions granted to current user |
 
-```json
-{
-  "userId": "7",
-  "assignments": [
-    {
-      "assignmentId": "76",
-      "department": {
-        "id": "3",
-        "code": "PROD",
-        "name": "ฝ่ายผลิต"
-      },
-      "role": {
-        "id": "4",
-        "code": "OPERATOR",
-        "name": "พนักงานผลิต",
-        "scopeType": "DEPARTMENT"
-      },
-      "isActive": true,
-      "expiredAt": null,
-      "permissions": ["production.read"],
-      "menus": [
-        {
-          "id": "menu-production",
-          "code": "production",
-          "name": "การผลิต",
-          "nameEn": "Production",
-          "path": "/production",
-          "icon": null,
-          "menuType": "MAIN",
-          "sortOrder": 1,
-          "permissions": [],
-          "children": []
-        }
-      ],
-      "menuCount": 1
-    }
-  ]
-}
-```
+## 2. Products (`/api/v1/products`) — `products` module
 
-### PATCH `/users/:id` — Aggregate Assignment Update
+### Fields (products table)
 
-ส่งข้อมูลส่วนตัวพร้อม `assignments` ซึ่งเป็นสถานะปลายทางทั้งหมดของผู้ใช้ใน request เดียว:
-
-```json
-{
-  "firstName": "Somchai",
-  "lastName": "Jaidee",
-  "email": "somchai@example.com",
-  "telephone": "0812345678",
-  "assignments": [
-    { "id": "12", "departmentId": "3", "roleId": "5" },
-    { "departmentId": null, "roleId": "1" }
-  ]
-}
-```
-
-- Assignment เดิมที่ต้องการคงไว้หรือแก้ไขให้ส่ง `id`; รายการใหม่ไม่ต้องส่ง `id`
-- Assignment เดิมที่ไม่อยู่ใน array จะถูกลบ โดยผู้ใช้ต้องเหลืออย่างน้อย 1 รายการ
-- ห้ามมีคู่ `(departmentId, roleId)` ซ้ำกัน
-- System role ใช้ `departmentId: null`; department role ต้องระบุ `departmentId`
-- Backend ตรวจสอบและเพิ่ม/แก้ไข/ลบ Assignment พร้อมข้อมูลส่วนตัวภายใน transaction เดียว
-- เมื่อชุด Assignment เปลี่ยน `permissionVersion` จะเพิ่มขึ้น ทำให้ access token เดิมใช้ไม่ได้และต้อง login ใหม่
-
-## Departments (ต้องเป็น SUPER_ADMIN)
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/departments` | Bearer + SUPER_ADMIN | รายการแผนก (รองรับ `page`, `limit`, `search`) |
-| GET | `/departments/:id` | Bearer + SUPER_ADMIN | ข้อมูลแผนก |
-| POST | `/departments` | Bearer + SUPER_ADMIN | สร้างแผนก |
-| PATCH | `/departments/:id` | Bearer + SUPER_ADMIN | แก้ไขแผนก |
-| DELETE | `/departments/:id` | Bearer + SUPER_ADMIN | ลบแผนก |
-
-## Roles (ต้องเป็น SUPER_ADMIN)
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/roles` | Bearer + SUPER_ADMIN | รายการบทบาท (รองรับ `page`, `limit`, `search`, `status`) |
-| GET | `/roles/:id` | Bearer + SUPER_ADMIN | ข้อมูลบทบาท |
-| POST | `/roles` | Bearer + SUPER_ADMIN | สร้างบทบาท |
-| PATCH | `/roles/:id` | Bearer + SUPER_ADMIN | แก้ไขบทบาท |
-| DELETE | `/roles/:id` | Bearer + SUPER_ADMIN | ลบบทบาท |
-
-### Query Parameters ของ `GET /roles`
-
-| Param | Type | Default | หมายเหตุ |
-|---|---|---|---|
-| `page` | int ≥ 1 | `1` | หน้าที่ต้องการ |
-| `limit` | int 1–100 | `20` | จำนวนต่อหน้า |
-| `search` | string | — | ค้นหา `code`, `nameTh`, `nameEn` (ILIKE) |
-| `status` | `active` \| `inactive` | — | กรองตามสถานะ (`active` = isActive true, `inactive` = isActive false) |
-
-Response ของ list รวม `actionCodes`, `permissionCount` และ `userCount` ในแต่ละ role:
-
-```json
-{
-  "items": [
-    {
-      "id": "1",
-      "code": "SUPER_ADMIN",
-      "nameTh": "ผู้ดูแลระบบ",
-      "nameEn": "Super Admin",
-      "scopeType": "SYSTEM",
-      "isActive": true,
-      "isSystem": true,
-      "description": null,
-      "createdAt": "2026-08-01T00:00:00.000Z",
-      "updatedAt": "2026-08-01T00:00:00.000Z",
-      "actionCodes": ["VIEW", "CREATE", "UPDATE", "DELETE"],
-      "permissionCount": 4,
-      "userCount": 2
-    }
-  ],
-  "meta": { "page": 1, "limit": 20, "totalItems": 1, "totalPages": 1 }
-}
-```
-
-## Menus (ต้องเป็น SUPER_ADMIN)
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/menus` | Bearer + SUPER_ADMIN | รายการเมนู (รองรับ `page`, `limit`, `search`) |
-| GET | `/menus/tree` | Bearer + SUPER_ADMIN | โครงสร้างเมนูแบบ tree |
-| GET | `/menus/:id` | Bearer + SUPER_ADMIN | ข้อมูลเมนู |
-| POST | `/menus` | Bearer + SUPER_ADMIN | สร้างเมนู |
-| PATCH | `/menus/:id` | Bearer + SUPER_ADMIN | แก้ไขเมนู |
-| DELETE | `/menus/:id` | Bearer + SUPER_ADMIN | ลบเมนู |
-
-## Permissions (ต้องเป็น SUPER_ADMIN)
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/permissions` | Bearer + SUPER_ADMIN | รายการ permission (รองรับ `page`, `limit`, `search`) พร้อม `departments` |
-| GET | `/permissions/options` | Bearer + SUPER_ADMIN | ดึง menus + actions สำหรับ dropdown ในฟอร์มสร้าง/แก้ไข permission |
-| GET | `/permissions/:id` | Bearer + SUPER_ADMIN | ข้อมูล permission พร้อม `departments` |
-| POST | `/permissions` | Bearer + SUPER_ADMIN | สร้าง permission ใหม่ |
-| PATCH | `/permissions/:id` | Bearer + SUPER_ADMIN | แก้ไข permission |
-| DELETE | `/permissions/:id` | Bearer + SUPER_ADMIN | ลบ permission |
-| PUT | `/permissions/:id/departments` | Bearer + SUPER_ADMIN | กำหนดแผนกที่ใช้ permission ได้ |
-
-### GET `/permissions/options`
-
-คืน menus และ actions ที่ active สำหรับใช้ใน dropdown:
-
-```json
-{
-  "menus": [
-    { "id": "1", "code": "dashboard", "nameTh": "แดชบอร์ด", "nameEn": "Dashboard" }
-  ],
-  "actions": [
-    { "id": "1", "code": "VIEW", "nameTh": "ดู", "nameEn": "View" }
-  ]
-}
-```
-
-### POST `/permissions`
-
-```json
-{
-  "menuId": "1",
-  "actionId": "1",
-  "code": "DASHBOARD_VIEW",
-  "description": "ดูหน้า Dashboard",
-  "isActive": true
-}
-```
-
-| Field | Type | Required | Note |
-|---|---|---|---|
-| `menuId` | string | ✅ | ID ของ menu (ต้องมีอยู่จริง) |
-| `actionId` | string | ✅ | ID ของ action (ต้องมีอยู่จริง) |
-| `code` | string | ✅ | รหัส permission (ต้องไม่ซ้ำ) |
-| `description` | string \| undefined | — | คำอธิบาย |
-| `isActive` | bool | — | default `true` |
-
-### PATCH `/permissions/:id`
-
-ทุก field เป็น optional:
-
-```json
-{
-  "code": "DASHBOARD_VIEW_UPDATED",
-  "description": "ดูหน้า Dashboard (แก้ไข)"
-}
-```
-
-### DELETE `/permissions/:id`
-
-ลบ permission — ไม่ต้องส่ง body คืน `404` ถ้าไม่พบ
-
-### PUT `/permissions/:id/departments`
-
-`departments: []` ใน permission response หมายถึงใช้งานได้ทุกแผนก ส่วนรายการที่มีค่าจะประกอบด้วย `id`, `code`, `nameTh` และ `nameEn`
-
-Request สำหรับกำหนดแผนก:
-
-```json
-{
-  "departmentIds": ["1", "2", "3"]
-}
-```
-
-`departmentIds` ต้องเป็น string array ที่ไม่มีค่าซ้ำและทุก ID ต้องมีอยู่จริง ส่ง array ว่างเพื่อกลับไปใช้งานได้ทุกแผนก ระบบคืน `404` เมื่อไม่พบ permission และ `400` พร้อม `departmentIds` ที่ผิดเมื่อไม่พบแผนก
-
-## Sessions (ต้องเป็น SUPER_ADMIN)
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/sessions` | Bearer + SUPER_ADMIN | รายการเซสชัน (รองรับ `page`, `limit`, `userId`) |
-| GET | `/sessions/:id` | Bearer + SUPER_ADMIN | ข้อมูลเซสชัน |
-| PATCH | `/sessions/:id/revoke` | Bearer + SUPER_ADMIN | revoke เซสชัน |
-| POST | `/sessions/revoke-all/:userId` | Bearer + SUPER_ADMIN | revoke ทุกเซสชันของ user |
-
-## Audit Logs (ต้องเป็น SUPER_ADMIN)
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/audit-logs` | Bearer + SUPER_ADMIN | รายการ audit logs (รองรับ `page`, `limit`, `userId`, `action`) |
-| GET | `/audit-logs/:id` | Bearer + SUPER_ADMIN | ข้อมูล audit log |
-
-## Materials
-
-> Material Master ตาม [Material Master Requirements](docs/wiki/material-master.md)
-> สิทธิ์ที่ใช้: `MATERIAL_VIEW`, `MATERIAL_CREATE`, `MATERIAL_UPDATE`, `MATERIAL_DELETE`
-
-| Method | Endpoint | Permission | Description |
-|---|---|---|---|
-| GET | `/materials` | `MATERIAL_VIEW` | รายการ Material (รองรับ `page`, `limit`, `search`, `isActive`, `type`, `unitId`, `modelId`, `deliveryTypeId`, `loadingPointId`, `supplierId`, `sortBy`, `sortOrder`) |
-| GET | `/materials/lookups` | `MATERIAL_VIEW` | ดึง Lookup Master Data ทั้งหมด (units, suppliers, models, deliveryTypes, loadingPoints) สำหรับสร้างฟอร์ม |
-| GET | `/materials/:id` | `MATERIAL_VIEW` | ข้อมูล Material ตาม id พร้อม suppliers และ lookup relations |
-| POST | `/materials` | `MATERIAL_CREATE` | สร้าง Material ใหม่ |
-| PATCH | `/materials/:id` | `MATERIAL_UPDATE` | แก้ไข Material (ต้องส่ง `updatedAt` เพื่อทำ optimistic concurrency check) |
-| DELETE | `/materials/:id` | `MATERIAL_DELETE` | Soft delete (`isActive = false`) |
-| PATCH | `/materials/:id/restore` | `MATERIAL_UPDATE` | Restore Material ที่ถูก soft delete |
-| POST | `/materials/images` | `MATERIAL_CREATE` หรือ `MATERIAL_UPDATE` | อัปโหลดรูปภาพ (multipart `file`, JPEG/PNG/WEBP ≤ 5 MiB) ได้ `imagePath` ชั่วคราวไปใช้ใน create/update |
-
-### Query Parameters ของ `GET /materials`
-
-| Param | Type | Default | หมายเหตุ |
-|---|---|---|---|
-| `page` | int ≥ 1 | `1` | หน้าที่ต้องการ |
-| `limit` | int 1–100 | `20` | จำนวนต่อหน้า |
-| `search` | string | — | ค้นหา `code` หรือ `name` (ILIKE) |
-| `isActive` | bool | — | กรองตามสถานะ |
-| `type` | enum | — | กรองตามประเภท: `PC` \| `OF` \| `OF_MAT` |
-| `unitId` | string (positive int) | — | กรองตาม Unit |
-| `modelId` | string (positive int) | — | กรองตาม Material Model |
-| `deliveryTypeId` | string (positive int) | — | กรองตาม Delivery Type |
-| `loadingPointId` | string (positive int) | — | กรองตาม Loading Point |
-| `supplierId` | string (positive int) | — | กรองตาม Supplier (ดูจาก `supplier_materials`) |
-| `sortBy` | enum | `code` | `code` \| `name` \| `isActive` \| `createdAt` \| `updatedAt` |
-| `sortOrder` | enum | `asc` | `asc` \| `desc` |
-
-Response:
-
-```json
-{
-  "items": [
-    {
-      "id": "42",
-      "code": "MAT-001",
-      "name": "น้ำมันปาล์ม",
-      "type": "PC",
-      "unitId": "1",
-      "deliveryTypeId": "1",
-      "modelId": null,
-      "loadingPointId": "1",
-      "processLineName": "Line A",
-      "scale": "กว้าง 50 × ยาว 100 × สูง 20 ซม.",
-      "imagePath": "/uploads/materials/abc.jpg",
-      "specification": "...",
-      "description": "...",
-      "packingQuantity": 25,
-      "isActive": true,
-      "createdBy": "1",
-      "updatedBy": "1",
-      "createdAt": "2026-08-02T10:00:00.000Z",
-      "updatedAt": "2026-08-02T10:00:00.000Z",
-      "unit": { "id": "1", "code": "KG", "nameTh": "กิโลกรัม", "nameEn": "Kilogram" },
-      "deliveryType": { "id": "1", "code": "TRUCK", "nameTh": "รถบรรทุก" },
-      "model": null,
-      "loadingPoint": { "id": "1", "code": "RCV-A", "nameTh": "Receiving A" },
-      "suppliers": [
-        { "id": "1", "code": "SUP-001", "nameTh": "บริษัท ตัวอย่าง จำกัด" }
-      ]
-    }
-  ],
-  "meta": { "page": 1, "limit": 20, "totalItems": 1, "totalPages": 1 }
-}
-```
-
-### `POST /materials`
-
-```json
-{
-  "code": "MAT-001",
-  "name": "น้ำมันปาล์ม",
-  "type": "PC",
-  "unitId": "1",
-  "deliveryTypeId": "1",
-  "modelId": null,
-  "loadingPointId": "1",
-  "processLineName": "Line A",
-  "scale": "กว้าง 50 × ยาว 100 × สูง 20 ซม.",
-  "imagePath": "/uploads/materials/.tmp/<uuid>.jpg",
-  "specification": "...",
-  "description": "...",
-  "packingQuantity": 25,
-  "isActive": true,
-  "supplierIds": ["1", "2"]
-}
-```
-
-- `code` จะถูก trim + uppercase อัตโนมัติ
-- `type` เป็น optional ค่าที่รองรับ: `PC` \| `OF` \| `OF_MAT` (ประเภทวัตถุดิบ)
-- `imagePath` ต้องเป็น path ที่ได้จาก `POST /materials/images` (ถ้าไม่ส่ง = ไม่มีรูป)
-- `supplierIds` ต้องไม่ซ้ำ และทุก id ต้อง active
-- `packingQuantity` เป็น optional จำนวนเต็ม ≥ 1 (จำนวนต่อแพ็ก/หน่วยบรรจุ) ส่ง `null` เพื่อล้างค่า
-
-### `PATCH /materials/:id`
-
-เหมือน `POST /materials` แต่ทุก field เป็น optional และต้องส่ง:
-
-```json
-{
-  "name": "น้ำมันปาล์ม (ใหม่)",
-  "type": "OF",
-  "updatedAt": "2026-08-02T10:00:00.000Z"
-}
-```
-
-- `updatedAt` ต้องตรงกับค่าปัจจุบัน → ถ้าไม่ตรง backend ตอบ `409 Conflict`
-- `type` สามารถเปลี่ยนได้: `PC` \| `OF` \| `OF_MAT` หรือ `null` เพื่อล้างค่า
-- ถ้าเปลี่ยน `supplierIds` ระบบจะ sync (เพิ่มใหม่ / soft delete ของเดิมที่หายไป / restore ของเดิม)
-- ถ้าเปลี่ยน `imagePath` ระบบจะ promote ไฟล์ใหม่และลบไฟล์เก่า (ถ้าสำเร็จ)
-
-### `POST /materials/images`
-
-ใช้ `multipart/form-data` field ชื่อ `file`:
-
-```bash
-curl -X POST -H "Authorization: Bearer <token>" \
-  -F "file=@/path/to/image.jpg" \
-  http://localhost:3001/api/v1/materials/images
-```
-
-Response:
-
-```json
-{
-  "imagePath": "/uploads/materials/.tmp/0c9b8e6e-...jpg",
-  "previewUrl": "/uploads/materials/.tmp/0c9b8e6e-...jpg"
-}
-```
-
-> `imagePath` ที่ได้เป็น path ชั่วคราว (อยู่ใน `.tmp/`) ระบบจะย้ายไปยัง root เมื่อ create/update Material สำเร็จ และลบอัตโนมัติภายใน 24 ชั่วโมงหากไม่ถูกใช้
-
-### Lookup response ของ `GET /materials/lookups`
-
-```json
-{
-  "units": [{ "id": "1", "code": "KG", "nameTh": "กิโลกรัม", "nameEn": "Kilogram" }],
-  "suppliers": [{ "id": "1", "code": "SUP-001", "nameTh": "..." }],
-  "models": [],
-  "deliveryTypes": [{ "id": "1", "code": "TRUCK", "nameTh": "รถบรรทุก" }],
-  "loadingPoints": [{ "id": "1", "code": "RCV-A", "nameTh": "Receiving A" }]
-}
-```
-
-> ทุก lookup จะคืนเฉพาะ `isActive = true` เรียงตาม `code ASC`
-
-## Stock Balances (ยอดคงเหลือวัสดุ)
-
-> ดึงยอดคงเหลือวัสดุตาม stock_balances table
-> สิทธิ์ที่ใช้: `MATERIALS_RECEIVING_VIEW`
-
-| Method | Endpoint | Permission | Description |
-|---|---|---|---|
-| GET | `/stock-balances` | `MATERIAL_VIEW` | รายการยอดคงเหลือทั้งหมด |
-| GET | `/stock-balances/:materialId` | `MATERIAL_VIEW` | ยอดคงเหลือของวัสดุตาม id |
-
-### Response ของ `GET /stock-balances/:materialId`
-
-```json
-{
-  "materialId": "42",
-  "materialCode": "MAT-001",
-  "materialName": "น้ำมันปาล์ม",
-  "quantity": "1000.0000",
-  "unitCode": "KG",
-  "unitNameTh": "กิโลกรัม",
-  "lastMovementAt": "2026-08-09T10:30:00.000Z"
-}
-```
-
-- `quantity` คืน string เพื่อรักษา precision (max 4 ตำแหน่งทศนิยม)
-- `lastMovementAt` คืน `null` ถ้ายังไม่มีการเคลื่อนไหว
-- คืน `404 Not Found` ถ้าไม่พบ material
-
-## Master Data (CRUD pattern เดียวกันทั้ง 9 resource)
-
-Guard: `JwtAuthGuard` + `ActiveAssignmentGuard` + `PermissionGuard` — ต้องส่ง Bearer token, ต้องมี active assignment และต้องมี permission ตามตาราง
-
-| Resource | Base path | Permission prefix |
+| Field | Type | Notes |
 |---|---|---|
-| Units | `/units` | `UNIT_*` |
-| Suppliers | `/suppliers` | `SUPPLIER_*` |
-| Categories | `/categories` | `CATEGORY_*` |
-| Delivery Types | `/delivery-types` | `DELIVERY_TYPE_*` |
-| Loading Points | `/loading-points` | `LOADING_POINT_*` |
-| Material Models | `/material-models` | `MATERIAL_MODEL_*` |
-| Organizations | `/organizations` | `ORGANIZATION_*` |
-| Status Items | `/status-items` | `STATUS_ITEM_*` |
-| Reject Reasons | `/reject-reasons` | `REJECT_REASON_*` |
+| `id` | bigint (auto) | PK |
+| `code` | varchar(50) UNIQUE | Required, uppercase recommended |
+| `name` | varchar(255) | Required — single name (TH/EN) |
+| `unit_id` | bigint FK → `units` | Required |
+| `model_id` | bigint FK → `product_models` | Required |
+| `customer_id` | bigint FK → `customers` | Required |
+| `packing` | integer | Default 1 — จำนวนชิ้นต่อ pack |
+| `location_id` | bigint FK → `locations` | Required |
+| `safety_stock` | integer | **Auto-computed** = `lot_size` (overridable) |
+| `product_type_id` | bigint FK → `product_types` | Required |
+| `lot_size` | integer | Default 1 — ชิ้นต่อ lot |
+| `min_stock` | integer | **Auto-computed** = `packing` (overridable) |
+| `delivery_type_id` | bigint FK → `delivery_types` | Required |
+| `scale` | varchar(50) nullable | สเกล/อัตราส่วน |
+| `loading_point_id` | bigint FK → `loading_points` | Required |
+| `process_line_id` | bigint FK → `process_lines` | Required |
+| `product_image_path` | varchar(500) nullable | |
+| `is_active` | boolean | Default true |
 
-ทุก resource มี 6 endpoints เหมือนกัน (แทน `<base>` ด้วย base path และ `<PREFIX>` ด้วย permission prefix):
+### Safety stock / Min stock formulas
 
-| Method | Endpoint | Permission | Description |
+```
+safety_stock = safetyStock ?? lotSize
+min_stock     = minStock ?? packing
+```
+
+Re-applied on every create/update unless the caller passes `safetyStock` / `minStock` explicitly (override).
+
+### Routes
+
+| Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `<base>` | `<PREFIX>_VIEW` | รายการแบบ pagination |
-| GET | `<base>/:id` | `<PREFIX>_VIEW` | ข้อมูลรายการเดียว (404 ถ้าไม่พบ) |
-| POST | `<base>` | `<PREFIX>_CREATE` | สร้างใหม่ (409 ถ้า `code` ซ้ำ — เทียบแบบ case-insensitive) |
-| PATCH | `<base>/:id` | `<PREFIX>_UPDATE` | แก้ไข ทุก field optional แต่ **ต้องส่ง `updatedAt`** (409 ถ้าไม่ตรง) |
-| DELETE | `<base>/:id` | `<PREFIX>_DELETE` | Soft delete (`isActive = false`) |
-| PATCH | `<base>/:id/restore` | `<PREFIX>_UPDATE` | Restore (`isActive = true`) |
+| GET | `/products` | `PRODUCTS_VIEW` | Query: `search, isActive, modelId, customerId, productTypeId, locationId, processLineId, sortBy, sortOrder` |
+| GET | `/products/lookups` | `PRODUCTS_VIEW` | Returns `{ units, productModels, customers, locations, productTypes, deliveryTypes, loadingPoints, processLines }` |
+| GET | `/products/:id` | `PRODUCTS_VIEW` | Returns product with all 8 relations |
+| POST | `/products` | `PRODUCTS_CREATE` | Body: `CreateProductDto`. Validates every FK; computes safety/min stock |
+| PATCH | `/products/:id` | `PRODUCTS_UPDATE` | Body: `UpdateProductDto` (must include `updatedAt`) |
+| DELETE | `/products/:id` | `PRODUCTS_DELETE` | Soft delete (sets `is_active=false`) |
+| PATCH | `/products/:id/restore` | `PRODUCTS_RESTORE` | Restore soft-deleted |
 
-หมายเหตุร่วม:
+### Response shape (single product)
 
-- `code` จะถูก trim + uppercase อัตโนมัติทั้งตอน create และ update
-- ทุก string field ถูก trim; string ว่างจะถูกแปลงเป็น `null`
-- ทุก response object มี field ร่วม: `id`, `isActive`, `createdBy`, `updatedBy`, `createdAt`, `updatedAt`
-- DELETE/restore ไม่ต้องส่ง body และไม่ตรวจ `updatedAt`
+```json
+{
+  "id": "1", "code": "PRD-001", "name": "เครื่องยนต์ 4 สูบ",
+  "unitId": "1", "modelId": "4", "customerId": "1", "packing": 1,
+  "locationId": "1", "safetyStock": 100, "productTypeId": "1",
+  "lotSize": 100, "minStock": 1, "deliveryTypeId": "2",
+  "scale": "1:1", "loadingPointId": "2", "processLineId": "1",
+  "productImagePath": null, "isActive": true,
+  "createdAt": "...", "updatedAt": "...",
+  "unit":         { "id": "1", "code": "PCS", "nameTh": "ชิ้น" },
+  "model":        { "id": "4", "code": "HILX-2024", "nameTh": "Toyota Hilux Revo 2024", "brand": "Toyota" },
+  "customer":     { "id": "1", "code": "CUST-TOY", "nameTh": "บริษัท โตโยต้า..." },
+  "location":     { "id": "1", "code": "WH-A1", "nameTh": "คลัง A1" },
+  "productType":  { "id": "1", "code": "FG", "nameTh": "สินค้าสำเร็จรูป" },
+  "deliveryType": { "id": "2", "code": "NORMAL", "nameTh": "จัดส่งปกติ" },
+  "loadingPoint": { "id": "2", "code": "DOCK-1", "nameTh": "จุดขนถ่าย 1" },
+  "processLine":  { "id": "1", "code": "ASM-1", "nameTh": "สายประกอบ 1" }
+}
+```
 
-### Query parameters ของ list endpoint
+## 3. BOMs (`/api/v1/boms`) — `boms` module
 
-| Param | Type | Default | ใช้กับ |
+### Fields
+
+- `product_boms`: `id, product_id, version, status (DRAFT|ACTIVE|INACTIVE), specification, remark, effective_from, effective_to`
+- `product_bom_items`: `id, bom_id, material_id, sort_order, quantity, unit_id, is_scrap, wastage_percent, remark`
+
+### Routes
+
+| Method | Path | Permission | Notes |
 |---|---|---|---|
-| `page` | int ≥ 1 | `1` | ทุก resource |
-| `limit` | int 1–100 | `20` | ทุก resource |
-| `search` | string | — | ค้นหา `code`, `nameTh`, `nameEn` (ILIKE) |
-| `isActive` | `true` \| `false` | — | ทุก resource |
-| `type` | string | — | `/organizations` เท่านั้น |
-| `module` | string | — | `/status-items` เท่านั้น |
-| `sortBy` | enum | ดูตารางล่าง | ทุก resource |
-| `sortOrder` | `asc` \| `desc` | `asc` | ทุก resource |
+| GET | `/boms/product/:productId` | `BOMS_VIEW` | Array of BOMs for product (with `items[]` and joined `material.unit`) |
+| GET | `/boms/:id` | `BOMS_VIEW` | Single BOM |
+| POST | `/boms` | `BOMS_CREATE` | Auto-increments `version` (v1, v2…). Body: `{ productId, specification?, remark?, effectiveFrom?, effectiveTo?, items: [{ materialId, quantity, unitId, isScrap?, wastagePercent?, remark? }] }` |
+| PATCH | `/boms/:id` | `BOMS_UPDATE` | Edit spec/remark/dates (cannot edit ACTIVE BOM — deactivate first) |
+| POST | `/boms/:id/items` | `BOMS_UPDATE` | Append an item to a DRAFT/INACTIVE BOM |
+| DELETE | `/boms/:id/items/:itemId` | `BOMS_UPDATE` | Remove an item |
+| PATCH | `/boms/:id/activate` | `BOMS_UPDATE` | Activate a BOM (deactivates others for same product) |
+| PATCH | `/boms/:id/deactivate` | `BOMS_UPDATE` | Deactivate |
+| DELETE | `/boms/:id` | `BOMS_DELETE` | Hard delete (not allowed for ACTIVE) |
 
-| Resource | `sortBy` ที่รองรับ | Default |
+## 4. Master Data (CRUD with `soft delete` via `is_active`)
+
+All return lists with `select: id, code, name_th, name_en`; all support `lookups`-style usage for FK dropdowns.
+
+| Module | Path | Notes |
 |---|---|---|
-| Units, Suppliers, Delivery Types, Loading Points, Material Models | `code`, `nameTh`, `isActive`, `createdAt`, `updatedAt` | `code` |
-| Categories | `code`, `nameTh`, `sortOrder`, `isActive`, `createdAt`, `updatedAt` | `sortOrder` |
-| Status Items | `code`, `nameTh`, `module`, `sortOrder`, `isActive`, `createdAt`, `updatedAt` | `sortOrder` |
-| Organizations | `code`, `nameTh`, `type`, `isActive`, `createdAt`, `updatedAt` | `code` |
+| Materials | `/materials`, `/materials/lookups`, `/materials/:id` | has `unit_id, model_id, delivery_type_id, loading_point_id, material_type, packing_quantity, ratio, image_path` |
+| Units | `/units` | code, name_th, name_en, symbol |
+| Suppliers | `/suppliers` | code, name_th, name_en, tax_id, contact_name, address |
+| Material Models | `/material-models` | code, name_th, name_en |
+| Delivery Types | `/delivery-types` | code, name_th, name_en |
+| Loading Points | `/loading-points` | code, name_th, name_en |
+| Organizations | `/organizations` | code, name_th, name_en, tax_id, type, parent_id, logo_url |
+| Categories | `/categories` | code, name_th, name_en, parent_id, sort_order, icon_color |
+| **Product Models** | `/product-models` | NEW — code, name_th, name_en, brand |
+| **Customers** | `/customers` | NEW — code, name_th, name_en, tax_id, contact_name, telephone, email, address |
+| **Locations** | `/locations` | NEW — code, name_th, name_en, zone, warehouse |
+| **Product Types** | `/product-types` | NEW — code, name_th, name_en, sort_order |
+| **Process Lines** | `/process-lines` | NEW — code, name_th, name_en |
+| Status Items | `/status-items` | code, name_th, name_en, color, module, is_default, sort_order |
+| Reject Reasons | `/reject-reasons` | code, name_th, name_en, description |
 
-Response ของ list ทุก resource:
+## 5. Goods Receipts & Materials (operations)
 
-```json
-{
-  "items": [],
-  "meta": { "page": 1, "limit": 20, "totalItems": 0, "totalPages": 0 }
-}
-```
-
-### Fields ของแต่ละ resource
-
-**Units** (`/units`)
-
-| Field | Type | Required (create) | Note |
-|---|---|---|---|
-| `code` | string ≤ 20 | ✅ | uppercase, unique |
-| `nameTh` | string ≤ 100 | ✅ | |
-| `nameEn` | string ≤ 100 \| null | — | |
-| `symbol` | string ≤ 20 \| null | — | เช่น `kg`, `ตัน` |
-| `description` | string \| null | — | |
-| `isActive` | bool | — | default `true` |
-
-**Suppliers** (`/suppliers`)
-
-| Field | Type | Required (create) | Note |
-|---|---|---|---|
-| `code` | string ≤ 50 | ✅ | uppercase, unique |
-| `nameTh` | string ≤ 255 | ✅ | |
-| `nameEn` | string ≤ 255 \| null | — | |
-| `taxId` | string ≤ 20 \| null | — | |
-| `contactName` | string ≤ 255 \| null | — | |
-| `telephone` | string ≤ 50 \| null | — | |
-| `email` | string ≤ 255 \| null | — | ต้องเป็นรูปแบบ email |
-| `address` | string \| null | — | |
-| `isActive` | bool | — | default `true` |
-
-**Categories** (`/categories`)
-
-| Field | Type | Required (create) | Note |
-|---|---|---|---|
-| `code` | string ≤ 50 | ✅ | uppercase, unique |
-| `nameTh` | string ≤ 100 | ✅ | |
-| `nameEn` | string ≤ 100 \| null | — | |
-| `parentId` | string \| null | — | ต้องเป็นตัวเลขจำนวนเต็มบวกในรูป string |
-| `sortOrder` | int 0–9999 | — | |
-| `iconColor` | string ≤ 20 \| null | — | |
-| `description` | string \| null | — | |
-| `isActive` | bool | — | default `true` |
-
-**Delivery Types** (`/delivery-types`), **Loading Points** (`/loading-points`), **Material Models** (`/material-models`) — ใช้ชุด field เดียวกัน
-
-| Field | Type | Required (create) | Note |
-|---|---|---|---|
-| `code` | string ≤ 50 | ✅ | uppercase, unique |
-| `nameTh` | string ≤ 100 | ✅ | |
-| `nameEn` | string ≤ 100 \| null | — | |
-| `description` | string \| null | — | |
-| `isActive` | bool | — | default `true` |
-
-**Organizations** (`/organizations`)
-
-| Field | Type | Required (create) | Note |
-|---|---|---|---|
-| `code` | string ≤ 50 | ✅ | uppercase, unique |
-| `nameTh` | string ≤ 255 | ✅ | |
-| `nameEn` | string ≤ 255 \| null | — | |
-| `taxId` | string ≤ 20 \| null | — | |
-| `address` | string \| null | — | |
-| `phone` | string ≤ 50 \| null | — | |
-| `email` | string ≤ 255 \| null | — | ต้องเป็นรูปแบบ email |
-| `website` | string ≤ 255 \| null | — | |
-| `logoUrl` | string ≤ 500 \| null | — | |
-| `parentId` | string \| null | — | ตัวเลขจำนวนเต็มบวกในรูป string |
-| `type` | enum | ✅ | `headquarters` \| `branch` \| `subsidiary` \| `department` (default `department`) |
-| `isActive` | bool | — | default `true` |
-
-**Status Items** (`/status-items`)
-
-| Field | Type | Required (create) | Note |
-|---|---|---|---|
-| `code` | string ≤ 50 | ✅ | uppercase, unique |
-| `nameTh` | string ≤ 100 | ✅ | |
-| `nameEn` | string ≤ 100 \| null | — | |
-| `color` | enum ≤ 20 | ✅ | `info` \| `success` \| `warning` \| `danger` \| `muted` (default `info`) |
-| `module` | string ≤ 50 | ✅ | ชื่อ module ที่สถานะนี้ใช้ |
-| `isDefault` | bool | — | สถานะเริ่มต้นของ module |
-| `sortOrder` | int 0–9999 | — | |
-| `description` | string \| null | — | |
-| `isActive` | bool | — | default `true` |
-
-**Reject Reasons** (`/reject-reasons`) — โครงสร้างเหมือน `/loading-points`, `/delivery-types`, `/material-models` ใช้กับ `rejectReasonId` ใน Goods Receipt items
-
-| Field | Type | Required (create) | Note |
-|---|---|---|---|
-| `code` | string ≤ 50 | ✅ | uppercase, unique |
-| `nameTh` | string ≤ 100 | ✅ | |
-| `nameEn` | string ≤ 100 \| null | — | |
-| `description` | string \| null | — | |
-| `isActive` | bool | — | default `true` |
-
-### ตัวอย่าง create / update
-
-```http
-POST /api/v1/units
-Authorization: Bearer <accessToken>
-Content-Type: application/json
-
-{ "code": "kg", "nameTh": "กิโลกรัม", "nameEn": "Kilogram", "symbol": "kg" }
-```
-
-```http
-PATCH /api/v1/units/1
-Authorization: Bearer <accessToken>
-Content-Type: application/json
-
-{ "nameTh": "กิโลกรัม (แก้ไข)", "updatedAt": "2026-08-05T03:21:44.512Z" }
-```
-
-## Goods Receipts
-
-Guard: `JwtAuthGuard` + `ActiveAssignmentGuard` + `PermissionGuard`
-
-Requirement ทั้งหมดอยู่ใน [docs/wiki/goods-receipt.md](docs/wiki/goods-receipt.md)
-
-| Method | Endpoint | Permission | Description |
-|---|---|---|---|
-| GET | `/goods-receipts` | `GOODS_RECEIPT_VIEW` | รายการ พร้อม filter/sort/pagination |
-| GET | `/goods-receipts/lookups` | `GOODS_RECEIPT_VIEW` | Supplier, Material (กรองด้วย `?supplierId=`), Unit, Reject Reason |
-| GET | `/goods-receipts/:id` | `GOODS_RECEIPT_VIEW` | หัวเอกสาร + บรรทัด + ไฟล์แนบ |
-| POST | `/goods-receipts` | `GOODS_RECEIPT_CREATE` | สร้าง draft |
-| PATCH | `/goods-receipts/:id` | `GOODS_RECEIPT_UPDATE` | แก้ draft (ต้องส่ง `updatedAt`) |
-| DELETE | `/goods-receipts/:id` | `GOODS_RECEIPT_DELETE` | ลบ draft (hard delete, 204) |
-| POST | `/goods-receipts/:id/post` | `GOODS_RECEIPT_POST` | รับรองเอกสาร → ออกเลขที่ |
-| POST | `/goods-receipts/:id/cancel` | `GOODS_RECEIPT_CANCEL` | ยกเลิก (ต้องส่ง `cancelReason`) |
-| POST | `/goods-receipts/attachments` | `GOODS_RECEIPT_CREATE` หรือ `UPDATE` | Stage ไฟล์ (multipart `file`) |
-| POST | `/goods-receipts/:id/attachments` | `GOODS_RECEIPT_CREATE` หรือ `UPDATE` | ผูกไฟล์ที่ stage แล้วเข้าเอกสาร |
-| DELETE | `/goods-receipts/:id/attachments/:attachmentId` | `GOODS_RECEIPT_UPDATE` | ลบไฟล์แนบ (เฉพาะ draft, 204) |
-
-### Query Parameters ของ `GET /goods-receipts`
-
-| Parameter | ชนิด | ค่าเริ่มต้น | คำอธิบาย |
-|---|---|---|---|
-| `page` | number | 1 | |
-| `limit` | number | 20 | สูงสุด 100 |
-| `search` | string | — | ค้นใน `receiptNo` และ `supplierDocNo` |
-| `status` | enum | ไม่กรอง | `draft` / `posted` / `cancelled` — แสดงทุกสถานะรวมที่ยกเลิกถ้าไม่ระบุ |
-| `supplierId` | string | — | |
-| `materialId` | string | — | มีวัตถุดิบนี้อยู่ในบรรทัดใดบรรทัดหนึ่ง |
-| `receiptDateFrom` | `YYYY-MM-DD` | — | |
-| `receiptDateTo` | `YYYY-MM-DD` | — | |
-| `hasRejection` | boolean | — | `true` = มีบรรทัดที่ปฏิเสธของ |
-| `sortBy` | enum | `receiptDate` | `receiptNo` / `receiptDate` / `supplierDocNo` / `createdAt` / `updatedAt` |
-| `sortOrder` | enum | `desc` | |
-
-รายการส่งกลับเฉพาะหัวเอกสาร + `supplier` + `itemCount` + `totalQtyReceived` ไม่ส่งบรรทัดทั้งหมด
-
-### `POST /goods-receipts`
-
-```json
-{
-  "supplierId": "2",
-  "receiptDate": "2026-08-08",
-  "poNo": "PO-2026-0142",
-  "supplierDocNo": "DN-55031",
-  "supplierDocDate": "2026-08-07",
-  "noSupplierDocument": false,
-  "remark": "รถมาถึง 08:30",
-  "items": [
-    {
-      "materialId": "5",
-      "qtyDelivered": "1000.0000",
-      "qtyReceived": "970.0000",
-      "qtyRejected": "30.0000",
-      "rejectReasonId": "7",
-      "rejectNote": "ถุงขาด 3 ใบ",
-      "lotNo": "L2608-01",
-      "productionDate": "2026-08-01",
-      "expiryDate": "2027-02-01",
-      "unitPrice": "112.5000",
-      "lineAmount": "109125.0000"
-    }
-  ],
-  "attachments": [
-    {
-      "docType": "DELIVERY_NOTE",
-      "filePath": "/uploads/goods-receipts/.tmp/9f1c....pdf",
-      "fileName": "DN-55031.pdf"
-    }
-  ]
-}
-```
-
-กฎที่ตรวจ:
-
-- `receiptDate` ห้ามเป็นวันในอนาคต
-- `qtyReceived + qtyRejected <= qtyDelivered` และต้องมีอย่างน้อยหนึ่งค่ามากกว่า 0
-- `rejectReasonId` จำเป็นเมื่อ `qtyRejected > 0` และต้องว่างเมื่อไม่ปฏิเสธ
-- ห้าม `(materialId, lotNo)` ซ้ำในเอกสารเดียว วัตถุดิบซ้ำต่าง lot ได้
-- ทุกวัตถุดิบต้องมี mapping ที่ active ใน `master.supplier_materials` กับ Supplier ที่ระบุ มิฉะนั้นตอบ 400
-- จำนวนและราคาส่งเป็น string (รับ number ได้แต่จะถูกแปลง) ทศนิยมไม่เกิน 4 ตำแหน่ง
-
-### `POST /goods-receipts/:id/post`
-
-ไม่ต้องส่ง body ระบบจะ:
-
-1. ตรวจว่าเอกสารเป็น `draft` และมีอย่างน้อย 1 บรรทัด
-2. ตรวจว่ามี `supplierDocNo` เว้นแต่ `noSupplierDocument = true`
-3. Snapshot `materialCode`/`materialName` ลงทุกบรรทัด
-4. ออกเลข `GR-YYYYMM-NNNN` จาก `inventory.document_counters`
-5. ตั้ง `status = posted`, `postedBy`, `postedAt`
-
-หลัง post แก้ได้เฉพาะ `remark` และการเพิ่มไฟล์แนบ — ตอบ 409 ถ้าพยายามแก้อย่างอื่น
-
-### `POST /goods-receipts/:id/cancel`
-
-```json
-{ "cancelReason": "กรอกเลขใบส่งของผิด" }
-```
-
-ยกเลิกได้เฉพาะเอกสารที่ `posted` เอกสารยังคงเลขที่เดิมและยังปรากฏในรายการ
-
-### `POST /goods-receipts/attachments`
-
-multipart form-data field ชื่อ `file` — รับ JPEG/PNG/WebP/PDF ไม่เกิน 10 MiB ต่อไฟล์ และ 10 ไฟล์ต่อเอกสาร ตรวจ magic bytes ทุกชนิด
-
-Response คือ metadata ที่ต้องส่งกลับใน `attachments[]` ของ create/update หรือ `POST /goods-receipts/:id/attachments` ไฟล์ใน `.tmp/` จะถูกลบอัตโนมัติหลัง 24 ชั่วโมงถ้าไม่ถูกผูกกับเอกสาร
-
-### Error ที่พบบ่อยของ Goods Receipts
-
-| Code | เมื่อไหร่ |
+| Path | Notes |
 |---|---|
-| `400` | validation ไม่ผ่าน, `qtyReceived + qtyRejected > qtyDelivered`, ขาด `rejectReasonId` ตอน `qtyRejected > 0`, material ไม่มี mapping active กับ supplier ที่ระบุ |
-| `404` | ไม่พบเอกสาร หรือไม่พบไฟล์แนบ |
-| `409` | `supplierDocNo` ซ้ำกับ supplier เดียวกัน (เอกสารที่ไม่ cancelled), `updatedAt` ไม่ตรง (optimistic lock), หรือ action ไม่ตรงกับสถานะเอกสาร (เช่น post เอกสารที่ posted แล้ว, แก้เอกสารที่ posted, ลบไฟล์แนบของเอกสาร posted) |
+| `/goods-receipts` (+ `/lookups`, `/:id`, `/post`, `/cancel`, `/attachments`) | Goods receipt CRUD with post/cancel workflow |
+| `/materials-receiving` (+ `/report`, `/unified-report`, `/lookups`, `/suppliers`, `/by-lot/:lot`, `/:id`, `/:id/confirm`, `/:id/cancel`, `/pieces-qr`, `/packages/:id/qr`) | Receiving with QR/lot tracking |
+| `/materials-disbursement` (+ `/report`, `/lookups`, `/:id`, `/:id/confirm`, `/:id/cancel`) | Material disbursement |
+| `/stock-balances` (+ `/:materialId`) | Current stock per material |
 
-## Materials Receiving (รับเข้าวัตถุดิบ + Stock Balance + QR Code)
+## 6. Access Control (admin)
 
-> ต่างจาก Goods Receipt ตรงที่เป็น **single material per receiving** และ **update stock balance** ทันทีที่ confirm
-> สิทธิ์ที่ใช้: `MATERIALS_RECEIVING_VIEW`, `MATERIALS_RECEIVING_CREATE`, `MATERIALS_RECEIVING_UPDATE`, `MATERIALS_RECEIVING_DELETE`, `MATERIALS_RECEIVING_CONFIRM`, `MATERIALS_RECEIVING_CANCEL`
-
-| Method | Endpoint | Permission | Description |
-|---|---|---|---|
-| GET | `/materials-receiving` | `MATERIALS_RECEIVING_VIEW` | รายการรับเข้า (รองรับ `page`, `limit`, `search`, `status`, `supplierId`, `materialId`, `internalLotNo`, `receiveDateFrom`, `receiveDateTo`, `hasPackages`, `sortBy`, `sortOrder`) |
-| GET | `/materials-receiving/lookups` | `MATERIALS_RECEIVING_VIEW` | ดึง suppliers / materials (พร้อม packingQuantity) / units สำหรับฟอร์ม |
-| GET | `/materials-receiving/by-lot/:internalLotNo` | `MATERIALS_RECEIVING_VIEW` | ค้นหาด้วย Internal Lot No. (ใช้ตอน scan QR) คืน 404 ถ้าไม่พบ |
-| GET | `/materials-receiving/:id` | `MATERIALS_RECEIVING_VIEW` | รายละเอียดการรับเข้า พร้อม `packages[]` และ relations |
-| POST | `/materials-receiving` | `MATERIALS_RECEIVING_CREATE` | สร้าง draft + generate lot no + คำนวณ package + generate QR (รองรับ `idempotencyKey`) |
-| PATCH | `/materials-receiving/:id` | `MATERIALS_RECEIVING_UPDATE` | แก้ draft (ต้องส่ง `updatedAt` เพื่อทำ optimistic concurrency check) |
-| DELETE | `/materials-receiving/:id` | `MATERIALS_RECEIVING_DELETE` | ลบ draft เท่านั้น |
-| POST | `/materials-receiving/:id/confirm` | `MATERIALS_RECEIVING_CONFIRM` | ยืนยันการรับเข้า → update `stock_balances` + บันทึก `stock_transactions` |
-| POST | `/materials-receiving/:id/cancel` | `MATERIALS_RECEIVING_CANCEL` | ยกเลิก (ถ้าเคย confirm จะ revert stock ด้วย `transactionType=ADJUST`) |
-
-### Internal Lot No., Run No. & Supplier Lot No.
-
-| ประเภท | Format | กฎ |
-|---|---|---|
-| Run No. | `MR-YYYYMMDD-XXXX` | เลขรันสำหรับแต่ละใบ, reset ทุกวัน, running 4 หลัก เริ่ม 0001 |
-| Internal Lot No. | `CCI-YYYYMMDD-XXX` | reset ทุกวัน, running 3 หลัก เริ่ม 001, จัดสรรผ่าน `material_receiving_lot_counters` ด้วย `pessimistic_write` lock |
-| Supplier Lot No. | `SUP-YYYYMMDD` | generate จาก `supplierProductionDate` (ไม่มี running number) |
-
-ตัวอย่าง:
-```text
-วันที่ 2026-08-09, รายการแรก: MR-20260809-0001, CCI-20260809-001
-วันที่ 2026-08-09, รายการที่สอง: MR-20260809-0002, CCI-20260809-002
-วันที่ 2026-08-10, รายการแรก: MR-20260810-0001, CCI-20260810-001   (running reset)
-
-Supplier Production Date 2026-08-01 → SUP-20260801
-```
-
-### Package Calculation
-
-```
-packageCount = CEIL(receiveQuantity / materials.packingQuantity)
-```
-
-ตัวอย่าง `packingQuantity=200`, `receiveQuantity=1050` → 6 packages (5×200 + 1×50), และ `SUM(packages.quantity) = 1050`
-
-### QR Code
-
-#### Receiving QR (qr_code)
-QR Code (`qr_code`) เก็บเป็น base64 PNG ขนาด ~150px และ `qr_payload` เก็บข้อมูล JSONB ที่ scan ได้:
-
-```json
-{
-  "version": "1.0",
-  "internalLotNo": "CCI-20260809-001",
-  "materialCode": "MAT-A",
-  "receiveQuantity": "1000",
-  "supplierLotNo": "SUP-20260801"
-}
-```
-
-`internalLotNo` เป็นค่าหลักสำหรับ identify และค้นหากลับ ใช้ `GET /materials-receiving/by-lot/:internalLotNo`
-
-#### Package QR (qr_code ใน packages[])
-แต่ละกล่องมี QR Code แยกสำหรับ tracking status:
-
-```json
-{
-  "version": "1.0",
-  "internalLotNo": "CCI-20260809-001",
-  "packageNo": 1,
-  "quantity": "200.0000",
-  "status": "pending"
-}
-```
-
-### Package Status Tracking
-
-แต่ละ package มี status เพื่อ track การเคลื่อนไหว:
-
-| Status | ความหมาย | เปลี่ยนเมื่อ |
-|---|---|---|
-| `pending` | รอดำเนินการ | สร้างใบรับ (default) |
-| `in_stock` | อยู่ในสต็อก | confirm สำเร็จ |
-| `issued` | เบิกออกแล้ว | เมื่อมีการเบิกใช้ |
-| `damaged` | เสียหาย | เมื่อรายงานความเสียหาย |
-| `returned` | คืน supplier | เมื่อส่งคืน |
-
-### Query Parameters ของ `GET /materials-receiving`
-
-| Param | Type | Default | หมายเหตุ |
-|---|---|---|---|
-| `page` | int ≥ 1 | `1` | หน้าที่ต้องการ |
-| `limit` | int 1–100 | `20` | จำนวนต่อหน้า |
-| `search` | string | — | ค้นหา `internalLotNo`, `supplierLotNo`, `material.code` (ILIKE) |
-| `status` | enum | — | `draft` \| `confirmed` \| `cancelled` |
-| `supplierId` | string (positive int) | — | กรองตาม supplier |
-| `materialId` | string (positive int) | — | กรองตาม material |
-| `internalLotNo` | `CCI-YYYYMMDD-XXX` | — | match แบบ exact |
-| `receiveDateFrom` / `receiveDateTo` | `YYYY-MM-DD` | — | ช่วงวันที่รับ |
-| `hasPackages` | bool | — | กรองตามการมี/ไม่มี package detail |
-| `sortBy` | enum | `receiveDate` | `internalLotNo` \| `receiveDate` \| `supplierLotNo` \| `createdAt` \| `updatedAt` |
-| `sortOrder` | enum | `desc` | `asc` \| `desc` |
-
-### `POST /materials-receiving`
-
-```json
-{
-  "materialId": "3",
-  "supplierId": "2",
-  "receiveQuantity": "1000",
-  "supplierProductionDate": "2026-08-01",
-  "receiveDate": "2026-08-09",
-  "idempotencyKey": "order-20260809-001",
-  "remark": "ฝากรับที่จุด A"
-}
-```
-
-- `idempotencyKey` (optional) — ถ้าส่ง ระบบจะคืนใบรับเดิมที่สร้างด้วย key นี้แล้ว (ถ้ามี) เพื่อกันการสร้างซ้ำจาก retry
-- `packingQuantityOverride` (optional) — ใช้กรณี materials.packing_quantity ยังว่าง หรือต้องการ snapshot ค่าต่างหาก
-- ทุกครั้งที่สร้าง ระบบจะ: validate material + supplier + supplier_material mapping → snapshot `packingQuantity` → คำนวณ `packageCount` → generate `runNo` (lock lot counter) → generate `internalLotNo` (lock lot counter) → generate `supplierLotNo` → generate QR สำหรับใบรับ + QR สำหรับแต่ละ package (base64 PNG) → save receiving + packages ทั้งหมดภายใน transaction เดียว
-
-### `POST /materials-receiving/:id/confirm`
-
-ยืนยันการรับเข้า (draft → confirmed) และ update stock:
-- ล็อก `stock_balances` แถวของ material นั้นด้วย `pessimistic_write` แล้วบวก `receiveQuantity`
-- บันทึก `stock_transactions` ที่ `transactionType=RECEIVE`, `referenceType=MATERIAL_RECEIVING`, `referenceLotNo=internalLotNo`
-- อัปเดต package status ทั้งหมดเป็น `in_stock`
-- กรอก `confirmedBy`, `confirmedAt`
-
-### `POST /materials-receiving/:id/cancel`
-
-```json
-{ "cancelReason": "รับผิด material" }
-```
-
-- ถ้าเคย confirm → revert stock balance (ลบ receiveQuantity) + บันทึก `stock_transactions` ที่ `transactionType=ADJUST`, `quantityOut=receiveQuantity`
-- ถ้ายังเป็น draft → เปลี่ยนสถานะอย่างเดียว ไม่แตะ stock
-- `cancelReason` ต้องไม่ว่าง
-
-### Error ที่พบบ่อยของ Materials Receiving
-
-| Code | เมื่อไหร่ |
+| Path | Notes |
 |---|---|
-| `400` | validation ไม่ผ่าน, `receiveQuantity ≤ 0`, `receiveDate` เป็นอนาคต, material/supplier ไม่ active, material ไม่ได้ map กับ supplier ใน `supplier_materials`, `materials.packing_quantity` ว่างและไม่ส่ง `packingQuantityOverride` |
-| `404` | ไม่พบ material receiving หรือ internal lot no |
-| `409` | `internalLotNo` ซ้ำ (race condition), `idempotencyKey` ซ้ำ, `updatedAt` ไม่ตรง (optimistic lock), หรือ action ไม่ตรงสถานะ (เช่น confirm draft ที่ confirm แล้ว, cancel cancelled, แก้/ลบ receiving ที่ confirmed) |
+| `/users` (CRUD + `/:id/status`, `/:id/reset-password`, `/:id/access-summary`, `/:id/assignments` CRUD) | User management |
+| `/departments` (CRUD) | Department tree |
+| `/roles` (CRUD) | Roles |
+| `/menus` (+ `/tree`, CRUD) | Menu registry |
+| `/permissions` (+ `/options`, CRUD + `/:id/departments`) | Permission registry |
+| `/sessions` (+ `/:id`, `/:id/revoke`, `/revoke-all/:userId`) | Active sessions |
+| `/audit-logs` (+ `/:id`) | Audit trail |
 
-## Root
+---
 
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| GET | `/` | Public | Hello message จาก `AppController` (default NestJS) |
+## Migration history (most recent first)
 
-> เอกสาร Swagger อยู่ที่ `http://localhost:<port>/api/docs` (นอก global prefix)
-> ไฟล์ที่อัปโหลดเสิร์ฟผ่าน static path `/uploads/...` (นอก global prefix เช่นกัน)
+| Migration | Description |
+|---|---|
+| `1786700000004` | (legacy) Initial products + BOMs schema (now superseded) |
+| `1786700000005` | **Rebuild products schema** — drop old, add 5 master tables (product_models, customers, locations, product_types, process_lines), recreate products with FKs, add safety_stock/min_stock formulas |
 
-## คำอธิบาย Auth
+## Seed data
 
-- **Public** — ไม่ต้องส่ง token
-- **Bearer** — ต้องส่ง `Authorization: Bearer <accessToken>`
-- **Bearer + SUPER_ADMIN** — ต้องส่ง token และผู้ใช้ต้องมี role `SUPER_ADMIN`
-
-## Query Parameters ทั่วไป
-
-สำหรับ endpoints รายการที่รองรับ pagination:
-- `page` — หน้าที่ต้องการ (default: 1)
-- `limit` — จำนวนต่อหน้า (default: 20)
+- `src/database/seeds/seed.ts` — base iam + master data (categories, units, suppliers, …)
+- `src/database/seeds/seed-master-data.ts` — **5 product_models + 4 customers + 3 locations + 3 product_types + 4 process_lines + 4 products + 2 BOMs**

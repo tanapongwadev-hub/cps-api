@@ -9,6 +9,7 @@ describe('MenusService', () => {
   let service: MenusService;
   let menuRepository: jest.Mocked<Repository<Menu>>;
   let permissionRepository: jest.Mocked<Repository<Permission>>;
+  let mockQueryRunner: { connect: jest.Mock; startTransaction: jest.Mock; commitTransaction: jest.Mock; rollbackTransaction: jest.Mock; release: jest.Mock; manager: { delete: jest.Mock; remove: jest.Mock } };
 
   beforeEach(() => {
     menuRepository = {
@@ -23,11 +24,27 @@ describe('MenusService', () => {
       count: jest.fn(),
     } as unknown as jest.Mocked<Repository<Permission>>;
 
+    mockQueryRunner = {
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      manager: {
+        delete: jest.fn().mockResolvedValue(undefined),
+        remove: jest.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    const mockDataSource = {
+      createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
+    } as unknown as DataSource;
+
     service = new MenusService(
       menuRepository,
       permissionRepository,
       {} as jest.Mocked<Repository<Action>>,
-      {} as DataSource,
+      mockDataSource,
     );
   });
 

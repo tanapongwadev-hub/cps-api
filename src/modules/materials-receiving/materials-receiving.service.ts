@@ -68,32 +68,11 @@ const SUPPLIER_MAPPING_ERROR =
   'Material is not linked to supplier. Link them in Material Master first.';
 
 /**
- * Month → letter mapping for LOT codes.
- * 1=A, 2=B, 3=C, 4=D, 5=E, 6=F, 7=G, 8=H, 9=I, 10=J, 11=K, 12=L
- */
-const MONTH_LETTER_MAP: Record<number, string> = {
-  1: 'A',
-  2: 'B',
-  3: 'C',
-  4: 'D',
-  5: 'E',
-  6: 'F',
-  7: 'G',
-  8: 'H',
-  9: 'I',
-  10: 'J',
-  11: 'K',
-  12: 'L',
-};
-
-/**
- * Build the date-portion of a LOT code.
- * e.g. "2026-08-13" → "2026H13"
+ * Build the date-portion of a LOT code (YYYYMMDD).
+ * e.g. "2026-08-13" → "20260813"
  */
 function lotDatePart(dateStr: string): string {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const monthLetter = MONTH_LETTER_MAP[month] ?? String(month);
-  return `${year}${monthLetter}${String(day).padStart(2, '0')}`;
+  return dateStr.replace(/-/g, '');
 }
 
 @Injectable()
@@ -1188,7 +1167,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     }
     counter.lastNumber += 1;
     await counterRepository.save(counter);
-    return `${LOT_PREFIX}-${lotDatePart(receiveDate)}${String(counter.lastNumber).padStart(5, '0')}`;
+    return `${LOT_PREFIX}-${lotDatePart(receiveDate)}-${String(counter.lastNumber).padStart(3, '0')}`;
   }
 
   /**

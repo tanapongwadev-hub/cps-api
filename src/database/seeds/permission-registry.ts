@@ -1,12 +1,13 @@
+import { BOMS_PERMISSIONS } from '../../modules/boms/boms-permissions';
 import { CATEGORY_PERMISSIONS } from '../../modules/categories/category-permissions';
 import { DELIVERY_TYPE_PERMISSIONS } from '../../modules/delivery-types/delivery-type-permissions';
-import { GOODS_RECEIPT_PERMISSIONS } from '../../modules/goods-receipts/goods-receipt-permissions';
 import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
 import { MATERIALS_DISBURSEMENT_PERMISSIONS } from '../../modules/materials-disbursement/materials-disbursement-permissions';
 import { MATERIALS_RECEIVING_PERMISSIONS } from '../../modules/materials-receiving/materials-receiving-permissions';
 import { ORGANIZATION_PERMISSIONS } from '../../modules/organizations/organization-permissions';
+import { PRODUCTS_PERMISSIONS } from '../../modules/products/products-permissions';
 import { REJECT_REASON_PERMISSIONS } from '../../modules/reject-reasons/reject-reason-permissions';
 import { STATUS_ITEM_PERMISSIONS } from '../../modules/status-items/status-item-permissions';
 import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissions';
@@ -93,11 +94,6 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   STATUS_ITEM_MANAGEMENT: fromCrud(STATUS_ITEM_PERMISSIONS),
   ORGANIZATION_MANAGEMENT: fromCrud(ORGANIZATION_PERMISSIONS),
   REJECT_REASON_MANAGEMENT: fromCrud(REJECT_REASON_PERMISSIONS),
-  GOODS_RECEIPT: {
-    ...fromCrud(GOODS_RECEIPT_PERMISSIONS),
-    POST: GOODS_RECEIPT_PERMISSIONS.POST,
-    CANCEL: GOODS_RECEIPT_PERMISSIONS.CANCEL,
-  },
   MATERIALS_RECEIVING: {
     ...fromCrud(MATERIALS_RECEIVING_PERMISSIONS),
     POST: MATERIALS_RECEIVING_PERMISSIONS.CONFIRM,
@@ -119,17 +115,33 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   MATERIALS_REPORT: {
     READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
   },
+  // Products (automotive parts) — standard CRUD + RESTORE
+  PRODUCTS_LIST: {
+    CREATE: PRODUCTS_PERMISSIONS.CREATE,
+    READ: PRODUCTS_PERMISSIONS.VIEW,
+    UPDATE: PRODUCTS_PERMISSIONS.UPDATE,
+    DELETE: PRODUCTS_PERMISSIONS.DELETE,
+  },
+  // BOMs — has extra ACTIVATE/DEACTIVATE actions on top of CRUD
+  BOMS: {
+    CREATE: BOMS_PERMISSIONS.CREATE,
+    READ: BOMS_PERMISSIONS.VIEW,
+    UPDATE: BOMS_PERMISSIONS.UPDATE,
+    DELETE: BOMS_PERMISSIONS.DELETE,
+  },
 };
 
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
 export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
-  GOODS_RECEIPT: DOCUMENT_ACTION_CODES,
   MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
   MATERIALS_DISBURSEMENT: MATERIALS_DISBURSEMENT_ACTION_CODES,
   // Report menus — read-only
   MATERIALS_RECEIVING_REPORT: ['READ'],
   MATERIALS_DISBURSEMENT_REPORT: ['READ'],
   MATERIALS_REPORT: ['READ'],
+  // Products/BOMs (standard CRUD)
+  PRODUCTS_LIST: DEFAULT_ACTION_CODES,
+  BOMS: DEFAULT_ACTION_CODES,
 };
 
 export function resolveActionCodes(menuCode: string): readonly string[] {
