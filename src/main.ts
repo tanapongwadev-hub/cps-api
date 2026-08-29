@@ -26,6 +26,15 @@ async function bootstrap() {
   app.useStaticAssets(imageRoot, {
     prefix: '/uploads/materials/',
   });
+  const productImageRoot = resolvePath(
+    getEnv('PRODUCT_IMAGE_ROOT', join(process.cwd(), 'uploads', 'products')),
+  );
+  app.useStaticAssets(join(productImageRoot, '.tmp'), {
+    prefix: '/uploads/products/.tmp/',
+  });
+  app.useStaticAssets(productImageRoot, {
+    prefix: '/uploads/products/',
+  });
 
   // Global validation pipe
   app.useGlobalPipes(new CustomValidationPipe());

@@ -7,9 +7,13 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequireAnyPermissions } from '../../common/decorators/require-any-permissions.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -17,13 +21,21 @@ import { PermissionGuard } from '../../common/guards/permission.guard';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import type { ProductImageFile } from './product-image-storage.service';
 import { PRODUCTS_PERMISSIONS } from './products-permissions';
+import {
+  PRODUCT_IMAGE_MAX_SIZE,
+  ProductImageStorageService,
+} from './product-image-storage.service';
 import { ProductsService } from './products.service';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard, ActiveAssignmentGuard, PermissionGuard)
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly imageStorage: ProductImageStorageService,
+  ) {}
 
   @Get()
   @RequirePermissions(PRODUCTS_PERMISSIONS.VIEW)
@@ -35,6 +47,20 @@ export class ProductsController {
   @RequirePermissions(PRODUCTS_PERMISSIONS.VIEW)
   getLookups() {
     return this.productsService.getLookups();
+  }
+
+  @Post('images')
+  @RequireAnyPermissions(
+    PRODUCTS_PERMISSIONS.CREATE,
+    PRODUCTS_PERMISSIONS.UPDATE,
+  )
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: PRODUCT_IMAGE_MAX_SIZE },
+    }),
+  )
+  stageImage(@UploadedFile() file: ProductImageFile) {
+    return this.imageStorage.stage(file);
   }
 
   @Get(':id')

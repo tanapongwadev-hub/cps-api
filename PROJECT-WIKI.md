@@ -1,614 +1,446 @@
-# CPS Access Control - Project Wiki
+# CPS API — Project Wiki
 
-> **สำหรับ AI / Developer:** ก่อนแก้ไขโค้ดทุกครั้ง ให้อ่านไฟล์นี้ก่อน เพื่อให้แก้ไขสอดคล้องกับ architecture, conventions และ security practices ของโปรเจค
+> เอกสารนี้อ้างอิงโค้ดบน branch `develoment` ที่ตรวจถึงวันที่ 28 สิงหาคม 2026 (ฐานเดิม commit `b4114ab`) หากเอกสารขัดกับ controller, DTO, service, entity หรือ migration ให้ถือโค้ดเป็นแหล่งข้อมูลหลัก และอัปเดตเอกสารพร้อมการเปลี่ยนแปลงนั้น
 
-## 0. AI Developer Guide
+## 1. ภาพรวมระบบ
 
-### 0.1 Before making changes
+`cps-api` เป็น REST API สำหรับระบบควบคุมสิทธิ์และงานวัตถุดิบ/การผลิต ใช้ NestJS 11, TypeScript, TypeORM และ PostgreSQL รองรับงานหลักดังนี้
 
-- อ่าน `PROJECT-WIKI.md` (ไฟล์นี้) และ `API_ENDPOINTS.md`
-- ตรวจสอบ module map และ dependency ก่อนเพิ่ม/แก้ service
-- อย่า hardcode secrets / credentials / JWT defaults ใน source code
-- ต้องใช้ `getEnv`, `getEnvNumber`, `getEnvBoolean` จาก `src/config/env.utils.ts` เมื่ออ่าน environment variable
-- config ส่วนกลางอยู่ที่ `src/config/app.config.ts` และ `src/config/database.config.ts`
+- Authentication แบบ JWT access/refresh token และ session revocation
+- RBAC แบบผู้ใช้มีหลาย assignment โดยแต่ละ assignment ผูก role กับ department
+- Permission รายเมนู/การกระทำ พร้อม override รายผู้ใช้และขอบเขต department
+- Material master, supplier mapping, รูปวัสดุ และข้อมูล master ที่เกี่ยวข้อง
+- รับวัตถุดิบพร้อม lot, package, QR, stock balance และ stock transaction
+- จ่ายวัตถุดิบแบบ FIFO พร้อมย้อน stock เมื่อยกเลิก
+- Product master และ Bill of Materials (BOM) แบบ versioned
+- Audit log, menu tree, session และ user administration
 
-### 0.2 Conventions
+### 1.1 Runtime snapshot
 
-- Controllers บางเบา วาง business logic ใน Services
-- ใช้ DTO + `class-validator` สำหรับ request validation
-- ใช้ custom exceptions จาก `src/common/exceptions/custom-exceptions.ts`
-- Guards: `JwtAuthGuard`, `RolesGuard`, `PermissionGuard` อยู่ใน `src/common/guards`
-- Decorators: `@Public()`, `@Roles(...)`, `@RequirePermissions(...)`, `@CurrentUser()` อยู่ใน `src/common/decorators`
-- Entities อยู่ใน `src/entities/iam/*` และ `src/entities/master/*`
-- TypeORM migrations อยู่ใน `src/database/migrations/*`
-- Seeds อยู่ใน `src/database/seeds/*`
+| รายการ         | ค่า                                     |
+| -------------- | --------------------------------------- |
+| Framework      | NestJS `^11.0.1`                        |
+| Language       | TypeScript `^5.7.3`                     |
+| ORM            | TypeORM `^0.3.20`                       |
+| Database       | PostgreSQL                              |
+| Authentication | Passport JWT + Argon2id                 |
+| Validation     | `class-validator` + `class-transformer` |
+| API prefix     | `/api/v1`                               |
+| Default port   | `3001`                                  |
+| Swagger UI     | `/api/docs`                             |
+| Main schemas   | `iam`, `master`, `inventory`            |
 
-### 0.3 Forbidden patterns
+### 1.2 เอกสารที่เกี่ยวข้อง
 
-- ห้ามใช้ default password/hardcoded secrets (เช่น `9203106`, `default-secret-key...`)
-- ห้าม import `ConfigService` แล้วสร้าง `new ConfigService()` ใน standalone scripts
-- ห้าม `enableCors()` แบบเปิดกว้างใน production (`CORS_ORIGIN` ต้องถูกตั้งค่า)
-- ห้ามเรียก `db:reset` ใน production (`reset-database.ts` บล็อก `NODE_ENV=production` อยู่แล้ว)
+- [API_ENDPOINTS.md](API_ENDPOINTS.md) — contract ของ route, permission, DTO และ response
+- [Material Master Requirements](docs/wiki/material-master.md) — requirement เดิมของ Material Master
+- [Goods Receipt Requirements](docs/wiki/goods-receipt.md) — เอกสาร historical; โมดูล `goods-receipts` ถูกถอดออกจาก runtime แล้ว
 
-## 1. ภาพรวมระบบ (System Overview)
+## 2. กฎสำหรับ Developer และ AI
 
-CPS Access Control เป็นระบบจัดการสิทธิ์ผู้ใช้งาน (RBAC) บน NestJS + PostgreSQL รองรับการจัดการผู้ใช้ แผนก บทบาท เมนู สิทธิ์ เซสชัน และบันทึกการใช้งาน
+### 2.1 ก่อนแก้ backend
 
-### 1.1 Domain Requirement Documents
+1. อ่าน controller, DTO, service, entity และ test ของ module ที่จะแก้
+2. ไล่ request path: route → guard → DTO → service → repository/entity → table
+3. ตรวจ permission code ใน `*-permissions.ts` และ `permission-registry.ts`
+4. รักษา `bigint` เป็น `string` และค่า `numeric` ทางธุรกิจเป็น decimal string เมื่อ code ปัจจุบันใช้รูปแบบนั้น
+5. ใช้ transaction สำหรับงานหลายตาราง, stock, confirm/cancel, assignment aggregate และ BOM write
+6. เพิ่ม migration ใหม่แทนการแก้ migration ที่ใช้งานแล้ว
+7. อัปเดต Wiki/API docs เมื่อ public contract, schema หรือ business rule เปลี่ยน
 
-- [Material Master Requirements](docs/wiki/material-master.md) — ข้อมูลหลักวัตถุดิบ, Supplier และ Master Data ที่เกี่ยวข้อง
-- [Goods Receipt Requirements](docs/wiki/goods-receipt.md) — เอกสารรับเข้าวัตถุดิบ, ขอบเขตที่ตัดออก และกฎธุรกรรม
-- [Materials Receiving Spec](#35-inventory-entities--materials-receiving--stock-balance-5-ตารางเพิ่ม) — รับเข้าวัตถุดิบ (single material) + package breakdown + QR + stock balance
+### 2.2 Conventions
 
-## 2. สถาปัตยกรรม (Architecture)
+- Controller รับผิดชอบ routing/guard/HTTP concerns; business logic อยู่ใน service
+- Input ภายนอกต้องผ่าน DTO และ global `CustomValidationPipe`
+- Validation เปิด `whitelist`, `forbidNonWhitelisted`, `transform` และ implicit conversion
+- ชื่อ property ฝั่ง TypeScript ใช้ camelCase; column PostgreSQL ใช้ snake_case
+- ใช้ `@CurrentUser('id')` สำหรับ `createdBy`/`updatedBy`
+- Master data ส่วนใหญ่ใช้ soft delete ผ่าน `isActive`; transaction draft ใช้ hard deleteได้ตาม service
+- Update DTO ของ master data, Material, Product, BOM และ Materials Receiving หลายตัวบังคับส่ง `updatedAt`; ต้องตรวจ service ก่อนอ้างว่าเป็น optimistic concurrency เพราะ Product/BOM ปัจจุบันรับ field แต่ยังไม่ compare token
+- ห้าม log access token, refresh token, password หรือ payload ที่เป็นความลับ
 
-### 2.1 Tech Stack
+### 2.3 Forbidden patterns และ security debt
 
-- **Framework**: NestJS 11.x
-- **Language**: TypeScript
-- **ORM**: TypeORM 0.3.x
-- **Database**: PostgreSQL 14+
-- **Authentication**: JWT + Passport
-- **Password Hashing**: Argon2
-- **Documentation**: Swagger/OpenAPI
-- **Configuration**: Centralized via `src/config/app.config.ts`, `src/config/database.config.ts`, and `src/config/env.utils.ts`
-- **Schemas**: `iam` (Identity and Access Management) และ `master` (ข้อมูลหลักของระบบ)
+- ห้ามเพิ่ม secret/password แบบ hardcode
+- ห้ามเปิด CORS กว้างใน production; ต้องกำหนด `CORS_ORIGIN`
+- ห้ามเปิด `synchronize: true`; schema ต้องเปลี่ยนผ่าน migration
+- ห้าม bypass `JwtAuthGuard`, `ActiveAssignmentGuard`, `RolesGuard` หรือ `PermissionGuard`
+- ห้ามใช้ JavaScript `number` กับค่า `numeric(18,4)` ที่ต้องรักษาความแม่นยำ
+- `src/database/seeds/seed.ts` ยังมี default DB password ใน standalone runner และ `check-schema.js` เป็นไฟล์ local ที่มี credential; ทั้งสองเป็น security debt ห้ามนำรูปแบบนี้ไปใช้ต่อ และ `check-schema.js` ไม่ถูก commit
+- Repository ไม่มี `.env.example` ในสถานะปัจจุบัน แม้ README เดิมจะอ้างถึงไฟล์นี้
 
-### 2.2 Project Structure
+## 3. Bootstrap และ HTTP behavior
 
-```
-cps-api/
-├── src/
-│   ├── modules/                    # Feature modules
-│   │   ├── access-control/         # Cross-cutting permission calculation
-│   │   ├── audit-logs/             # Audit logging
-│   │   ├── auth/                   # Authentication & session management
-│   │   ├── departments/            # Department management
-│   │   ├── menus/                  # Menu hierarchy management
-│   │   ├── permissions/            # Permission read-only
-│   │   ├── roles/                  # Role management
-│   │   ├── sessions/               # Session management
-│   │   └── users/                  # User management
-│   ├── entities/iam/               # IAM TypeORM entities (12 tables)
-│   │   ├── actions.entity.ts
-│   │   ├── audit-log.entity.ts
-│   │   ├── auth-session.entity.ts
-│   │   ├── department.entity.ts
-│   │   ├── department-permission.entity.ts
-│   │   ├── menu.entity.ts
-│   │   ├── permission.entity.ts
-│   │   ├── role-action.entity.ts
-│   │   ├── role.entity.ts
-│   │   ├── user-department-permission.entity.ts
-│   │   ├── user-department-role.entity.ts
-│   │   └── user.entity.ts
-│   ├── entities/master/            # Material Master TypeORM entities (7 tables)
-│   │   ├── delivery-type.entity.ts
-│   │   ├── loading-point.entity.ts
-│   │   ├── material-model.entity.ts
-│   │   ├── material.entity.ts
-│   │   ├── supplier-material.entity.ts
-│   │   ├── supplier.entity.ts
-│   │   └── unit.entity.ts
-│   ├── database/                   # Database operations
-│   │   ├── migrations/             # TypeORM migrations
-│   │   ├── seeds/                  # Seed scripts
-│   │   │   ├── create-super-admin.ts
-│   │   │   └── seed.ts
-│   │   ├── data-source.ts          # TypeORM DataSource config
-│   │   └── reset-database.ts       # Development reset script
-│   ├── config/                     # Configuration
-│   │   ├── app.config.ts           # App-level config
-│   │   ├── database.config.ts      # Database config
-│   │   └── env.utils.ts            # Environment variable utilities
-│   ├── common/                     # Shared utilities
-│   │   ├── constants/              # Application constants
-│   │   ├── decorators/             # Custom decorators (@Public, @Roles, etc.)
-│   │   ├── dto/                    # Common DTOs
-│   │   ├── enums/                  # Application enums
-│   │   ├── exceptions/             # Custom exceptions
-│   │   ├── guards/                 # Auth guards (JwtAuthGuard, RolesGuard, etc.)
-│   │   ├── interceptors/           # Logging interceptor
-│   │   ├── interfaces/             # TypeScript interfaces
-│   │   └── pipes/                  # Validation pipes
-│   ├── main.ts                     # Application bootstrap
-│   └── app.module.ts               # Root module
-├── dist/                           # Compiled output
-├── node_modules/                   # Dependencies
-├── .env.example                    # Environment variables template
-├── .env                            # Actual environment variables (not committed)
-├── .gitignore
-├── nest-cli.json
-├── package.json
-├── pnpm-lock.yaml
-├── tsconfig.json
-├── PROJECT-WIKI.md                 # This file
-└── API_ENDPOINTS.md                # API documentation
+`src/main.ts` ทำงานตามลำดับนี้:
+
+1. สร้าง `NestExpressApplication`
+2. ตั้ง global prefix เป็น `/api/v1`
+3. mount static Material images ที่ `/uploads/materials/` และ Product images ที่ `/uploads/products/`; staged images อยู่ใต้ `.tmp/` ของแต่ละ resource
+4. เปิด global validation pipe
+5. เปิด logging interceptor
+6. เปิด CORS พร้อม credentials
+7. สร้าง Swagger document ที่ `/api/docs`
+8. listen ตาม `PORT` (default `3001`)
+
+### 3.1 Response conventions
+
+- ไม่มี global response-envelope interceptor; service return อะไร client ได้ shape นั้นโดยตรง
+- List endpoint ส่วนใหญ่คืน `{ items, meta }`
+- Master data และ inventory list ใช้ meta แบบ `{ page, limit, totalItems, totalPages }`
+- Products list คืน `{ items, meta: { totalItems } }` และไม่มี page/limit ใน DTO ปัจจุบัน
+- Delete transaction endpoint ที่กำหนด `204 No Content` ได้แก่ Materials Receiving และ Materials Disbursement
+- QR endpoint คืน binary `image/png` ไม่ใช่ JSON
+
+### 3.2 Validation error
+
+```json
+{
+  "statusCode": 400,
+  "error": "Bad Request",
+  "code": "VALIDATION_ERROR",
+  "message": "field must satisfy validation rule"
+}
 ```
 
-## 3. โมเดลข้อมูล (Data Model)
+Custom exceptions อาจเพิ่ม `path` และ `timestamp`; NestJS exceptions ทั่วไปอาจใช้ shape มาตรฐานของ Nest จึงไม่ควรสมมติว่า error ทุกประเภทมี field เหมือนกันทั้งหมด
 
-### 3.1 IAM Entities (12 tables)
+### 3.3 Authentication ไม่ได้เป็น global guard
 
-| Table                         | คำอธิบาย                                         | ความสัมพันธ์                                     |
-| ----------------------------- | ------------------------------------------------ | ------------------------------------------------ |
-| `actions`                     | การกระทำที่อนุญาต (CREATE, READ, UPDATE, DELETE) | ถูกอ้างอิงโดย `permissions` และ `role_actions`   |
-| `roles`                       | บทบาท (SUPER_ADMIN, ADMIN, USER)                 | มี `role_actions` และ `user_department_roles`    |
-| `role_actions`                | ผูกบทบาทกับการกระทำ                              | Many-to-many ระหว่าง roles กับ actions           |
-| `departments`                 | แผนก/หน่วยงาน                                    | ถูกอ้างอิงโดย `user_department_roles`            |
-| `department_permissions`      | ผูกแผนกกับสิทธิ์ที่อนุญาต                        | Many-to-many ระหว่าง departments กับ permissions |
-| `users`                       | ผู้ใช้งาน                                        | มี `user_department_roles`                       |
-| `user_department_roles`       | ผูก user กับ role และ department                 | Core ของระบบ RBAC                                |
-| `user_department_permissions` | สิทธิ์เฉพาะ user                                 | Override สิทธิ์จาก role                          |
-| `menus`                       | เมนูในระบบ                                       | มี parent-child hierarchy                        |
-| `permissions`                 | ผูก menu กับ action                              | ถูกอ้างอิงโดย `user_department_permissions`      |
-| `auth_sessions`               | เซสชันการเข้าสู่ระบบ                             | เก็บ refresh token hash                          |
-| `audit_logs`                  | บันทึกการกระทำสำคัญ                              | ตรวจสอบย้อนหลัง                                  |
+ไม่มี `APP_GUARD` ใน project ปัจจุบัน การป้องกัน route เกิดจาก `@UseGuards(...)` บน controller/method ดังนั้น endpoint ใหม่ต้องประกาศ guard เอง ห้ามสันนิษฐานว่า route จะถูกป้องกันอัตโนมัติ
 
-### 3.2 ER Diagram (Textual)
-
-```
-users ──┬── user_department_roles ─── roles
-        │              │
-        │              └── departments
-        │
-        └── auth_sessions
-
-roles ─── role_actions ─── actions
-menus ─── permissions ─── actions
-users ─── user_department_permissions ─── user_department_roles, permissions
-```
-
-### 3.3 Material Master Entities (7 tables)
-
-| Table                       | คำอธิบาย                        | ความสัมพันธ์                                                          |
-| --------------------------- | ------------------------------- | --------------------------------------------------------------------- |
-| `master.materials`          | ข้อมูลหลักวัตถุดิบ              | อ้างอิงหน่วย รูปแบบจัดส่ง รุ่น จุดลงสินค้า และ Supplier ผ่านตารางกลาง |
-| `master.units`              | หน่วยนับหลัก                    | หนึ่งหน่วยถูกใช้โดย Material ได้หลายรายการ                            |
-| `master.delivery_types`     | รูปแบบการจัดส่ง                 | หนึ่งรูปแบบถูกใช้โดย Material ได้หลายรายการ                           |
-| `master.material_models`    | รุ่นหรือแบบวัตถุดิบ             | หนึ่งรุ่นถูกใช้โดย Material ได้หลายรายการ                             |
-| `master.loading_points`     | จุดรับหรือจุดลงวัตถุดิบ         | หนึ่งจุดถูกใช้โดย Material ได้หลายรายการ                              |
-| `master.suppliers`          | ข้อมูลหลัก Supplier             | เชื่อมกับ Material ผ่าน `supplier_materials`                          |
-| `master.supplier_materials` | ตารางกลาง Material และ Supplier | Unique ต่อคู่ `material_id`, `supplier_id`                            |
-
-รายละเอียด requirement และข้อมูลที่อยู่นอกขอบเขตอยู่ใน [Material Master Requirements](docs/wiki/material-master.md)
-
-### 3.4 Inventory Entities (4 tables)
-
-Schema `inventory` เก็บเอกสารธุรกรรม แยกจาก `master` ที่เก็บข้อมูลหลัก
-
-| Table                                  | คำอธิบาย                        | ความสัมพันธ์                                                    |
-| -------------------------------------- | ------------------------------- | --------------------------------------------------------------- |
-| `inventory.goods_receipts`             | หัวเอกสารรับเข้าวัตถุดิบ        | อ้าง `master.organizations` และ `master.suppliers` (หนึ่งราย)   |
-| `inventory.goods_receipt_items`        | รายการรับแต่ละบรรทัด            | อ้าง `master.materials`, `master.units`, `master.reject_reasons` |
-| `inventory.goods_receipt_attachments`  | ไฟล์แนบหลายไฟล์ต่อเอกสาร        | `ON DELETE CASCADE` จากหัวเอกสาร                                |
-| `inventory.document_counters`          | ตัวรันเลขเอกสารต่อองค์กร/งวด    | Unique `(organization_id, doc_type, period)`                     |
-
-`master.reject_reasons` เป็น Master Data เพิ่มเติมที่โมดูลนี้ต้องใช้ โครงสร้างเหมือน `master.loading_points`
-
-ข้อกำหนดสำคัญ:
-
-- จำนวนและราคาใช้ `NUMERIC(18,4)` และ map เป็น `string` ฝั่ง TypeScript ห้ามใช้ float
-- วันที่ทางธุรกิจใช้ `DATE` ไม่ใช่ `TIMESTAMP` เพื่อเลี่ยงปัญหา timezone
-- `goods_receipts` เป็นตารางแรกในระบบที่อ้าง `master.organizations`
-- เอกสารสถานะ `posted` ห้ามแก้ตัวเลข การแก้ทำด้วยการยกเลิกแล้วออกใบใหม่
-- ยังไม่มี stock ledger หรือยอดคงเหลือในเฟสนี้ (ดูเหตุผลใน [Goods Receipt Requirements §2.2](docs/wiki/goods-receipt.md))
-
-รายละเอียด requirement ทั้งหมดอยู่ใน [Goods Receipt Requirements](docs/wiki/goods-receipt.md)
-
-### 3.5 Inventory Entities — Materials Receiving + Stock Balance (5 ตารางเพิ่ม)
-
-Schema `inventory` เก็บ transaction เพิ่มเติมจาก Goods Receipt — เน้น **single material per receiving** + **update stock balance** + **QR code** ทันทีที่ confirm
-
-| Table | คำอธิบาย | ความสัมพันธ์ |
-|---|---|---|
-| `inventory.material_receivings` | หัวเอกสารรับเข้า (1 material/1 ใบ) | FK `master.organizations`, `master.suppliers`, `master.materials`, `master.units` |
-| `inventory.material_receiving_packages` | รายละเอียดแต่ละบรรจุภัณฑ์ | `ON DELETE CASCADE` จาก receiving |
-| `inventory.material_receiving_lot_counters` | ตัวรันเลข lot ภายใน (CCI-YYYYMMDD-XXX) | Unique `(lot_date)` |
-| `inventory.stock_balances` | ยอดคงเหลือต่อ Material (snapshot) | Unique `(material_id)`, FK `master.materials` |
-| `inventory.stock_transactions` | ประวัติการเคลื่อนไหวสต็อก | FK `master.materials` |
+## 4. Architecture และ module map
 
 ```text
-master.materials  ──┐
-                     ├──< inventory.material_receivings ──< material_receiving_packages
-master.suppliers ────┤                              │
-                     │                              ├──< stock_transactions
-master.units ───────┤
-                     │                              │
-                     └──> inventory.stock_balances─┘
-                              │
-                              └──< stock_transactions
+HTTP request
+  └─ Controller
+      ├─ JwtAuthGuard / RolesGuard หรือ ActiveAssignmentGuard / PermissionGuard
+      ├─ DTO + CustomValidationPipe
+      └─ Service
+          ├─ TypeORM Repository / QueryBuilder
+          ├─ DataSource transaction (เมื่อเปลี่ยนหลายตาราง)
+          └─ Entity → PostgreSQL schema
 ```
 
-ข้อกำหนดสำคัญ:
+### 4.1 Module groups
 
-- **Internal Lot No.** = `CCI-YYYYMMDD-XXX` — generate ผ่าน `material_receiving_lot_counters` ด้วย `pessimistic_write` lock, reset running number ทุกวัน, UNIQUE constraint เป็น defense in depth
-- **Supplier Lot No.** = `SUP-YYYYMMDD` — generate จาก `supplier_production_date` (ไม่มี running number)
-- **Package Count** = `CEIL(receiveQuantity / packingQuantity)` — `packing_quantity` snapshot เก็นไว้ตอนรับเข้า เพื่อกันไม่ให้ยอดเพี้ยนเมื่อ master เปลี่ยน
-- **QR Code** เก็บเป็น base64 PNG ใน `qr_code` และ JSONB payload ใน `qr_payload` (version 1.0) — scan แล้วใช้ internal lot no ค้นหากลับ
-- **Idempotency** ผ่าน optional `idempotency_key` พร้อม UNIQUE partial index
-- **Concurrency** — `stock_balances` update ใช้ `SELECT FOR UPDATE` ทุกครั้ง, transaction เดียวรวม receiving + packages + stock balance + stock transaction
-- **Stock balance** บวกเมื่อ `confirm`, ลบเมื่อ `cancel` ที่เคย confirm (พร้อม `stock_transactions` ที่ `transactionType=ADJUST`)
-- สถานะ: `draft` → `confirmed` → `cancelled` (แก้/ลบได้เฉพาะ draft, cancel confirmed จะ revert stock)
+| กลุ่ม             | Modules                                                                                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity/RBAC     | `auth`, `users`, `departments`, `roles`, `menus`, `permissions`, `sessions`, `audit-logs`, `access-control`                                               |
+| Material master   | `materials`, `units`, `suppliers`, `material-models`, `delivery-types`, `loading-points`, `categories`, `organizations`, `status-items`, `reject-reasons` |
+| Inventory         | `materials-receiving`, `materials-disbursement`, `stock-balances`                                                                                         |
+| Production master | `products`, `boms`                                                                                                                                        |
 
-API endpoints: `GET/POST/PATCH/DELETE /materials-receiving` + `POST /materials-receiving/:id/confirm` + `POST /materials-receiving/:id/cancel` + `GET /materials-receiving/by-lot/:internalLotNo`
+`AccessControlModule` เป็น cross-cutting module สำหรับคำนวณ effective permissions และสร้าง menu tree ไม่มี controller ของตัวเอง
 
-## 4. กระบวนการเข้าสู่ระบบ (Authentication Flow)
+### 4.2 Runtime modules
 
-### 4.1 Login
+`AppModule` import 25 feature modulesข้างต้น ไม่ได้ import `goods-receipts` อีกต่อไป โค้ด controller/service/entity/migrations ของ Goods Receipt รุ่นเก่าถูกลบใน commit `b4114ab`
 
-```
-POST /auth/login
-{
-  "username": "superadmin",
-  "password": "change-me-secure-password"
-}
-```
+## 5. Data model
 
-ขั้นตอน:
+### 5.1 IAM schema (12 tables)
 
-1. `AuthController.login()` รับ `LoginDto`
-2. เรียก `AuthService.validateUser()`:
-   - หา user จาก username
-   - ตรวจสอบ isActive, isLocked
-   - ตรวจสอบ password ด้วย argon2
-   - รีเซ็ต failedLoginAttempts
-3. เรียก `AuthService.login()`:
-   - โหลด `user_department_roles` พร้อม department, role
-   - กรอง assignments ที่ active (รวม NULL department สำหรับ superadmin)
-   - ถ้าเป็น SUPER_ADMIN → generate tokens ทันที
-   - ถ้ามี 1 assignment → auto-select
-   - ถ้ามีหลาย assignment → คืน `requiresDepartmentSelection: true` + `departmentSelectionToken`
-4. `generateTokens()`:
-   - สร้าง `AuthSession`
-   - sign accessToken และ refreshToken ด้วย JWT secrets
-   - เก็บ refreshTokenHash ใน session
+| Table                             | หน้าที่                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| `iam.users`                       | บัญชีผู้ใช้, password hash, lock/active state, permission version               |
+| `iam.roles`                       | Role แบบ `SYSTEM` หรือ `DEPARTMENT`                                             |
+| `iam.actions`                     | CREATE, READ, UPDATE, DELETE, POST, CANCEL                                      |
+| `iam.role_actions`                | Action ที่ role ใช้ได้                                                          |
+| `iam.departments`                 | หน่วยงานของ assignment                                                          |
+| `iam.user_department_roles`       | Assignment ระหว่าง user, role และ department; SYSTEM role ใช้ department `NULL` |
+| `iam.menus`                       | Menu tree (`MAIN`/`SUB`)                                                        |
+| `iam.permissions`                 | Permission code ผูก menu + action                                               |
+| `iam.department_permissions`      | Permission ที่เปิดให้ department                                                |
+| `iam.user_department_permissions` | Permission override ของ assignment                                              |
+| `iam.auth_sessions`               | Refresh token hash, expiry และ revoke state                                     |
+| `iam.audit_logs`                  | Audit trail                                                                     |
 
-### 4.2 Department Selection
-
-```
-POST /auth/select-department
-{
-  "departmentSelectionToken": "...",
-  "userDepartmentRoleId": "1"
-}
+```text
+users ──< user_department_roles >── roles ──< role_actions >── actions
+                    │
+                    ├── departments
+                    └── user_department_permissions >── permissions
+departments ──< department_permissions >── permissions
+menus ──< permissions >── actions
+users ──< auth_sessions
 ```
 
-ขั้นตอน:
+### 5.2 Master schema (19 tables)
 
-1. `AuthController.selectDepartment()` verify `departmentSelectionToken` ด้วย `JWT_DEPARTMENT_SELECTION_SECRET`
-2. ดึง `sub` (userId) จาก token
-3. เรียก `AuthService.selectDepartment(userId, userDepartmentRoleId)`
-4. ตรวจสอบ assignment ว่าเป็นของ user จริง และ active
-5. generate tokens สำหรับ assignment นั้น
+| Domain              | Tables                                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Material            | `materials`, `units`, `suppliers`, `supplier_materials`, `material_models`, `delivery_types`, `loading_points`, `categories` |
+| Organization/status | `organizations`, `status_items`, `reject_reasons`                                                                            |
+| Product             | `products`, `product_models`, `customers`, `locations`, `product_types`, `process_lines`                                     |
+| BOM                 | `product_boms`, `product_bom_items`                                                                                          |
 
-### 4.3 Switch Department
+ความสัมพันธ์หลัก:
 
-```
-POST /auth/switch-department
-Authorization: Bearer <accessToken>
-{
-  "userDepartmentRoleId": "2"
-}
-```
+```text
+materials ── unit
+    ├── material_model
+    ├── delivery_type
+    ├── loading_point
+    └──< supplier_materials >── suppliers
 
-ขั้นตอน:
-
-1. `JwtAuthGuard` verify accessToken
-2. `CurrentUser` decorator ดึงข้อมูล user จาก `request.user`
-3. `AuthController.switchDepartment()` ส่ง `user.id` และ `userDepartmentRoleId`
-4. ทำงานเหมือน `selectDepartment`
-
-### 4.4 Refresh Token
-
-```
-POST /auth/refresh
-{
-  "refreshToken": "..."
-}
+products ── unit / product_model / customer / location
+    ├── product_type / delivery_type / loading_point / process_line
+    └──< product_boms ──< product_bom_items >── materials + units
 ```
 
-ขั้นตอน:
+ตาราง `product_models`, `customers`, `locations`, `product_types` และ `process_lines` มี entity/migration/seed และถูกใช้ผ่าน `/products/lookups` แต่ยังไม่มี controller CRUD ของตัวเอง
 
-1. Verify refreshToken ด้วย `JWT_REFRESH_SECRET`
-2. หา `AuthSession` จาก `sessionId` ในข้อมูล payload
-3. ตรวจสอบ user ยัง active และไม่ locked
-4. ตรวจสอบ `permissionVersion` ตรงกัน
-5. Revoke session เก่า
-6. generate tokens ใหม่
-7. endpoint รองรับทั้ง `/auth/refresh` และ `/auth/refresh-token` (alias)
+### 5.3 Inventory schema (9 tables)
 
-## 5. ระบบสิทธิ์ (Authorization / RBAC)
+| Table                             | หน้าที่                                                           |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `material_receivings`             | Header รับเข้า; snapshot material type/ratio, lot, QR, PO, status |
+| `material_receiving_packages`     | Package ย่อย, lot detail, quantity, QR และ package status         |
+| `material_receiving_lot_counters` | Counter ต่อวันที่สำหรับ internal lot                              |
+| `stock_balances`                  | ยอดปัจจุบัน unique ต่อ material                                   |
+| `stock_transactions`              | Ledger RECEIVE/ISSUE/ADJUST พร้อม before/in/out/after             |
+| `materials_disbursements`         | Header จ่ายออกแบบ `stock_cut` หรือ `production`                   |
+| `material_disbursement_items`     | จำนวนขอเบิกและจำนวนจ่ายจริง                                       |
+| `material_disbursement_packages`  | Allocation จาก receiving package ตาม FIFO                         |
+| `materials_disbursement_counters` | Counter เลขเอกสารจ่ายต่อวัน                                       |
 
-### 5.1 Role-Based Access Control
+## 6. Authentication flow
 
-- **SUPER_ADMIN**: สิทธิ์ระดับระบบ ไม่ผูก department
-- **ADMIN**: สิทธิ์ระดับแผนก ผูกกับ department หนึ่งแผนก
-- **USER**: สิทธิ์ระดับแผนก ผูกกับ department หนึ่งแผนก
+### 6.1 Login
 
-### 5.2 Permission Resolution
+`POST /api/v1/auth/login` ตรวจ username/password, active/locked state และนับ failed attempts ค่า default lock คือ 5 ครั้งเป็นเวลา 15 นาที
 
-1. ดึง `role_actions` จาก role ของ user
-2. ดึง `user_department_permissions` เพิ่มเติม/ยกเว้น
-3. รวมกันเป็น set ของ permissions สำหรับ user ใน department นั้น
+- ผู้ใช้ที่มี assignment เดียว/เลือกได้ทันที: คืน access token, refresh token, user, active assignment และ access control
+- ผู้ใช้ที่ต้องเลือก department: คืน `departmentSelectionToken` อายุสั้นและรายการ assignments จากนั้นเรียก `/auth/select-department`
+- Refresh token ถูกเก็บเป็น hash ใน `auth_sessions`
 
-### 5.3 Guards
+### 6.2 Select/switch department
 
-- `JwtAuthGuard`: ตรวจสอบ access token
-- `Public`: อนุญาตให้เข้าถึงได้โดยไม่ต้อง login
-- `@CurrentUser()`: ดึงข้อมูล user จาก JWT payload
+- `select-department` เป็น public เพราะใช้ token เฉพาะกิจที่ sign ด้วย `JWT_DEPARTMENT_SELECTION_SECRET`
+- `switch-department` ต้องใช้ access token และเลือก assignment ที่เป็นของ user เท่านั้น
+- JWT ใหม่บรรจุ active role/department/assignment ที่ guards และ permission service ใช้ต่อ
 
-## 6. Modules
+### 6.3 Refresh/logout
 
-### 6.0 Module Dependency Map
+- `/auth/refresh` และ `/auth/refresh-token` เป็น aliases
+- Refresh ตรวจ signature, session, hash, expiry, revoke state และสถานะ user/assignment
+- Logout revoke session ปัจจุบัน; SUPER_ADMIN จัดการ session ทั้งระบบผ่าน `/sessions`
 
-| Module              | Imports                                                                                                                                                                    | TypeORM Entities                                                                                                                  | Exports                                                                 | Controller              | บทบาทหลัก                                         |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------- | ------------------------------------------------- |
-| AppModule           | ConfigModule, TypeOrmModule, AuthModule, UsersModule, DepartmentsModule, RolesModule, MenusModule, PermissionsModule, SessionsModule, AuditLogsModule, AccessControlModule, MaterialsModule, UnitsModule, SuppliersModule, CategoriesModule, DeliveryTypesModule, LoadingPointsModule, MaterialModelsModule, OrganizationsModule, StatusItemsModule | —                                                                                                                                 | —                                                                       | `AppController`         | Root module                                       |
-| AuthModule          | AccessControlModule, TypeOrmModule, PassportModule, JwtModule                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission, Department, Role, Action, RoleAction, Permission, Menu, AuthSession, AuditLog | `AuthService`                                                           | `AuthController`        | Login/logout/refresh/token + department selection |
-| UsersModule         | TypeOrmModule                                                                                                                                                              | User, UserDepartmentRole, UserDepartmentPermission                                                                                | `UsersService`                                                          | `UsersController`       | จัดการผู้ใช้ + assignments                        |
-| DepartmentsModule   | TypeOrmModule                                                                                                                                                              | Department                                                                                                                        | `DepartmentsService`                                                    | `DepartmentsController` | จัดการแผนก                                        |
-| RolesModule         | TypeOrmModule                                                                                                                                                              | Role                                                                                                                              | `RolesService`                                                          | `RolesController`       | จัดการบทบาท                                       |
-| MenusModule         | TypeOrmModule                                                                                                                                                              | Menu, Permission, Action                                                                                                          | `MenusService`                                                          | `MenusController`       | จัดการเมนู + tree                                 |
-| PermissionsModule   | TypeOrmModule                                                                                                                                                              | Permission                                                                                                                        | `PermissionsService`                                                    | `PermissionsController` | CRUD สิทธิ์ + กำหนดแผนกที่ใช้ได้                 |
-| SessionsModule      | TypeOrmModule                                                                                                                                                              | AuthSession                                                                                                                       | `SessionsService`                                                       | `SessionsController`    | จัดการ session / revoke                           |
-| AuditLogsModule     | TypeOrmModule                                                                                                                                                              | AuditLog                                                                                                                          | `AuditLogsService`                                                      | `AuditLogsController`   | ดู audit logs                                     |
-| AccessControlModule | TypeOrmModule                                                                                                                                                              | Permission, RoleAction, UserDepartmentRole, UserDepartmentPermission, Menu                                                        | `AccessControlService`, `EffectivePermissionService`, `MenuTreeService` | —                       | คำนวณสิทธิ์และเมนูที่ user ได้รับ                 |
-| MaterialsModule     | AccessControlModule, TypeOrmModule                                                                                                                                         | Material, SupplierMaterial, Unit, DeliveryType, MaterialModel, LoadingPoint, Supplier                                             | `MaterialsService`, `MaterialImageStorageService`, `PermissionGuard`    | `MaterialsController`   | CRUD Material Master + จัดการรูปภาพ              |
-| UnitsModule         | TypeOrmModule                                                                                                                                                              | Unit                                                                                                                              | `UnitsService`                                                          | `UnitsController`       | CRUD หน่วยนับ                                    |
-| SuppliersModule     | TypeOrmModule                                                                                                                                                              | Supplier                                                                                                                          | `SuppliersService`                                                      | `SuppliersController`   | CRUD Supplier                                     |
-| CategoriesModule    | TypeOrmModule                                                                                                                                                              | Category                                                                                                                          | `CategoriesService`                                                     | `CategoriesController`  | CRUD หมวดหมู่วัตถุดิบ                           |
-| DeliveryTypesModule | TypeOrmModule                                                                                                                                                              | DeliveryType                                                                                                                      | `DeliveryTypesService`                                                  | `DeliveryTypesController` | CRUD รูปแบบการจัดส่ง                           |
-| LoadingPointsModule | TypeOrmModule                                                                                                                                                              | LoadingPoint                                                                                                                      | `LoadingPointsService`                                                  | `LoadingPointsController` | CRUD จุดลงสินค้า                               |
-| MaterialModelsModule | TypeOrmModule                                                                                                                                                             | MaterialModel                                                                                                                     | `MaterialModelsService`                                                 | `MaterialModelsController` | CRUD รุ่นวัตถุดิบ                            |
-| OrganizationsModule  | TypeOrmModule                                                                                                                                                              | Organization                                                                                                                      | `OrganizationsService`                                                   | `OrganizationsController` | CRUD องค์กร                                    |
-| StatusItemsModule  | TypeOrmModule                                                                                                                                                              | StatusItem                                                                                                                        | `StatusItemsService`                                                    | `StatusItemsController`  | CRUD รายการสถานะ                               |
-| RejectReasonsModule | TypeOrmModule                                                                                                                                                             | RejectReason                                                                                                                      | `RejectReasonsService`                                                  | `RejectReasonsController` | CRUD เหตุผลการปฏิเสธ                          |
-| GoodsReceiptsModule | AccessControlModule, TypeOrmModule                                                                                                                                         | GoodsReceipt, GoodsReceiptItem, GoodsReceiptAttachment, DocumentCounter                                                              | `GoodsReceiptsService`, `GoodsReceiptAttachmentsService`                  | `GoodsReceiptsController` | เอกสารรับเข้าวัตถุดิบ draft → posted → cancelled |
+## 7. Authorization / RBAC
 
-### 6.1 AuthModule
+### 7.1 Guard stacks
 
-- จัดการ login, logout, refresh, select/switch department
-- ใช้ Passport Local Strategy และ JWT Strategy
-- สร้างและจัดการ `AuthSession`
+| กลุ่ม endpoint  | Guards                                                     | ความหมาย                                     |
+| --------------- | ---------------------------------------------------------- | -------------------------------------------- |
+| Auth protected  | `JwtAuthGuard`                                             | JWT ถูกต้อง                                  |
+| IAM admin       | `JwtAuthGuard`, `RolesGuard` + `SUPER_ADMIN`               | เฉพาะ SUPER_ADMIN                            |
+| Business/master | `JwtAuthGuard`, `ActiveAssignmentGuard`, `PermissionGuard` | ต้องมี active assignment และ permission code |
 
-### 6.2 UsersModule
+`SUPER_ADMIN` bypass การตรวจ effective permission ใน `PermissionGuard` และ bypass requirement เรื่อง department assignment
 
-- CRUD ผู้ใช้งาน
-- จัดการ `user_department_roles`
-- รีเซ็ตรหัสผ่าน
+### 7.2 Permission resolution
 
-### 6.3 DepartmentsModule
+Permission ถูกคำนวณตาม user + active assignment ไม่รวม permission จาก assignment อื่น กลไกประกอบด้วย role/action, department permission และ user-assignment permission จากนั้นคืนชุด code สำหรับ guard/menu
 
-- CRUD แผนก
+`@RequirePermissions(A, B)` หมายถึงต้องมีครบทุก code ส่วน `@RequireAnyPermissions(A, B)` หมายถึงมีอย่างน้อยหนึ่ง code
 
-### 6.4 RolesModule
+### 7.3 Permission families
 
-- CRUD บทบาท
-- จัดการ `role_actions`
+- Master CRUD: `<RESOURCE>_VIEW|CREATE|UPDATE|DELETE`
+- Materials Receiving: เพิ่ม `MATERIALS_RECEIVING_CONFIRM`, `MATERIALS_RECEIVING_CANCEL`
+- Materials Disbursement: เพิ่ม `MATERIALS_DISBURSEMENT_CONFIRM`, `MATERIALS_DISBURSEMENT_CANCEL`
+- Products: เพิ่ม `PRODUCTS_RESTORE`
+- BOM constants มี `BOMS_ACTIVATE`/`BOMS_DEACTIVATE` แต่ controller ปัจจุบันใช้ `BOMS_UPDATE` สำหรับ activate/deactivate
 
-### 6.5 MenusModule
+## 8. Business rules
 
-- CRUD เมนู
-- รองรับ hierarchy (parent-child)
+### 8.1 Material master
 
-### 6.6 PermissionsModule
+- `code` unique; reference และ supplier ที่เลือกต้องมีอยู่และ active
+- `materialType`: `PCS`, `PIPE`, `SHEET`, `COIL`
+- `type`: `PC`, `OF`, `OF_MAT`
+- `PCS` ต้องไม่มี `ratio`; PIPE/SHEET/COIL ต้องมี integer `ratio >= 1`
+- `supplierIds` ต้องไม่ซ้ำ และ sync ผ่าน `supplier_materials`
+- `packingQuantity` เป็น integer `>= 1` เมื่อระบุ
+- การอัปโหลดรูปเป็นสองขั้น: `POST /materials/images` stage ไฟล์ แล้วส่ง temporary `imagePath` ใน create/update เพื่อ promote
+- รองรับ JPEG/PNG/WebP สูงสุด 5 MiB และตรวจ file signature; staged file เก่ากว่า 24 ชั่วโมงถูก cleanup แบบจำกัดจำนวน
 
-- CRUD permission + กำหนดแผนกที่ใช้ได้ (`PUT /permissions/:id/departments`)
-- `GET /permissions/options` — ดึง menus + actions สำหรับ dropdown ในฟอร์มสร้าง/แก้ไข
+### 8.2 Materials Receiving
 
-### 6.7 SessionsModule
+- Status: `draft → confirmed → cancelled`; draft เท่านั้นที่ update/delete ได้
+- `receiveQuantity` ต้องมากกว่า 0 และใช้ decimal ไม่เกิน 4 ตำแหน่ง
+- `receiveDate` ห้ามเป็นอนาคต
+- Supplier ระบุเองได้; หากไม่ส่ง service auto-resolve เมื่อ material มี active supplier เดียว หากมีหลายรายต้องส่ง `supplierId`
+- Material, supplier และ mapping ต้อง active
+- `packingQuantity` อ่าน snapshot จาก material หรือ `packingQuantityOverride`; ต้อง `>= 1`
+- PIPE/SHEET/COIL คำนวณ `piecesQuantity = receiveQuantity × ratio`; PCS ไม่มี pieces quantity/QR ชุดที่สอง
+- สร้าง internal lot/run no และ package/QR ใน transaction
+- Confirm เพิ่ม stock balance, สร้าง RECEIVE transaction และเปลี่ยน package เป็น `in_stock`
+- Cancel confirmed document ลดยอดกลับและสร้าง ADJUST transaction ใน transaction; cancel draft ไม่เคยเพิ่ม stock ปัจจุบัน receiving cancel ยังไม่เปลี่ยน package status และไม่ตรวจ downstream FIFO allocation
+- Update ใช้ `updatedAt` ป้องกัน lost update
 
-- ดูและ revoke เซสชัน
+### 8.3 Materials Disbursement
 
-### 6.8 AuditLogsModule
+- Type: `stock_cut` หรือ `production`; `stock_cut` ต้องมี `reason`
+- Status: `draft → confirmed → cancelled`; draft เท่านั้นที่ update/delete/confirm ได้
+- ต้องมีอย่างน้อยหนึ่ง item และทุก `requestedQuantity > 0`
+- `disbursementDate` ห้ามเป็นอนาคต
+- Confirm lock/allocate stock แบบ FIFO จาก receiving packages เก่าสุดก่อน, สร้าง package allocations, ISSUE transactions และลด stock balance
+- หาก stock ไม่พอ confirm ล้มเหลวทั้ง transaction
+- Cancel confirmed document คืน quantity ให้ packages/stock และย้อน allocation ใน transaction
+- Report แสดง source lot ที่ถูก FIFO allocation
 
-- ดูบันทึกการกระทำ
+### 8.4 Products
 
-### 6.9 AccessControlModule
+- `code` unique
+- FK บังคับ 8 รายการ: unit, product model, customer, location, product type, delivery type, loading point, process line
+- `packing`/`lotSize` default 1 และต้อง `>= 1`
+- ค่า auto: `safetyStock = lotSize`, `minStock = packing` เว้นแต่ส่ง override
+- เมื่อ update packing/lotSize ระบบพยายามรักษาค่า override เดิม; ค่า auto เดิมจะถูก recompute
+- Delete เป็น soft delete; restore ใช้ permission `PRODUCTS_RESTORE`
+- List ปัจจุบันไม่รองรับ pagination แม้ master list อื่นรองรับ
+- Update DTO บังคับ `updatedAt` แต่ service ปัจจุบันยังไม่ตรวจ optimistic concurrency token
+- การอัปโหลดรูปเป็นสองขั้นเหมือน Material: `POST /products/images` stage ไฟล์ แล้วส่ง temporary `productImagePath` ใน create/update เพื่อ promote หลัง validation
+- รองรับ JPEG/PNG/WebP สูงสุด 5 MiB, ตรวจ file signature, ใช้ชื่อ UUID ฝั่ง server และ cleanup staged file เก่ากว่า 24 ชั่วโมง
+- เมื่อ transaction ล้มเหลว ระบบลบ promoted image ชดเชย; เมื่อแทนที่หรือตั้ง `productImagePath: null` ระบบลบรูปเก่าหลัง transaction commit
 
-- ไม่มี controller (cross-cutting service module)
-- ให้บริการคำนวณสิทธิ์และเมนู:
-  - `AccessControlService.getEffectivePermissionRows()` — รวมสิทธิ์จาก role + override
-  - `EffectivePermissionService.getEffectivePermissionCodes()` — คืน permission codes ที่ active
-  - `MenuTreeService.buildMenuTree()` — สร้างเมนู tree ตามสิทธิ์
-- ถูก import โดย `AuthModule` เพื่อใช้ใน `AuthService.getMyMenus()` / `getMyPermissions()`
-- หาก controller อื่นต้องการตรวจสิทธิ์ละเอียด ให้ import `AccessControlModule` และใช้ `PermissionGuard` พร้อม `@RequirePermissions(...)`
+### 8.5 BOM
 
-### 6.10 MaterialsModule
+- Status: `DRAFT`, `ACTIVE`, `INACTIVE`
+- Create ต้องมี item 1–200 รายการ; material/unit ทุก id ต้องมีอยู่
+- Version สร้างอัตโนมัติ `v1`, `v2`, ... ต่อ product
+- ACTIVE BOM ห้าม update, add/remove item หรือ hard delete
+- Activate BOM หนึ่งรายการจะเปลี่ยน ACTIVE BOM อื่นของ product เดียวกันเป็น INACTIVE
+- `quantity >= 0.0001`; `wastagePercent` อยู่ระหว่าง 0–100
+- Controller รับ `updatedAt` ใน update DTO แต่ service ปัจจุบันยังไม่ได้ตรวจ optimistic concurrency ของ BOM
+- Constants `BOMS_ACTIVATE`/`BOMS_DEACTIVATE` ยังไม่ได้ถูกใช้โดย controller/seed registry
 
-- CRUD Material Master ตาม [Material Master Requirements](docs/wiki/material-master.md)
-- ใช้สิทธิ์จาก `MATERIAL_VIEW`, `MATERIAL_CREATE`, `MATERIAL_UPDATE`, `MATERIAL_DELETE` ผ่าน `PermissionGuard` (ดู `src/modules/materials/material-permissions.ts`)
-- จัดการความสัมพันธ์กับ Lookup Master Data (Unit, DeliveryType, MaterialModel, LoadingPoint) และ Supplier ผ่านตารางกลาง `master.supplier_materials`
-- ใช้ `DataSource.transaction()` ในการ create/update/deactivate/restore เพื่อรักษาความ consistent ของ material + supplier mappings
-- ใช้ `pessimistic_write` lock ตอน update เพื่อป้องกัน concurrent write
-- ใช้ optimistic concurrency ผ่าย `updatedAt` ใน `UpdateMaterialDto` (ถ้า `updatedAt` ไม่ตรงกัน → `409 Conflict`)
-- Endpoint `POST /materials/images` ใช้ `MaterialImageStorageService` ทำสองขั้นตอน:
-  1. `stage()` รับ multipart file แล้วเขียนลง `.tmp/` (เก็บ path ชั่วคราว 24 ชม.)
-  2. `promote()` ย้ายไฟล์จาก `.tmp/` ไปยัง root เมื่อ create/update Material สำเร็จ
-  3. `discard()` ลบไฟล์เก่าเมื่อมีการเปลี่ยนรูป หรือ compensate เมื่อ transaction fail
-- `MaterialImageStorageService` validate MIME type, magic bytes (JPEG/PNG/WEBP), และขนาดไม่เกิน 5 MiB
-- การลบ Material ใช้ soft delete ผ่าน `isActive = false` (เรียก `DELETE /materials/:id` → `PATCH /materials/:id/restore` เพื่อ restore)
-- รายการ Material ใช้ query builder join กับ lookup + supplier mappings และกรองเฉพาะ active suppliers/mappings
+## 9. Module catalog
 
-### 6.11 UnitsModule
+| Module                 | Base path                 | Protection     | หมายเหตุ                                  |
+| ---------------------- | ------------------------- | -------------- | ----------------------------------------- |
+| app                    | `/api/v1`                 | Public         | health/root string                        |
+| auth                   | `/auth`                   | mixed          | login/select/refresh public; ที่เหลือ JWT |
+| users                  | `/users`                  | SUPER_ADMIN    | user + assignment aggregate               |
+| departments            | `/departments`            | SUPER_ADMIN    | hard delete ตาม service                   |
+| roles                  | `/roles`                  | SUPER_ADMIN    | role/action management                    |
+| menus                  | `/menus`                  | SUPER_ADMIN    | list/tree/CRUD                            |
+| permissions            | `/permissions`            | SUPER_ADMIN    | CRUD + department mapping                 |
+| sessions               | `/sessions`               | SUPER_ADMIN    | inspect/revoke                            |
+| audit-logs             | `/audit-logs`             | SUPER_ADMIN    | read-only                                 |
+| materials              | `/materials`              | permission     | CRUD/lookups/image staging                |
+| units                  | `/units`                  | permission     | soft delete/restore                       |
+| suppliers              | `/suppliers`              | permission     | soft delete/restore                       |
+| material-models        | `/material-models`        | permission     | soft delete/restore                       |
+| delivery-types         | `/delivery-types`         | permission     | soft delete/restore                       |
+| loading-points         | `/loading-points`         | permission     | soft delete/restore                       |
+| categories             | `/categories`             | permission     | hierarchy + soft delete                   |
+| organizations          | `/organizations`          | permission     | hierarchy/type + soft delete              |
+| status-items           | `/status-items`           | permission     | status by module                          |
+| reject-reasons         | `/reject-reasons`         | permission     | soft delete/restore                       |
+| materials-receiving    | `/materials-receiving`    | permission     | lot/package/QR/stock/report               |
+| materials-disbursement | `/materials-disbursement` | permission     | FIFO issue/report                         |
+| stock-balances         | `/stock-balances`         | receiving VIEW | current stock                             |
+| products               | `/products`               | permission     | Product + 8 lookups + image staging       |
+| boms                   | `/boms`                   | permission     | version/status/items                      |
 
-- CRUD หน่วยนับ (เช่น KG, PCS, L)
-- ใช้สิทธิ์ `UNIT_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
+## 10. Database migrations and seeds
 
-### 6.12 SuppliersModule
-
-- CRUD ข้อมูลหลัก Supplier
-- ใช้สิทธิ์ `SUPPLIER_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-
-### 6.13 CategoriesModule
-
-- CRUD หมวดหมู่วัตถุดิบ (รองรับ hierarchy ผ่าน `parentId`)
-- ใช้สิทธิ์ `CATEGORY_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-
-### 6.14 DeliveryTypesModule
-
-- CRUD รูปแบบการจัดส่ง (เช่น รถบรรทุก, Tanker, Container)
-- ใช้สิทธิ์ `DELIVERY_TYPE_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-
-### 6.15 LoadingPointsModule
-
-- CRUD จุดรับ/จุดลงวัตถุดิบ (เช่น Receiving Area A, Tank Farm)
-- ใช้สิทธิ์ `LOADING_POINT_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-
-### 6.16 MaterialModelsModule
-
-- CRUD รุ่นหรือแบบวัตถุดิบ
-- ใช้สิทธิ์ `MATERIAL_MODEL_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-
-### 6.17 OrganizationsModule
-
-- CRUD โครงสร้างองค์กร (headquarters/branch/subsidiary/department) รองรับ hierarchy ผ่าน `parentId`
-- ใช้สิทธิ์ `ORGANIZATION_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-
-### 6.18 StatusItemsModule
-
-- CRUD รายการสถานะ (เช่น รอดำเนินการ, กำลังดำเนินการ, เสร็จสิ้น) พร้อม `color` และ `module` สำหรับจัดกลุ่ม
-- ใช้สิทธิ์ `STATUS_ITEM_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-
-### 6.19 RejectReasonsModule
-
-- CRUD เหตุผลการปฏิเสธของตอนรับเข้า โครงสร้างเดียวกับ `LoadingPointsModule`
-- ใช้สิทธิ์ `REJECT_REASON_VIEW/CREATE/UPDATE/DELETE` ผ่าน `PermissionGuard`
-- ถูกอ้างจาก `inventory.goods_receipt_items.reject_reason_id` จึงปิดใช้งานด้วย `isActive = false` แทนการลบ
-
-### 6.20 GoodsReceiptsModule
-
-- เอกสารรับเข้าวัตถุดิบ วงจรชีวิต `draft → posted → cancelled`
-- ใช้สิทธิ์ `GOODS_RECEIPT_VIEW/CREATE/UPDATE/DELETE/POST/CANCEL` — `POST` และ `CANCEL` เป็น action ใหม่ใน `iam.actions`
-- `GoodsReceiptAttachmentStorageService` รับ JPEG/PNG/WebP/PDF (10 MiB, 10 ไฟล์ต่อเอกสาร) ใช้ pattern `stage` → `promote` → `discard` แยกจาก `MaterialImageStorageService`
-- ออกเลขเอกสาร `GR-YYYYMM-NNNN` ตอน post โดยล็อกแถวใน `inventory.document_counters` เป็นขั้นตอนสุดท้ายของทรานแซกชัน
-- บังคับให้ทุกบรรทัดมี mapping ที่ active ใน `master.supplier_materials` กับ Supplier ที่หัวเอกสาร
-- Snapshot `material_code`/`material_name` ลงบรรทัดตอน post เพื่อให้เอกสารย้อนหลังไม่เปลี่ยนตาม Master Data
-- อ่านองค์กรจาก config `DEFAULT_ORGANIZATION_CODE` เพราะ `User`/`Department` ยังไม่มีสังกัดองค์กร
-- Dependencies: `AccessControlModule`, entities จาก `inventory` และ `master`
-
-## 7. Database Migration & Seeding
-
-### 7.1 คำสั่งที่สำคัญ
+### 10.1 Commands
 
 ```bash
-pnpm db:reset        # ลบ schema iam และสร้างใหม่
-pnpm migration:run   # รัน migrations
-pnpm seed:run        # ใส่ข้อมูลเริ่มต้น
-pnpm start:dev       # เริ่ม development server
+pnpm run migration:run
+pnpm run migration:revert
+pnpm run migration:generate -- src/database/migrations/<Name>
+pnpm run seed:run
+pnpm run db:reset
 ```
 
-### 7.2 Seed Data
+`db:reset` เป็น destructive และใช้เฉพาะ development
 
-- Actions: CREATE, READ, UPDATE, DELETE, POST, CANCEL
-- Roles: SUPER_ADMIN, ADMIN, USER
-- Role Actions: SUPER_ADMIN/ADMIN ได้ทุก action รวม POST/CANCEL, USER ได้ CREATE/READ/UPDATE
-- Departments: WE, PS
-- Default Organization: active `headquarters` ตาม `DEFAULT_ORGANIZATION_CODE` (default `CPS`) เพื่อให้ startup validation ของ Goods Receipt ผ่านบน fresh database
-- Initial Super Admin: username `superadmin` / password `change-me-secure-password`
+### 10.2 Migration timeline
 
-Permission ถูกสร้างจาก menu × action ผ่าน `src/database/seeds/permission-registry.ts` ซึ่งเป็น registry ที่ map `menu.code` → `action.code` → `permission.code` เมนูที่ไม่อยู่ใน registry จะใช้รูปแบบ `${menuCode}_${actionCode}` และเมนูที่ต้องการ action นอกเหนือชุด CRUD (เช่น `GOODS_RECEIPT` ที่ต้องมี POST/CANCEL) ประกาศไว้ใน `MENU_ACTION_CODES`
+| Range                  | เนื้อหา                                                                             |
+| ---------------------- | ----------------------------------------------------------------------------------- |
+| `1700000000000`–`0004` | IAM schema/tables, permission effect, department permissions, assignment uniqueness |
+| `1700000000005`–`0007` | Material master, case-insensitive material code, additional master tables           |
+| `1700000000009`        | POST/CANCEL actions                                                                 |
+| `1786197666075`        | Material type                                                                       |
+| `1786197666076`–`6079` | Materials Receiving, package/run/lot detail และ constraint fix                      |
+| `1786700000000`–`0002` | Material shape/ratio, PO/snapshot, pieces QR                                        |
+| `1786700000003`        | Materials Disbursement/FIFO tables                                                  |
+| `1786700000004`        | Products/BOM schema รุ่นแรก                                                         |
+| `1786700000005`        | Rebuild Products และเพิ่ม product master tables                                     |
 
-`permission-registry.spec.ts` ยืนยันว่า permission code ของทุกเมนูเดิมไม่เปลี่ยนหลัง refactor
+Migration filename order เป็น source of truth; spec filesในโฟลเดอร์เดียวกันไม่ใช่ migration runtime
 
-## 8. Environment Variables
+### 10.3 Seed behavior
 
-ดูรายละเอียดได้ที่ `.env.example`. การอ่าน env ทั้งหมดควรผ่าน `src/config/env.utils.ts`:
+`seed.ts` สร้าง action, default organization, roles, role-actions, departments, menus, permissions และ initial SUPER_ADMIN แบบ idempotent เป็นส่วนใหญ่
 
-- `getEnv(key, default?)` — คืน `string`, throw ถ้าไม่มี default และไม่มีค่า
-- `getEnvNumber(key, default?)` — คืน `number`, validate ว่าเป็นตัวเลข
-- `getEnvBoolean(key, default?)` — คืน `boolean` (`true`/`1`)
+`seed-master-data.ts` seed product models, customers, locations, product types, process lines, products และ BOM ตัวอย่าง ข้อมูลนี้เป็น sample/bootstrap data ไม่ใช่ API contract
 
-Config ที่ใช้ประจำ:
+## 11. Environment variables
 
-| Config          | File                            | คำอธิบาย                                                                                     |
-| --------------- | ------------------------------- | -------------------------------------------------------------------------------------------- |
-| App config      | `src/config/app.config.ts`      | `NODE_ENV`, `PORT`, `CORS_ORIGIN`, `DEFAULT_ORGANIZATION_CODE`                                |
-| Database config | `src/config/database.config.ts` | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_DATABASE`, `DB_SCHEMA`, `DB_LOGGING` |
+| Variable                              | Required/default                   | ใช้ทำอะไร                                         |
+| ------------------------------------- | ---------------------------------- | ------------------------------------------------- |
+| `NODE_ENV`                            | `development`                      | runtime mode                                      |
+| `PORT`                                | `3001`                             | HTTP port                                         |
+| `CORS_ORIGIN`                         | empty                              | comma-separated origins; empty currentlyเปิดกว้าง |
+| `DB_HOST`                             | `localhost`                        | PostgreSQL host                                   |
+| `DB_PORT`                             | `5432`                             | PostgreSQL port                                   |
+| `DB_USERNAME`                         | `postgres`                         | DB user                                           |
+| `DB_PASSWORD`                         | required in config                 | DB password                                       |
+| `DB_DATABASE`                         | `cps_database`                     | database name                                     |
+| `DB_SCHEMA`                           | `iam`                              | default schema                                    |
+| `DB_LOGGING`                          | `false`                            | TypeORM logging                                   |
+| `JWT_ACCESS_SECRET`                   | required                           | access-token signing                              |
+| `JWT_ACCESS_EXPIRES_IN`               | `8h`                               | access-token TTL                                  |
+| `JWT_REFRESH_SECRET`                  | required                           | refresh-token signing                             |
+| `JWT_REFRESH_EXPIRES_IN`              | `7d`                               | refresh-token TTL                                 |
+| `JWT_DEPARTMENT_SELECTION_SECRET`     | required                           | selection-token signing                           |
+| `JWT_DEPARTMENT_SELECTION_EXPIRES_IN` | configured/default in auth service | selection-token TTL                               |
+| `MAX_FAILED_LOGIN_ATTEMPTS`           | `5`                                | lock threshold                                    |
+| `ACCOUNT_LOCK_MINUTES`                | `15`                               | lock duration                                     |
+| `DEFAULT_ORGANIZATION_CODE`           | `CPS`                              | organization used by receiving                    |
+| `MATERIAL_IMAGE_ROOT`                 | `<cwd>/uploads/materials`          | filesystem root for Material images               |
+| `PRODUCT_IMAGE_ROOT`                  | `<cwd>/uploads/products`           | filesystem root for Product images                |
+| `INITIAL_SUPER_ADMIN_*`               | seed defaults                      | username/password/name/email สำหรับ bootstrap     |
 
-สิ่งที่ต้องระวัง:
-
-- `DB_PASSWORD` ไม่มี default แล้ว ต้อง set ใน `.env`
-- `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_DEPARTMENT_SELECTION_SECRET` ไม่มี default (ใช้ `getOrThrow` ใน auth)
-- `CORS_ORIGIN` ถ้าเว้นว่างจะอนุญาตทุก origin (`true`) — ห้ามทิ้งว่างใน production
-- `MAX_FAILED_LOGIN_ATTEMPTS`, `ACCOUNT_LOCK_MINUTES` ใช้ `getEnvNumber` (default `5` และ `15` ตามลำดับ)
-- `DEFAULT_ORGANIZATION_CODE` (default `CPS`) ใช้กำหนดองค์กรของเอกสารรับเข้าวัตถุดิบ ต้องมีแถวใน `master.organizations` ที่ `code` ตรงกันและ `is_active = true` มิฉะนั้นการสร้างใบรับจะตอบ 400
-
-## 9. Logging
-
-- Global HTTP logging interceptor บันทึกทุก request/response
-- Debug logs ใน `AuthService.login` ช่วย trace ปัญหา department selection
-- Logs ซ่อน sensitive fields (password, refreshToken)
-
-## 10. API Testing
-
-ไฟล์ `cps-api-collection.json` สามารถ import ใน Apidog/Postman ได้ มีตัวแปร:
-
-- `baseUrl`
-- `accessToken`
-- `refreshToken`
-- `departmentSelectionToken`
-
-## 11. ข้อควรระวังใน Production
-
-- เปลี่ยน JWT secrets ทั้งหมด
-- เปลี่ยน default super admin password
-- ตั้งค่า `DB_SYNCHRONIZE=false`
-- ใช้ HTTPS
-- ตั้งค่า CORS ให้เหมาะสม
-- เก็บ logs และ audit logs อย่างปลอดภัย
-
-## 12. Common Workflows
-
-### 12.1 Local Development Setup
+## 12. Development and verification
 
 ```bash
 pnpm install
-cp .env.example .env
-# แก้ไข .env ให้ถูกต้อง (DB_PASSWORD, JWT secrets)
-pnpm migration:run
-pnpm seed:run
-pnpm start:dev
+pnpm run start:dev
+pnpm test -- --runInBand
+pnpm run build
+pnpm run lint
 ```
 
-### 12.2 Reset Database (สำหรับ development เท่านั้น)
+ข้อควรระวัง: `pnpm run lint` ใช้ `--fix` จึงแก้ไฟล์ได้ ไม่ใช่ read-only check
 
-```bash
-pnpm db:reset
-pnpm migration:run
-pnpm seed:run
-```
+### 12.1 Checklist เมื่อเพิ่ม endpoint
 
-### 12.3 Generate a New Migration
+- route และ HTTP method ไม่ชน static/dynamic path
+- guard/role/permission ถูกต้อง
+- DTO ปฏิเสธ unknown fields และ validate ทุก external input
+- response/list pagination สอดคล้อง module ใกล้เคียง
+- entity column/schema/FK ตรง migration
+- multi-table write อยู่ใน transaction
+- test ครอบคลุม happy path, validation, permission และ conflict/not-found
+- อัปเดต `API_ENDPOINTS.md`, Wiki และ permission registry/seed เมื่อจำเป็น
 
-```bash
-pnpm migration:generate src/database/migrations/<MigrationName>
-```
+## 13. Known gaps ณ วันที่อัปเดต
 
-หรือสร้างด้วย TypeORM CLI:
-
-```bash
-pnpm exec typeorm migration:create src/database/migrations/<MigrationName>
-```
-
-### 12.4 Add a New Feature Module
-
-1. สร้าง module ใหม่ใน `src/modules/<feature>/`
-2. สร้าง `<feature>.module.ts`, `<feature>.service.ts`, `<feature>.controller.ts`, `dto/`
-3. เพิ่ม TypeORM entities ที่ต้องใช้ใน `imports: [TypeOrmModule.forFeature([...])]`
-4. เพิ่ม module ลง `AppModule` imports
-5. อัปเดต `API_ENDPOINTS.md` และ `PROJECT-WIKI.md` ถ้ามีผลกระทบต่อ module map หรือ workflow
-
-### 12.5 Add a New Environment Variable
-
-1. เพิ่มใน `.env.example`
-2. ถ้าเป็นค่าที่ใช้ทั่วไป ให้เพิ่มใน `src/config/app.config.ts` หรือ `src/config/database.config.ts`
-3. อ่านผ่าน `getEnv` / `getEnvNumber` / `getEnvBoolean`
-4. ห้าม hardcode default สำหรับ secrets/passwords
-
-### 12.6 Standalone Scripts (migrations / seeds / reset)
-
-- สคริปต์เหล่านี้ไม่ผ่าน `NestApplication` ดังนั้น `.env` จะถูกโหลดก็ต่อเมื่อ shell มี env อยู่แล้ว หรือใช้ `dotenv/config`
-- อย่าสร้าง `new ConfigService()` เพื่ออ่าน env ให้ import `getDatabaseConfig()` / `getAppConfig()` จาก `src/config/*` แทน
-- ดูตัวอย่างได้ที่ `src/database/data-source.ts` และ `src/database/reset-database.ts`
+- ไม่มี CRUD endpoints แยกสำหรับ `product_models`, `customers`, `locations`, `product_types`, `process_lines`
+- Swagger tags/DTO annotations ยังไม่ครอบคลุมทุก module จึงไม่ควรใช้ Swagger เป็นแหล่ง contract เดียว
+- Products list ไม่มี page/limit และ meta pagination ต่างจาก master modules อื่น
+- Product update รับ `updatedAt` แต่ service ยังไม่ตรวจ token
+- BOM update รับ `updatedAt` แต่ service ยังไม่ตรวจ token
+- BOM activate/deactivate ใช้ `BOMS_UPDATE` แม้มี permission constants เฉพาะ
+- `UnifiedReportQueryDto.materialId` ใช้ `@IsDateString()` ซึ่งไม่สอดคล้องกับความหมายของ id
+- `AddBomItemDto` มี validation เบากว่า item ใน Create BOM
+- การ cancel Materials Receiving ที่ confirmed ยังไม่เปลี่ยน package status และไม่ป้องกันการลดยอดติดลบเมื่อ stock จาก lot นั้นถูกใช้ไปแล้ว
+- ไม่มี `.env.example`
+- CORS เปิดทุก origin เมื่อ `CORS_ORIGIN` ว่าง
+- standalone seed runner ยังมี default DB password ใน source; ต้องแก้ก่อนนำ workflow นี้ไปใช้ production

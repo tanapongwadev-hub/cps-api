@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -16,7 +17,8 @@ import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { ProcessLine } from '../../entities/master/process-line.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { CreateProductDto } from './dto/create-product.dto';
-import { ListProductsQueryDto, PRODUCT_SORT_COLUMNS } from './dto/list-products-query.dto';
+import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { ProductImageStorageService } from './product-image-storage.service';
 import { UpdateProductDto } from './dto/update-product.dto';
 
 const PRODUCT_SORT_DB_COLUMNS: Record<string, string> = {
@@ -71,6 +73,8 @@ export class ProductsService {
     @InjectRepository(Unit)
     private unitRepository: Repository<Unit>,
     private dataSource?: DataSource,
+    @Optional()
+    private imageStorage?: ProductImageStorageService,
   ) {}
 
   private getDataSource(): DataSource {
@@ -184,10 +188,14 @@ export class ProductsService {
       qb.andWhere('product.isActive = :isActive', { isActive });
     }
     if (modelId) qb.andWhere('product.modelId = :modelId', { modelId });
-    if (customerId) qb.andWhere('product.customerId = :customerId', { customerId });
-    if (productTypeId) qb.andWhere('product.productTypeId = :productTypeId', { productTypeId });
-    if (locationId) qb.andWhere('product.locationId = :locationId', { locationId });
-    if (processLineId) qb.andWhere('product.processLineId = :processLineId', { processLineId });
+    if (customerId)
+      qb.andWhere('product.customerId = :customerId', { customerId });
+    if (productTypeId)
+      qb.andWhere('product.productTypeId = :productTypeId', { productTypeId });
+    if (locationId)
+      qb.andWhere('product.locationId = :locationId', { locationId });
+    if (processLineId)
+      qb.andWhere('product.processLineId = :processLineId', { processLineId });
 
     const sortCol = PRODUCT_SORT_DB_COLUMNS[sortBy] ?? 'product.code';
     qb.orderBy(sortCol, sortOrder === 'desc' ? 'DESC' : 'ASC');
@@ -210,14 +218,46 @@ export class ProductsService {
       loadingPoints,
       processLines,
     ] = await Promise.all([
-      this.unitRepository.find({ ...isActiveFilter, select: ['id', 'code', 'nameTh'], order: { code: 'ASC' } }),
-      this.productModelRepository.find({ ...isActiveFilter, select: baseSelect as never, order: { nameTh: 'ASC' } }),
-      this.customerRepository.find({ ...isActiveFilter, select: baseSelect as never, order: { nameTh: 'ASC' } }),
-      this.locationRepository.find({ ...isActiveFilter, select: baseSelect as never, order: { nameTh: 'ASC' } }),
-      this.productTypeRepository.find({ ...isActiveFilter, select: baseSelect as never, order: { sortOrder: 'ASC' } }),
-      this.deliveryTypeRepository.find({ ...isActiveFilter, select: baseSelect as never, order: { nameTh: 'ASC' } }),
-      this.loadingPointRepository.find({ ...isActiveFilter, select: baseSelect as never, order: { nameTh: 'ASC' } }),
-      this.processLineRepository.find({ ...isActiveFilter, select: baseSelect as never, order: { nameTh: 'ASC' } }),
+      this.unitRepository.find({
+        ...isActiveFilter,
+        select: ['id', 'code', 'nameTh'],
+        order: { code: 'ASC' },
+      }),
+      this.productModelRepository.find({
+        ...isActiveFilter,
+        select: baseSelect as never,
+        order: { nameTh: 'ASC' },
+      }),
+      this.customerRepository.find({
+        ...isActiveFilter,
+        select: baseSelect as never,
+        order: { nameTh: 'ASC' },
+      }),
+      this.locationRepository.find({
+        ...isActiveFilter,
+        select: baseSelect as never,
+        order: { nameTh: 'ASC' },
+      }),
+      this.productTypeRepository.find({
+        ...isActiveFilter,
+        select: baseSelect as never,
+        order: { sortOrder: 'ASC' },
+      }),
+      this.deliveryTypeRepository.find({
+        ...isActiveFilter,
+        select: baseSelect as never,
+        order: { nameTh: 'ASC' },
+      }),
+      this.loadingPointRepository.find({
+        ...isActiveFilter,
+        select: baseSelect as never,
+        order: { nameTh: 'ASC' },
+      }),
+      this.processLineRepository.find({
+        ...isActiveFilter,
+        select: baseSelect as never,
+        order: { nameTh: 'ASC' },
+      }),
     ]);
 
     return {
@@ -252,81 +292,98 @@ export class ProductsService {
     return product;
   }
 
-  async create(dto: CreateProductDto, userId: string): Promise<ProductWithRelations> {
-    return this.getDataSource().transaction(async (manager) => {
-      const repo = manager.getRepository(Product);
-      const packing = dto.packing ?? 1;
-      const lotSize = dto.lotSize ?? 1;
-      const { safetyStock, minStock } = this.computeStockLevels(
-        packing,
-        lotSize,
-        dto.safetyStock ?? null,
-        dto.minStock ?? null,
-      );
-
-      // Validate every FK before insert
-      const refs = await this.validateForeignKeys(manager, {
-        unitId: dto.unitId,
-        modelId: dto.modelId,
-        customerId: dto.customerId,
-        locationId: dto.locationId,
-        productTypeId: dto.productTypeId,
-        deliveryTypeId: dto.deliveryTypeId,
-        loadingPointId: dto.loadingPointId,
-        processLineId: dto.processLineId,
-      });
-
-      // Unique code
-      const existing = await repo.findOne({ where: { code: dto.code } });
-      if (existing) {
-        throw new ConflictException(`Product code "${dto.code}" already exists`);
+  async create(
+    dto: CreateProductDto,
+    userId: string,
+  ): Promise<ProductWithRelations> {
+    let promotedImagePath: string | undefined;
+    try {
+      if (dto.productImagePath) {
+        promotedImagePath = await this.getImageStorage().promote(
+          dto.productImagePath,
+        );
       }
 
-      const product = repo.create({
-        code: dto.code,
-        name: dto.name,
-        unitId: dto.unitId,
-        modelId: dto.modelId,
-        customerId: dto.customerId,
-        packing,
-        locationId: dto.locationId,
-        safetyStock,
-        productTypeId: dto.productTypeId,
-        lotSize,
-        minStock,
-        deliveryTypeId: dto.deliveryTypeId,
-        scale: dto.scale ?? null,
-        loadingPointId: dto.loadingPointId,
-        processLineId: dto.processLineId,
-        productImagePath: dto.productImagePath ?? null,
-        isActive: dto.isActive ?? true,
-        createdBy: userId,
-      });
+      return await this.getDataSource().transaction(async (manager) => {
+        const repo = manager.getRepository(Product);
+        const packing = dto.packing ?? 1;
+        const lotSize = dto.lotSize ?? 1;
+        const { safetyStock, minStock } = this.computeStockLevels(
+          packing,
+          lotSize,
+          dto.safetyStock ?? null,
+          dto.minStock ?? null,
+        );
 
-      const saved = await repo.save(product);
-      const reloaded = await repo.findOne({
-        where: { id: saved.id },
-        relations: [
-          'unit',
-          'model',
-          'customer',
-          'location',
-          'productType',
-          'deliveryType',
-          'loadingPoint',
-          'processLine',
-        ],
+        const refs = await this.validateForeignKeys(manager, {
+          unitId: dto.unitId,
+          modelId: dto.modelId,
+          customerId: dto.customerId,
+          locationId: dto.locationId,
+          productTypeId: dto.productTypeId,
+          deliveryTypeId: dto.deliveryTypeId,
+          loadingPointId: dto.loadingPointId,
+          processLineId: dto.processLineId,
+        });
+
+        const existing = await repo.findOne({ where: { code: dto.code } });
+        if (existing) {
+          throw new ConflictException(
+            `Product code "${dto.code}" already exists`,
+          );
+        }
+
+        const product = repo.create({
+          code: dto.code,
+          name: dto.name,
+          unitId: dto.unitId,
+          modelId: dto.modelId,
+          customerId: dto.customerId,
+          packing,
+          locationId: dto.locationId,
+          safetyStock,
+          productTypeId: dto.productTypeId,
+          lotSize,
+          minStock,
+          deliveryTypeId: dto.deliveryTypeId,
+          scale: dto.scale ?? null,
+          loadingPointId: dto.loadingPointId,
+          processLineId: dto.processLineId,
+          productImagePath: promotedImagePath ?? null,
+          isActive: dto.isActive ?? true,
+          createdBy: userId,
+        });
+
+        const saved = await repo.save(product);
+        const reloaded = await repo.findOne({
+          where: { id: saved.id },
+          relations: [
+            'unit',
+            'model',
+            'customer',
+            'location',
+            'productType',
+            'deliveryType',
+            'loadingPoint',
+            'processLine',
+          ],
+        });
+        if (!reloaded) {
+          throw new NotFoundException(
+            `Product with id ${saved.id} not found after save`,
+          );
+        }
+        if (Object.keys(refs).length === 0) {
+          this.logger.warn(
+            'Product FK validation returned an empty map (unexpected)',
+          );
+        }
+        return reloaded;
       });
-      if (!reloaded) {
-        throw new NotFoundException(`Product with id ${saved.id} not found after save`);
-      }
-      // Touch refs so the linter doesn't drop the validation result on the
-      // floor — also gives an extra signal in logs if anything was wrong.
-      if (Object.keys(refs).length === 0) {
-        this.logger.warn('Product FK validation returned an empty map (unexpected)');
-      }
-      return reloaded as ProductWithRelations;
-    });
+    } catch (error) {
+      await this.compensatePromotedImage(promotedImagePath);
+      throw error;
+    }
   }
 
   async update(
@@ -334,111 +391,193 @@ export class ProductsService {
     dto: UpdateProductDto,
     userId: string,
   ): Promise<ProductWithRelations> {
-    return this.getDataSource().transaction(async (manager) => {
-      const repo = manager.getRepository(Product);
-      const product = await repo.findOne({ where: { id } });
-      if (!product) {
-        throw new NotFoundException(`Product with id ${id} not found`);
-      }
-
-      // Build the "would-be" final values so we can recompute stock correctly
-      // (use new value if provided, else keep current).
-      const nextPacking = dto.packing ?? product.packing;
-      const nextLotSize = dto.lotSize ?? product.lotSize;
-
-      // Only recompute when caller didn't explicitly override.
-      let nextSafety = dto.safetyStock ?? product.safetyStock;
-      let nextMin = dto.minStock ?? product.minStock;
-      // If packing/lotSize changed AND the current safety/min match the old
-      // auto-formula result, recompute; otherwise respect the user override.
-      const autoSafetyFromOldLot = product.lotSize;
-      const autoMinFromOldPack = product.packing;
-      const safetyWasAuto = product.safetyStock === autoSafetyFromOldLot;
-      const minWasAuto = product.minStock === autoMinFromOldPack;
-      if (dto.lotSize !== undefined && safetyWasAuto && dto.safetyStock === undefined) {
-        nextSafety = nextLotSize;
-      }
-      if (dto.packing !== undefined && minWasAuto && dto.minStock === undefined) {
-        nextMin = nextPacking;
-      }
-      // Recompute from scratch if any input changed and no override was given
-      if (dto.safetyStock === undefined && (dto.lotSize !== undefined || dto.packing !== undefined)) {
-        nextSafety = nextLotSize;
-      }
-      if (dto.minStock === undefined && (dto.packing !== undefined || dto.lotSize !== undefined)) {
-        nextMin = nextPacking;
-      }
-      // Final guard
-      if (nextSafety < 0) nextSafety = 0;
-      if (nextMin < 0) nextMin = 0;
-
-      // Validate any FK that was provided
-      await this.validateForeignKeys(manager, {
-        unitId: dto.unitId,
-        modelId: dto.modelId,
-        customerId: dto.customerId,
-        locationId: dto.locationId,
-        productTypeId: dto.productTypeId,
-        deliveryTypeId: dto.deliveryTypeId,
-        loadingPointId: dto.loadingPointId,
-        processLineId: dto.processLineId,
-      }, /*partial*/ true);
-
-      // Code uniqueness
-      if (dto.code && dto.code !== product.code) {
-        const existing = await repo.findOne({ where: { code: dto.code } });
-        if (existing) {
-          throw new ConflictException(`Product code "${dto.code}" already exists`);
+    let promotedImagePath: string | undefined;
+    let previousImagePath: string | null | undefined;
+    let imageChanged = false;
+    let result: ProductWithRelations;
+    try {
+      result = await this.getDataSource().transaction(async (manager) => {
+        const repo = manager.getRepository(Product);
+        const product = await repo.findOne({ where: { id } });
+        if (!product) {
+          throw new NotFoundException(`Product with id ${id} not found`);
         }
-      }
 
-      Object.assign(product, {
-        code: dto.code ?? product.code,
-        name: dto.name ?? product.name,
-        unitId: dto.unitId ?? product.unitId,
-        modelId: dto.modelId ?? product.modelId,
-        customerId: dto.customerId ?? product.customerId,
-        packing: nextPacking,
-        locationId: dto.locationId ?? product.locationId,
-        safetyStock: nextSafety,
-        productTypeId: dto.productTypeId ?? product.productTypeId,
-        lotSize: nextLotSize,
-        minStock: nextMin,
-        deliveryTypeId: dto.deliveryTypeId ?? product.deliveryTypeId,
-        scale: dto.scale ?? product.scale,
-        loadingPointId: dto.loadingPointId ?? product.loadingPointId,
-        processLineId: dto.processLineId ?? product.processLineId,
-        productImagePath: dto.productImagePath ?? product.productImagePath,
-        isActive: dto.isActive ?? product.isActive,
-        updatedBy: userId,
-      });
+        previousImagePath = product.productImagePath;
+        let nextImagePath = product.productImagePath;
+        if (dto.productImagePath !== undefined) {
+          imageChanged = dto.productImagePath !== product.productImagePath;
+          if (imageChanged && dto.productImagePath !== null) {
+            promotedImagePath = await this.getImageStorage().promote(
+              dto.productImagePath,
+            );
+            nextImagePath = promotedImagePath;
+          } else {
+            nextImagePath = dto.productImagePath;
+          }
+        }
 
-      await repo.save(product);
-      const reloaded = await repo.findOne({
-        where: { id },
-        relations: [
-          'unit',
-          'model',
-          'customer',
-          'location',
-          'productType',
-          'deliveryType',
-          'loadingPoint',
-          'processLine',
-        ],
+        // Build the "would-be" final values so we can recompute stock correctly
+        // (use new value if provided, else keep current).
+        const nextPacking = dto.packing ?? product.packing;
+        const nextLotSize = dto.lotSize ?? product.lotSize;
+
+        // Only recompute when caller didn't explicitly override.
+        let nextSafety = dto.safetyStock ?? product.safetyStock;
+        let nextMin = dto.minStock ?? product.minStock;
+        // If packing/lotSize changed AND the current safety/min match the old
+        // auto-formula result, recompute; otherwise respect the user override.
+        const autoSafetyFromOldLot = product.lotSize;
+        const autoMinFromOldPack = product.packing;
+        const safetyWasAuto = product.safetyStock === autoSafetyFromOldLot;
+        const minWasAuto = product.minStock === autoMinFromOldPack;
+        if (
+          dto.lotSize !== undefined &&
+          safetyWasAuto &&
+          dto.safetyStock === undefined
+        ) {
+          nextSafety = nextLotSize;
+        }
+        if (
+          dto.packing !== undefined &&
+          minWasAuto &&
+          dto.minStock === undefined
+        ) {
+          nextMin = nextPacking;
+        }
+        // Recompute from scratch if any input changed and no override was given
+        if (
+          dto.safetyStock === undefined &&
+          (dto.lotSize !== undefined || dto.packing !== undefined)
+        ) {
+          nextSafety = nextLotSize;
+        }
+        if (
+          dto.minStock === undefined &&
+          (dto.packing !== undefined || dto.lotSize !== undefined)
+        ) {
+          nextMin = nextPacking;
+        }
+        // Final guard
+        if (nextSafety < 0) nextSafety = 0;
+        if (nextMin < 0) nextMin = 0;
+
+        // Validate any FK that was provided
+        await this.validateForeignKeys(
+          manager,
+          {
+            unitId: dto.unitId,
+            modelId: dto.modelId,
+            customerId: dto.customerId,
+            locationId: dto.locationId,
+            productTypeId: dto.productTypeId,
+            deliveryTypeId: dto.deliveryTypeId,
+            loadingPointId: dto.loadingPointId,
+            processLineId: dto.processLineId,
+          },
+          /*partial*/ true,
+        );
+
+        // Code uniqueness
+        if (dto.code && dto.code !== product.code) {
+          const existing = await repo.findOne({ where: { code: dto.code } });
+          if (existing) {
+            throw new ConflictException(
+              `Product code "${dto.code}" already exists`,
+            );
+          }
+        }
+
+        Object.assign(product, {
+          code: dto.code ?? product.code,
+          name: dto.name ?? product.name,
+          unitId: dto.unitId ?? product.unitId,
+          modelId: dto.modelId ?? product.modelId,
+          customerId: dto.customerId ?? product.customerId,
+          packing: nextPacking,
+          locationId: dto.locationId ?? product.locationId,
+          safetyStock: nextSafety,
+          productTypeId: dto.productTypeId ?? product.productTypeId,
+          lotSize: nextLotSize,
+          minStock: nextMin,
+          deliveryTypeId: dto.deliveryTypeId ?? product.deliveryTypeId,
+          scale: dto.scale ?? product.scale,
+          loadingPointId: dto.loadingPointId ?? product.loadingPointId,
+          processLineId: dto.processLineId ?? product.processLineId,
+          productImagePath: nextImagePath,
+          isActive: dto.isActive ?? product.isActive,
+          updatedBy: userId,
+        });
+
+        await repo.save(product);
+        const reloaded = await repo.findOne({
+          where: { id },
+          relations: [
+            'unit',
+            'model',
+            'customer',
+            'location',
+            'productType',
+            'deliveryType',
+            'loadingPoint',
+            'processLine',
+          ],
+        });
+        if (!reloaded) {
+          throw new NotFoundException(
+            `Product with id ${id} not found after update`,
+          );
+        }
+        return reloaded;
       });
-      if (!reloaded) {
-        throw new NotFoundException(`Product with id ${id} not found after update`);
-      }
-      return reloaded as ProductWithRelations;
-    });
+    } catch (error) {
+      await this.compensatePromotedImage(promotedImagePath);
+      throw error;
+    }
+
+    if (
+      imageChanged &&
+      previousImagePath &&
+      previousImagePath !== result.productImagePath
+    ) {
+      await this.discardCommittedImage(previousImagePath);
+    }
+    return result;
+  }
+
+  private getImageStorage(): ProductImageStorageService {
+    if (!this.imageStorage) {
+      throw new Error('ProductsService image storage is not configured');
+    }
+    return this.imageStorage;
+  }
+
+  private async compensatePromotedImage(imagePath?: string): Promise<void> {
+    if (!imagePath) return;
+    try {
+      await this.getImageStorage().discard(imagePath);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to compensate Product image ${imagePath}`,
+        error,
+      );
+    }
+  }
+
+  private async discardCommittedImage(imagePath: string): Promise<void> {
+    try {
+      await this.getImageStorage().discard(imagePath);
+    } catch (error) {
+      this.logger.warn(`Failed to discard Product image ${imagePath}`, error);
+    }
   }
 
   async deactivate(id: string, userId: string): Promise<ProductWithRelations> {
     return this.getDataSource().transaction(async (manager) => {
       const repo = manager.getRepository(Product);
       const product = await repo.findOne({ where: { id } });
-      if (!product) throw new NotFoundException(`Product with id ${id} not found`);
+      if (!product)
+        throw new NotFoundException(`Product with id ${id} not found`);
       product.isActive = false;
       product.updatedBy = userId;
       await repo.save(product);
@@ -456,9 +595,11 @@ export class ProductsService {
         ],
       });
       if (!reloaded) {
-        throw new NotFoundException(`Product with id ${id} not found after deactivate`);
+        throw new NotFoundException(
+          `Product with id ${id} not found after deactivate`,
+        );
       }
-      return reloaded as ProductWithRelations;
+      return reloaded;
     });
   }
 
@@ -466,7 +607,8 @@ export class ProductsService {
     return this.getDataSource().transaction(async (manager) => {
       const repo = manager.getRepository(Product);
       const product = await repo.findOne({ where: { id } });
-      if (!product) throw new NotFoundException(`Product with id ${id} not found`);
+      if (!product)
+        throw new NotFoundException(`Product with id ${id} not found`);
       product.isActive = true;
       product.updatedBy = userId;
       await repo.save(product);
@@ -484,9 +626,11 @@ export class ProductsService {
         ],
       });
       if (!reloaded) {
-        throw new NotFoundException(`Product with id ${id} not found after restore`);
+        throw new NotFoundException(
+          `Product with id ${id} not found after restore`,
+        );
       }
-      return reloaded as ProductWithRelations;
+      return reloaded;
     });
   }
 
@@ -510,14 +654,60 @@ export class ProductsService {
     partial = false,
   ): Promise<Record<string, unknown>> {
     const checks: Array<[string, () => Promise<unknown>]> = [
-      ['unitId', () => manager.getRepository(Unit).findOne({ where: { id: refs.unitId } })],
-      ['modelId', () => manager.getRepository(ProductModel).findOne({ where: { id: refs.modelId } })],
-      ['customerId', () => manager.getRepository(Customer).findOne({ where: { id: refs.customerId } })],
-      ['locationId', () => manager.getRepository(Location).findOne({ where: { id: refs.locationId } })],
-      ['productTypeId', () => manager.getRepository(ProductType).findOne({ where: { id: refs.productTypeId } })],
-      ['deliveryTypeId', () => manager.getRepository(DeliveryType).findOne({ where: { id: refs.deliveryTypeId } })],
-      ['loadingPointId', () => manager.getRepository(LoadingPoint).findOne({ where: { id: refs.loadingPointId } })],
-      ['processLineId', () => manager.getRepository(ProcessLine).findOne({ where: { id: refs.processLineId } })],
+      [
+        'unitId',
+        () =>
+          manager.getRepository(Unit).findOne({ where: { id: refs.unitId } }),
+      ],
+      [
+        'modelId',
+        () =>
+          manager
+            .getRepository(ProductModel)
+            .findOne({ where: { id: refs.modelId } }),
+      ],
+      [
+        'customerId',
+        () =>
+          manager
+            .getRepository(Customer)
+            .findOne({ where: { id: refs.customerId } }),
+      ],
+      [
+        'locationId',
+        () =>
+          manager
+            .getRepository(Location)
+            .findOne({ where: { id: refs.locationId } }),
+      ],
+      [
+        'productTypeId',
+        () =>
+          manager
+            .getRepository(ProductType)
+            .findOne({ where: { id: refs.productTypeId } }),
+      ],
+      [
+        'deliveryTypeId',
+        () =>
+          manager
+            .getRepository(DeliveryType)
+            .findOne({ where: { id: refs.deliveryTypeId } }),
+      ],
+      [
+        'loadingPointId',
+        () =>
+          manager
+            .getRepository(LoadingPoint)
+            .findOne({ where: { id: refs.loadingPointId } }),
+      ],
+      [
+        'processLineId',
+        () =>
+          manager
+            .getRepository(ProcessLine)
+            .findOne({ where: { id: refs.processLineId } }),
+      ],
     ];
 
     const found: Record<string, unknown> = {};
