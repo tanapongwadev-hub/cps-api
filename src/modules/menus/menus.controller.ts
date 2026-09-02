@@ -16,6 +16,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RoleCode } from '../../common/enums/role-code.enum';
 import { CreateMenuDto } from './dto/create-menu.dto';
 import { UpdateMenuDto } from './dto/update-menu.dto';
+import { ReorderMenusDto } from './dto/reorder-menus.dto';
 
 @Controller('menus')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -39,6 +40,16 @@ export class MenusController {
   @Get('tree')
   findTree() {
     return this.menusService.findTree();
+  }
+
+  @Get('management-tree')
+  findManagementTree() {
+    return this.menusService.findManagementTree();
+  }
+
+  @Patch('reorder')
+  reorder(@Body() dto: ReorderMenusDto) {
+    return this.menusService.reorder(dto);
   }
 
   @Get(':id')

@@ -142,16 +142,67 @@ Update body supports optional `firstName`, `lastName`, `email`, `telephone`, and
 
 ### 4.4 Menus — `/menus`
 
-| Method   | Path          | Input                                 |
-| -------- | ------------- | ------------------------------------- |
-| `GET`    | `/menus`      | Query `page=1`, `limit=20`, `search?` |
-| `GET`    | `/menus/tree` | none; hierarchical tree               |
-| `GET`    | `/menus/:id`  | none                                  |
-| `POST`   | `/menus`      | `CreateMenuDto`                       |
-| `PATCH`  | `/menus/:id`  | `UpdateMenuDto`                       |
-| `DELETE` | `/menus/:id`  | none                                  |
+| Method   | Path                     | Input                                 |
+| -------- | ------------------------ | ------------------------------------- |
+| `GET`    | `/menus`                 | Query `page=1`, `limit=20`, `search?` |
+| `GET`    | `/menus/tree`            | none; hierarchical tree               |
+| `GET`    | `/menus/management-tree` | none                                  |
+| `GET`    | `/menus/:id`             | none                                  |
+| `POST`   | `/menus`                 | `CreateMenuDto`                       |
+| `PATCH`  | `/menus/reorder`         | `ReorderMenusDto`                     |
+| `PATCH`  | `/menus/:id`             | `UpdateMenuDto`                       |
+| `DELETE` | `/menus/:id`             | none                                  |
 
 Create supports `code`, `nameTh`, `nameEn`, `menuType?` (`MAIN|MENU|BUTTON|SUB`), `path?`, `icon?`, `sortOrder?`, `parentId?`, nested `permissions?`, and nested `submenus?`. A nested permission contains `permissionCode`, `permissionName`, `resource`, and `action`.
+
+`GET /menus/management-tree` returns every menu, including hidden (`isVisible: false`) and inactive (`isActive: false`) records, as an ordered nested tree. The deterministic `version` covers every record's `id`, `parentId`, `sortOrder`, `menuType`, and `updatedAt` and is the concurrency token required by the reorder endpoint.
+
+```json
+{
+  "version": "sha256:6df2d399b7d89be26f16d4a658c034440f65ee986b5f276d5e1f7c57404c41e9",
+  "menus": [
+    {
+      "id": "1",
+      "parentId": null,
+      "code": "DASHBOARD",
+      "nameTh": "แดชบอร์ด",
+      "nameEn": "Dashboard",
+      "menuType": "MAIN",
+      "path": "/dashboard",
+      "icon": "layout-dashboard",
+      "sortOrder": 0,
+      "isVisible": true,
+      "isActive": true,
+      "children": []
+    }
+  ]
+}
+```
+
+`PATCH /menus/reorder` atomically replaces the complete menu layout. The request must contain the current management-tree `version` and every menu ID exactly once:
+
+```json
+{
+  "version": "sha256:6df2d399b7d89be26f16d4a658c034440f65ee986b5f276d5e1f7c57404c41e9",
+  "items": [
+    { "id": "1", "parentId": null, "sortOrder": 0 },
+    { "id": "2", "parentId": "1", "sortOrder": 0 }
+  ]
+}
+```
+
+Each `id` must be a non-empty string, `parentId` must be `null` or a non-empty string, and `sortOrder` must be an integer at least `0`. The submitted IDs must exactly match the stored menu set. Parents must exist; self-parenting, cycles, children under `BUTTON` menus, and duplicate sibling positions are rejected. Every sibling list must use contiguous positions starting at `0`, and the maximum tree depth is 4 levels (a root is level 1). Non-button menu types are derived from placement (`MAIN` at the root, otherwise `SUB`); `BUTTON` remains `BUTTON`.
+
+The server starts a transaction, locks the complete menu set, checks the version, validates the complete projected layout, and saves only changed records. A stale version returns `409 Conflict` with `Menu arrangement has changed. Refresh before saving again.` Validation failures return `400 Bad Request`. Any failure rolls back without a partial reorder.
+
+```json
+{
+  "version": "sha256:38ba2df9784456ae2bbeb8e8bb83c1bdde06dc907304839468520683688656c8",
+  "updatedCount": 2
+}
+```
+
+The response version is computed from the merged post-save menu set. A valid no-op returns `updatedCount: 0` and does not issue menu updates.
 
 ### 4.5 Permissions — `/permissions`
 

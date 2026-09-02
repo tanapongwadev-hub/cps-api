@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In, QueryRunner } from 'typeorm';
@@ -14,7 +15,14 @@ import {
   CreateMenuPermissionDto,
 } from './dto/create-menu.dto';
 import { UpdateMenuDto } from './dto/update-menu.dto';
+import { ReorderMenusDto } from './dto/reorder-menus.dto';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
+import {
+  buildManagementTree,
+  computeMenuTreeVersion,
+  MenuLayoutValidationError,
+  validateAndProjectMenuLayout,
+} from './menu-tree-ordering';
 
 @Injectable()
 export class MenusService {
@@ -101,6 +109,83 @@ export class MenusService {
     });
 
     return rootMenus;
+  }
+
+  async findManagementTree() {
+    const menus = await this.menuRepository.find();
+
+    return {
+      version: computeMenuTreeVersion(menus),
+      menus: buildManagementTree(menus),
+    };
+  }
+
+  async reorder(dto: ReorderMenusDto) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const lockedMenus = await queryRunner.manager
+        .getRepository(Menu)
+        .createQueryBuilder('menu')
+        .setLock('pessimistic_write')
+        .getMany();
+
+      if (computeMenuTreeVersion(lockedMenus) !== dto.version) {
+        throw new ConflictException(
+          'Menu arrangement has changed. Refresh before saving again.',
+        );
+      }
+
+      let projectedLayout;
+      try {
+        projectedLayout = validateAndProjectMenuLayout(lockedMenus, dto.items);
+      } catch (error) {
+        if (error instanceof MenuLayoutValidationError) {
+          throw new BadRequestException(error.message);
+        }
+        throw error;
+      }
+
+      const menusById = new Map(lockedMenus.map((menu) => [menu.id, menu]));
+      const changedMenus = projectedLayout
+        .filter((projected) => {
+          const current = menusById.get(projected.id);
+          return (
+            current?.parentId !== projected.parentId ||
+            current.sortOrder !== projected.sortOrder ||
+            current.menuType !== projected.menuType
+          );
+        })
+        .map(
+          (projected) =>
+            ({
+              ...menusById.get(projected.id)!,
+              ...projected,
+            }) as Menu,
+        );
+
+      const savedMenus =
+        changedMenus.length > 0
+          ? await queryRunner.manager.save(Menu, changedMenus)
+          : [];
+      const savedById = new Map(savedMenus.map((menu) => [menu.id, menu]));
+      const postSaveMenus = lockedMenus.map(
+        (menu) => savedById.get(menu.id) ?? menu,
+      );
+
+      await queryRunner.commitTransaction();
+      return {
+        version: computeMenuTreeVersion(postSaveMenus),
+        updatedCount: changedMenus.length,
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async findOne(id: string) {
