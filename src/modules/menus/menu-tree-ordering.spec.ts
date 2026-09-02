@@ -54,6 +54,13 @@ describe('menu tree ordering', () => {
       sortOrder,
     }));
 
+  const duplicateSourceRecords = (): Menu[] => [
+    ...records,
+    menu('4', '1', 1, {
+      updatedAt: new Date('2026-09-02T09:00:00.000Z'),
+    }),
+  ];
+
   const replaceItem = (
     id: string,
     replacement: Partial<ReorderMenuItemDto>,
@@ -102,6 +109,35 @@ describe('menu tree ordering', () => {
     expect(computeMenuTreeVersion(changed)).not.toBe(
       computeMenuTreeVersion(records),
     );
+  });
+
+  it('rejects duplicate source records before building the management tree', () => {
+    expect(() => buildManagementTree(duplicateSourceRecords())).toThrow(
+      MenuLayoutValidationError,
+    );
+    expect(() => buildManagementTree(duplicateSourceRecords())).toThrow(
+      'Menu records contain duplicate ID 4.',
+    );
+  });
+
+  it('rejects duplicate source records deterministically before hashing', () => {
+    const duplicateRecords = duplicateSourceRecords();
+
+    expect(() => computeMenuTreeVersion(duplicateRecords)).toThrow(
+      'Menu records contain duplicate ID 4.',
+    );
+    expect(() =>
+      computeMenuTreeVersion([...duplicateRecords].reverse()),
+    ).toThrow('Menu records contain duplicate ID 4.');
+  });
+
+  it('rejects duplicate source records before validating a projection', () => {
+    expect(() =>
+      validateAndProjectMenuLayout(duplicateSourceRecords(), currentItems()),
+    ).toThrow(MenuLayoutValidationError);
+    expect(() =>
+      validateAndProjectMenuLayout(duplicateSourceRecords(), currentItems()),
+    ).toThrow('Menu records contain duplicate ID 4.');
   });
 
   it('projects a valid cross-level move and normalizes non-button types', () => {

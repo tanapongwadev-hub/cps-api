@@ -33,7 +33,21 @@ export class MenuLayoutValidationError extends Error {
   }
 }
 
+function assertUniqueMenuRecordIds(records: Menu[]): void {
+  const seenIds = new Set<string>();
+
+  for (const menu of records) {
+    if (seenIds.has(menu.id)) {
+      throw new MenuLayoutValidationError(
+        `Menu records contain duplicate ID ${menu.id}.`,
+      );
+    }
+    seenIds.add(menu.id);
+  }
+}
+
 export function buildManagementTree(records: Menu[]): ManagementMenuNode[] {
+  assertUniqueMenuRecordIds(records);
   const nodes = new Map<string, ManagementMenuNode>();
 
   for (const menu of records) {
@@ -79,6 +93,7 @@ export function buildManagementTree(records: Menu[]): ManagementMenuNode[] {
 }
 
 export function computeMenuTreeVersion(records: Menu[]): string {
+  assertUniqueMenuRecordIds(records);
   const versionInput = records
     .map((menu) => ({
       id: menu.id,
@@ -98,6 +113,7 @@ export function validateAndProjectMenuLayout(
   records: Menu[],
   items: ReorderMenuItemDto[],
 ): ProjectedMenuLayout[] {
+  assertUniqueMenuRecordIds(records);
   const byId = new Map(records.map((menu) => [menu.id, menu]));
   const childrenByParent = new Map<string | null, ReorderMenuItemDto[]>();
   const incomingById = new Map<string, string | null>();
