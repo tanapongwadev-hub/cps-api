@@ -10,6 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Product } from './product.entity';
+import { ProcessStep } from './process-step.entity';
 
 export enum ProductWorkflowStatus {
   DRAFT = 'DRAFT',
@@ -91,11 +92,16 @@ export class ProductWorkflowStep {
   @Column({ name: 'sort_order', type: 'integer', default: 0 })
   sortOrder: number;
 
-  /** ชื่อขั้นตอน เช่น "นำไปเชื่อมชิ้นงาน", "นำไป CNC", "ปิดกระบวนการผลิต" */
-  @Column({ name: 'step_name', type: 'varchar', length: 255 })
-  stepName: string;
+  /**
+   * อ้างอิงขั้นตอนกระบวนการผลิตจาก master data (process_steps) — เลือกจาก
+   * dropdown แทนการพิมพ์ชื่อขั้นตอนแบบอิสระ (เดิมเป็น step_name free-text
+   * column, เปลี่ยนเป็น FK นี้แทน)
+   */
+  @Index()
+  @Column({ name: 'process_step_id', type: 'bigint' })
+  processStepId: string;
 
-  /** คำอธิบายเพิ่มเติมของขั้นตอน (ไม่บังคับ) */
+  /** คำอธิบายเพิ่มเติมของขั้นตอนนี้เฉพาะ workflow นี้ (ไม่บังคับ) */
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
@@ -116,4 +122,8 @@ export class ProductWorkflowStep {
   })
   @JoinColumn({ name: 'workflow_id' })
   workflow: ProductWorkflow;
+
+  @ManyToOne(() => ProcessStep, { eager: false })
+  @JoinColumn({ name: 'process_step_id' })
+  processStep: ProcessStep;
 }

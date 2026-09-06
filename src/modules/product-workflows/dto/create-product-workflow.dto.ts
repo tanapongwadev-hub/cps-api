@@ -6,7 +6,6 @@ import {
   IsOptional,
   IsString,
   Matches,
-  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -19,16 +18,10 @@ function nullableTrimmedString(params: TransformFnParams): unknown {
   return trimmed === '' ? null : trimmed;
 }
 
-function trimString(params: TransformFnParams): unknown {
-  const value = params.value;
-  return typeof value === 'string' ? value.trim() : value;
-}
-
 export class CreateProductWorkflowStepDto {
-  @Transform(trimString)
   @IsString()
-  @MaxLength(255)
-  stepName: string;
+  @Matches(POSITIVE_DECIMAL_ID)
+  processStepId: string;
 
   @Transform(nullableTrimmedString)
   @IsOptional()

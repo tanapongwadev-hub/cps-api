@@ -30,6 +30,7 @@ import { StockBalancesModule } from './modules/stock-balances/stock-balances.mod
 import { ProductsModule } from './modules/products/products.module';
 import { BomsModule } from './modules/boms/boms.module';
 import { ProductWorkflowsModule } from './modules/product-workflows/product-workflows.module';
+import { ProcessStepsModule } from './modules/process-steps/process-steps.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { ProductWorkflowsModule } from './modules/product-workflows/product-work
     ProductsModule,
     BomsModule,
     ProductWorkflowsModule,
+    ProcessStepsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

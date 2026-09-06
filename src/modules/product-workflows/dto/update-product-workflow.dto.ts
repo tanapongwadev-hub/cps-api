@@ -1,16 +1,13 @@
 import { Transform, TransformFnParams } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
+
+const POSITIVE_DECIMAL_ID = /^[1-9]\d*$/;
 
 function nullableTrimmedString(params: TransformFnParams): unknown {
   const value = params.value;
   if (typeof value !== 'string') return value;
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
-}
-
-function trimString(params: TransformFnParams): unknown {
-  const value = params.value;
-  return typeof value === 'string' ? value.trim() : value;
 }
 
 export class UpdateProductWorkflowDto {
@@ -25,10 +22,9 @@ export class UpdateProductWorkflowDto {
 }
 
 export class AddProductWorkflowStepDto {
-  @Transform(trimString)
   @IsString()
-  @MaxLength(255)
-  stepName: string;
+  @Matches(POSITIVE_DECIMAL_ID)
+  processStepId: string;
 
   @Transform(nullableTrimmedString)
   @IsOptional()

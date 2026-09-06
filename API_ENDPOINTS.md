@@ -576,6 +576,7 @@ Unknown material returns `404 Material not found`.
 | Product        | `PRODUCTS_VIEW                                                                                   | CREATE | UPDATE | DELETE                                                                                                                   | RESTORE` |
 | BOM            | `BOMS_VIEW                                                                                       | CREATE | UPDATE | DELETE`; constants `BOMS_ACTIVATE`, `BOMS_DEACTIVATE`exist but activate/deactivate routes currently require`BOMS_UPDATE` |
 | Product Workflow | `PRODUCT_WORKFLOWS_VIEW                                                                        | CREATE | UPDATE | DELETE` — activate/deactivate routes require `PRODUCT_WORKFLOWS_UPDATE`, same pattern as BOMs |
+| Process Step (master) | `PROCESS_STEP_VIEW`, `PROCESS_STEP_CREATE`, `PROCESS_STEP_UPDATE`, `PROCESS_STEP_DELETE` — restore uses `PROCESS_STEP_UPDATE`, same pattern as Delivery type |
 
 ## 13. HTTP status/error guide
 
@@ -622,18 +623,35 @@ Create body:
   "productId": "1",
   "remark": null,
   "steps": [
-    { "stepName": "สั่งผลิต Product A", "description": null },
-    { "stepName": "นำไปเชื่อมชิ้นงาน", "description": null },
-    { "stepName": "นำไป CNC", "description": null },
-    { "stepName": "นำไปปั๊ม", "description": null },
-    { "stepName": "นำไปขัด", "description": null },
-    { "stepName": "นำไปเช็ค", "description": null },
-    { "stepName": "นำไป QC", "description": null },
-    { "stepName": "ปิดกระบวนการผลิต", "description": null }
+    { "processStepId": "1", "description": null },
+    { "processStepId": "2", "description": null },
+    { "processStepId": "3", "description": null },
+    { "processStepId": "4", "description": null },
+    { "processStepId": "5", "description": null },
+    { "processStepId": "6", "description": null },
+    { "processStepId": "7", "description": null },
+    { "processStepId": "8", "description": null }
   ]
 }
 ```
 
-Steps: 1–100, each just a free-text `stepName` (max 255 chars) + optional `description` — there is no separate "process type" master-data table backing a step, by design (mirrors how a material's `processLineName` is a plain string, not a FK). `sortOrder` is server-assigned from array position (1-based) on create/append, not client-supplied. Update accepts `remark?` and required string `updatedAt`; the current service does not compare this token (same as BOMs' `UpdateBomDto`). Like `AddBomItemDto`, `AddProductWorkflowStepDto` has no `sortOrder` param — an appended step always goes to the end.
+Steps: 1–100, each a `processStepId` FK into `/process-steps` (see § 16) + optional per-step `description` (a free-text override/note, not the step's name). **Changed 2026-09-06**: a step used to be a plain free-text `stepName` column; it is now a required FK so the frontend can offer a dropdown of master data instead of a text field (`process_step_id BIGINT NOT NULL REFERENCES master.process_steps(id) ON DELETE RESTRICT`, see migration `1786700000007-AddProcessStepsMaster.ts`). `create`/`addStep` both 409 (`ConflictException`) if any `processStepId` doesn't exist. The list/get responses still return a `stepName` field per step for display convenience — it's now derived by joining `processStep.nameTh` server-side (`ProductWorkflowsService#buildResponse`), not stored on the step row; also returns `processStepId`/`processStepCode`. `sortOrder` is server-assigned from array position (1-based) on create/append, not client-supplied. Update accepts `remark?` and required string `updatedAt`; the current service does not compare this token (same as BOMs' `UpdateBomDto`). Like `AddBomItemDto`, `AddProductWorkflowStepDto` has no `sortOrder` param — an appended step always goes to the end.
 
 Permission codes (`PRODUCT_WORKFLOWS_VIEW/CREATE/UPDATE/DELETE`) are not seeded into any permissions table, same as `BOMS_*` — they work for `SUPER_ADMIN` (which bypasses permission checks) but would need a seed row to work for a non-super-admin role.
+
+## 16. Process Steps (master data) — `/process-steps`
+
+Master data catalog for Product Workflow steps (§ 15) — full CRUD, structurally a mirror of `/delivery-types` (same soft-delete-via-`isActive`/restore shape, same optimistic-concurrency `updatedAt` on update). Added 2026-09-06 so a workflow step can be picked from a dropdown instead of typed as free text.
+
+| Method   | Path                      | Permission             | Behavior                                    |
+| -------- | ------------------------- | ----------------------- | -------------------------------------------- |
+| `GET`    | `/process-steps`          | `PROCESS_STEP_VIEW`     | Paginated list (`page`, `limit`, `search`, `isActive`, `sortBy`, `sortOrder`) |
+| `GET`    | `/process-steps/:id`      | `PROCESS_STEP_VIEW`     | One process step                             |
+| `POST`   | `/process-steps`          | `PROCESS_STEP_CREATE`   | Create (`code` unique, `nameTh` required)    |
+| `PATCH`  | `/process-steps/:id`      | `PROCESS_STEP_UPDATE`   | Update; requires matching `updatedAt`        |
+| `DELETE` | `/process-steps/:id`      | `PROCESS_STEP_DELETE`   | Soft-deactivate (`isActive: false`), not a hard delete |
+| `PATCH`  | `/process-steps/:id/restore` | `PROCESS_STEP_UPDATE` | Reactivate (`isActive: true`)              |
+
+Row shape: `{ id, code, nameTh, nameEn, description, isActive, createdBy, updatedBy, createdAt, updatedAt }`. Seeded on creation (migration `1786700000007-AddProcessStepsMaster.ts`) with 8 example rows (`PS-01` สั่งผลิต … `PS-08` ปิดกระบวนการผลิต) — an editable starting catalog, not a fixed enum; add/deactivate more via this CRUD. `product_workflow_steps.process_step_id` has `ON DELETE RESTRICT` against this table, so a process step referenced by any workflow step cannot be hard-deleted (not that this API exposes a hard delete anyway — only soft-deactivate).
+
+Permission codes (`PROCESS_STEP_VIEW/CREATE/UPDATE/DELETE`) are not seeded into any permissions table yet — same caveat as `BOMS_*`/`PRODUCT_WORKFLOWS_*`, work for `SUPER_ADMIN` only until seeded.

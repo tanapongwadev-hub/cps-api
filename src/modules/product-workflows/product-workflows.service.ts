@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,6 +12,7 @@ import {
   ProductWorkflowStep,
   ProductWorkflowStatus,
 } from '../../entities/master/product-workflow.entity';
+import { ProcessStep } from '../../entities/master/process-step.entity';
 import { CreateProductWorkflowDto } from './dto/create-product-workflow.dto';
 import {
   UpdateProductWorkflowDto,
@@ -24,6 +26,8 @@ export type ProductWorkflowWithSteps = Omit<
   steps: Array<{
     id: string;
     sortOrder: number;
+    processStepId: string;
+    processStepCode: string;
     stepName: string;
     description: string | null;
   }>;
@@ -36,6 +40,8 @@ export class ProductWorkflowsService {
   constructor(
     @InjectRepository(ProductWorkflow)
     private workflowRepository: Repository<ProductWorkflow>,
+    @InjectRepository(ProcessStep)
+    private processStepRepository: Repository<ProcessStep>,
     private dataSource?: DataSource,
   ) {}
 
@@ -50,7 +56,9 @@ export class ProductWorkflowsService {
       .map((step) => ({
         id: step.id,
         sortOrder: step.sortOrder,
-        stepName: step.stepName,
+        processStepId: step.processStepId,
+        processStepCode: (step as any).processStep?.code ?? '',
+        stepName: (step as any).processStep?.nameTh ?? '',
         description: step.description,
       }));
 
@@ -80,7 +88,7 @@ export class ProductWorkflowsService {
   ): Promise<ProductWorkflowWithSteps> {
     const workflow = await manager.getRepository(ProductWorkflow).findOne({
       where: { id },
-      relations: ['steps'],
+      relations: ['steps', 'steps.processStep'],
     });
     if (!workflow) {
       throw new NotFoundException(
@@ -90,10 +98,22 @@ export class ProductWorkflowsService {
     return this.buildResponse(workflow);
   }
 
+  private async assertProcessStepsExist(
+    manager: import('typeorm').EntityManager,
+    processStepIds: string[],
+  ): Promise<void> {
+    const uniqueIds = [...new Set(processStepIds)];
+    const processStepRepo = manager.getRepository(ProcessStep);
+    const found = await processStepRepo.findByIds(uniqueIds);
+    if (found.length !== uniqueIds.length) {
+      throw new ConflictException('One or more process step IDs are invalid');
+    }
+  }
+
   async findByProduct(productId: string): Promise<ProductWorkflowWithSteps[]> {
     const workflows = await this.workflowRepository.find({
       where: { productId },
-      relations: ['steps'],
+      relations: ['steps', 'steps.processStep'],
       order: { createdAt: 'DESC' },
     });
     return workflows.map((workflow) => this.buildResponse(workflow));
@@ -102,7 +122,7 @@ export class ProductWorkflowsService {
   async findOne(id: string): Promise<ProductWorkflowWithSteps> {
     const workflow = await this.workflowRepository.findOne({
       where: { id },
-      relations: ['steps'],
+      relations: ['steps', 'steps.processStep'],
     });
     if (!workflow)
       throw new NotFoundException(`ProductWorkflow with id ${id} not found`);
@@ -115,6 +135,11 @@ export class ProductWorkflowsService {
   ): Promise<ProductWorkflowWithSteps> {
     return this.getDataSource().transaction(async (manager) => {
       const workflowRepo = manager.getRepository(ProductWorkflow);
+
+      await this.assertProcessStepsExist(
+        manager,
+        dto.steps.map((step) => step.processStepId),
+      );
 
       const existingForProduct = await workflowRepo.find({
         where: { productId: dto.productId },
@@ -134,7 +159,7 @@ export class ProductWorkflowsService {
         createdBy: userId,
         steps: dto.steps.map((step, idx) => ({
           sortOrder: idx + 1,
-          stepName: step.stepName,
+          processStepId: step.processStepId,
           description: step.description ?? null,
           createdBy: userId,
         })),
@@ -191,6 +216,8 @@ export class ProductWorkflowsService {
         );
       }
 
+      await this.assertProcessStepsExist(manager, [dto.processStepId]);
+
       const stepRepo = manager.getRepository(ProductWorkflowStep);
       const maxSort = workflow.steps?.length
         ? Math.max(...workflow.steps.map((s) => s.sortOrder))
@@ -199,7 +226,7 @@ export class ProductWorkflowsService {
       const newStep = stepRepo.create({
         workflowId,
         sortOrder: maxSort + 1,
-        stepName: dto.stepName,
+        processStepId: dto.processStepId,
         description: dto.description ?? null,
         createdBy: userId,
       });
