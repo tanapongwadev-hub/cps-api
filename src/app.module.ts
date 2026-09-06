@@ -29,6 +29,7 @@ import { MaterialsDisbursementModule } from './modules/materials-disbursement/ma
 import { StockBalancesModule } from './modules/stock-balances/stock-balances.module';
 import { ProductsModule } from './modules/products/products.module';
 import { BomsModule } from './modules/boms/boms.module';
+import { ProductWorkflowsModule } from './modules/product-workflows/product-workflows.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { BomsModule } from './modules/boms/boms.module';
     StockBalancesModule,
     ProductsModule,
     BomsModule,
+    ProductWorkflowsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -575,6 +575,7 @@ Unknown material returns `404 Material not found`.
 | Disbursement   | `MATERIALS_DISBURSEMENT_VIEW                                                                     | CREATE | UPDATE | DELETE                                                                                                                   | CONFIRM  | CANCEL` |
 | Product        | `PRODUCTS_VIEW                                                                                   | CREATE | UPDATE | DELETE                                                                                                                   | RESTORE` |
 | BOM            | `BOMS_VIEW                                                                                       | CREATE | UPDATE | DELETE`; constants `BOMS_ACTIVATE`, `BOMS_DEACTIVATE`exist but activate/deactivate routes currently require`BOMS_UPDATE` |
+| Product Workflow | `PRODUCT_WORKFLOWS_VIEW                                                                        | CREATE | UPDATE | DELETE` — activate/deactivate routes require `PRODUCT_WORKFLOWS_UPDATE`, same pattern as BOMs |
 
 ## 13. HTTP status/error guide
 
@@ -597,3 +598,42 @@ Not every module uses the same exception class for an equivalent semantic condit
 - `/customers`, `/locations`, `/product-models`, `/product-types`, `/process-lines` are not implemented controllers
 - There is no generic `/uploads` API; Material/Product images are served statically and staged through `/materials/images` or `/products/images`
 - Swagger is useful for discovery but is incomplete because many DTOs/controllers lack comprehensive Swagger decorators
+
+## 15. Product Workflows — `/product-workflows`
+
+Production routing for a product — the ordered sequence of process steps a product must go through (e.g. order production → weld → CNC → stamp → polish → inspect → QC → close), as distinct from a BOM (which is *what materials* are used, not *what steps* production goes through). Same versioning/status shape as BOMs (`DRAFT` → `ACTIVE` → `INACTIVE`, one `ACTIVE` per product, `activate` demotes any other `ACTIVE` workflow of the same product), added 2026-09-06.
+
+| Method   | Path                                  | Permission                | Behavior                                                    |
+| -------- | -------------------------------------- | -------------------------- | ------------------------------------------------------------ |
+| `GET`    | `/product-workflows/product/:productId` | `PRODUCT_WORKFLOWS_VIEW`   | Workflow versions for product, newest first                  |
+| `GET`    | `/product-workflows/:id`               | `PRODUCT_WORKFLOWS_VIEW`   | Workflow with ordered steps                                   |
+| `POST`   | `/product-workflows`                   | `PRODUCT_WORKFLOWS_CREATE` | Create next version in DRAFT                                  |
+| `PATCH`  | `/product-workflows/:id`               | `PRODUCT_WORKFLOWS_UPDATE` | Update header (`remark`) only; ACTIVE prohibited              |
+| `POST`   | `/product-workflows/:id/steps`         | `PRODUCT_WORKFLOWS_UPDATE` | Append step; ACTIVE prohibited                                 |
+| `DELETE` | `/product-workflows/:id/steps/:stepId` | `PRODUCT_WORKFLOWS_UPDATE` | Remove step; ACTIVE prohibited                                 |
+| `PATCH`  | `/product-workflows/:id/activate`      | `PRODUCT_WORKFLOWS_UPDATE` | Activate and deactivate other ACTIVE workflows of product      |
+| `PATCH`  | `/product-workflows/:id/deactivate`    | `PRODUCT_WORKFLOWS_UPDATE` | Set INACTIVE                                                   |
+| `DELETE` | `/product-workflows/:id`               | `PRODUCT_WORKFLOWS_DELETE` | Hard delete; ACTIVE prohibited                                 |
+
+Create body:
+
+```json
+{
+  "productId": "1",
+  "remark": null,
+  "steps": [
+    { "stepName": "สั่งผลิต Product A", "description": null },
+    { "stepName": "นำไปเชื่อมชิ้นงาน", "description": null },
+    { "stepName": "นำไป CNC", "description": null },
+    { "stepName": "นำไปปั๊ม", "description": null },
+    { "stepName": "นำไปขัด", "description": null },
+    { "stepName": "นำไปเช็ค", "description": null },
+    { "stepName": "นำไป QC", "description": null },
+    { "stepName": "ปิดกระบวนการผลิต", "description": null }
+  ]
+}
+```
+
+Steps: 1–100, each just a free-text `stepName` (max 255 chars) + optional `description` — there is no separate "process type" master-data table backing a step, by design (mirrors how a material's `processLineName` is a plain string, not a FK). `sortOrder` is server-assigned from array position (1-based) on create/append, not client-supplied. Update accepts `remark?` and required string `updatedAt`; the current service does not compare this token (same as BOMs' `UpdateBomDto`). Like `AddBomItemDto`, `AddProductWorkflowStepDto` has no `sortOrder` param — an appended step always goes to the end.
+
+Permission codes (`PRODUCT_WORKFLOWS_VIEW/CREATE/UPDATE/DELETE`) are not seeded into any permissions table, same as `BOMS_*` — they work for `SUPER_ADMIN` (which bypasses permission checks) but would need a seed row to work for a non-super-admin role.
