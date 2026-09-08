@@ -21,6 +21,7 @@ import {
   MaterialReceiving,
   QrPayload,
 } from '../../entities/inventory/material-receiving.entity';
+import { buildLotDatePart } from './lot-code.util';
 
 /** Package QR Payload — encoded as pipe-delimited string for scan reliability */
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
@@ -53,11 +54,11 @@ const SORT_COLUMNS: Record<MaterialsReceivingSortBy, string> = {
 };
 
 const DECIMAL_SCALE = 4;
-/** Internal Lot No. prefix */
+/** Internal Lot No. prefix — kept as a fixed literal (not the material's own
+ * code) so the lot stays unique across every material received on the same
+ * day off one shared, date-only counter (see allocateInternalLotNo below). */
 const LOT_PREFIX = 'CCI';
-/** Supplier Lot No. prefix */
-const SUPPLIER_LOT_PREFIX = 'SUP';
-/** Run No. prefix (Material Receiving) */
+/** Run No. prefix (Material Receiving) — unrelated to Internal Lot No, unchanged */
 const RUN_NO_PREFIX = 'MR';
 /** QR schema version (เพิ่มเมื่อ contract เปลี่ยน) */
 const QR_PAYLOAD_VERSION = '1.0';
@@ -66,14 +67,6 @@ const PIECES_QR_PAYLOAD_VERSION = '2.0';
 
 const SUPPLIER_MAPPING_ERROR =
   'Material is not linked to supplier. Link them in Material Master first.';
-
-/**
- * Build the date-portion of a LOT code (YYYYMMDD).
- * e.g. "2026-08-13" → "20260813"
- */
-function lotDatePart(dateStr: string): string {
-  return dateStr.replace(/-/g, '');
-}
 
 @Injectable()
 export class MaterialsReceivingService implements OnApplicationBootstrap {
@@ -263,6 +256,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
           packageNo: pkg.packageNo,
           lotDetailNo,
           quantity: pkg.quantity,
+          remainingQuantity: pkg.quantity,
           qrCode: packageQrCodes.get(pkg.packageNo) ?? null,
           status: 'pending',
         });
@@ -374,6 +368,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
             packageNo: pkg.packageNo,
             lotDetailNo,
             quantity: pkg.quantity,
+            remainingQuantity: pkg.quantity,
             qrCode: packageQrCodes.get(pkg.packageNo) ?? null,
           });
         });
@@ -960,6 +955,50 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   /**
+   * Scan-a-box lookup — a package's printed QR encodes only its
+   * `lotDetailNo` (see generatePackageQrCodes below), never the mutable
+   * tracking fields themselves, so a scan must query the database for the
+   * latest data. Returns exactly the tracking fields the box's QR is meant
+   * to resolve to (material, both lot numbers, box number, initial/current
+   * qty, unit, receive/production dates, status).
+   */
+  async findPackageByLotDetailNo(lotDetailNo: string) {
+    const pkg = await this.packageRepository.findOne({
+      where: { lotDetailNo },
+    });
+    if (!pkg) {
+      throw new NotFoundException(`Package ${lotDetailNo} not found`);
+    }
+    const receiving = await this.receivingRepository
+      .createQueryBuilder('receiving')
+      .leftJoinAndSelect('receiving.material', 'material')
+      .leftJoinAndSelect('receiving.unit', 'unit')
+      .where('receiving.id = :id', { id: pkg.materialReceivingId })
+      .getOne();
+    if (!receiving) {
+      throw new NotFoundException(
+        `Material receiving for package ${lotDetailNo} not found`,
+      );
+    }
+    return {
+      packageId: pkg.id,
+      packageNo: pkg.packageNo,
+      lotDetailNo: pkg.lotDetailNo,
+      materialId: receiving.materialId,
+      materialCode: receiving.material?.code ?? '',
+      materialName: receiving.material?.name ?? '',
+      internalLotNo: receiving.internalLotNo,
+      supplierLotNo: receiving.supplierLotNo,
+      initialQuantity: pkg.quantity,
+      currentQuantity: pkg.remainingQuantity,
+      unitSymbol: receiving.unit?.symbol ?? '',
+      receiveDate: receiving.receiveDate,
+      supplierProductionDate: receiving.supplierProductionDate,
+      status: pkg.status,
+    };
+  }
+
+  /**
    * Return the base64 QR code for a specific package.
    */
   async getPackageQrCode(packageId: string): Promise<string | null> {
@@ -1130,11 +1169,14 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   /**
-   * จัดสรร Internal Lot No. แบบ CCI-YYYYMMDD-XXX
-   * - ใช้ material_receiving_lot_counters (lock แบบ SELECT FOR UPDATE)
-   *   เพื่อกัน duplicate แม้มี request เข้าพร้อมกัน
-   * - UNIQUE constraint บน internal_lot_no เป็น defense in depth
-   * - Running number reset ทุกวัน เพราะใช้ lot_date เป็น partition key
+   * จัดสรร Internal Lot No. แบบ CCI-{YY}{MonthCode}{DD}-{SEQ} เช่น CCI-26J07-001
+   * (ดู lot-code.util.ts สำหรับ MonthCode mapping — ตัด "E" ออกโดยตั้งใจ)
+   * - Prefix "CCI" เป็นค่าคงที่ ไม่ใช่รหัสวัสดุ เพื่อให้ยังใช้ตัวนับกลาง
+   *   (material_receiving_lot_counters) ตัวเดียวกับ run_no ได้ — Sequence
+   *   แยกตาม "วันที่รับเข้า" อย่างเดียว (ไม่แยกตาม material) จึงรับประกัน
+   *   lot ไม่ซ้ำข้ามวัสดุที่รับเข้าวันเดียวกันด้วย
+   * - ใช้ lock แบบ SELECT FOR UPDATE กัน duplicate แม้มี request เข้าพร้อมกัน
+   * - UNIQUE constraint บน internal_lot_no เป็น defense in depth เพิ่มเติม
    */
   private async allocateInternalLotNo(
     manager: EntityManager,
@@ -1167,15 +1209,17 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     }
     counter.lastNumber += 1;
     await counterRepository.save(counter);
-    return `${LOT_PREFIX}-${lotDatePart(receiveDate)}-${String(counter.lastNumber).padStart(3, '0')}`;
+    return `${LOT_PREFIX}-${buildLotDatePart(receiveDate)}-${String(counter.lastNumber).padStart(3, '0')}`;
   }
 
   /**
-   * Build Supplier Lot No. format: SUP-YYYY[M]DD
-   * e.g. SUP-2026H13
+   * Build Supplier Lot No. format: {YY}{MonthCode}{DD} เช่น 26J07
+   * ไม่มี prefix, ไม่มี running number — deterministic จากวันที่ supplier
+   * ผลิตเท่านั้น จึง receive หลายครั้งในวันที่ supplier ผลิตเดียวกันได้
+   * supplier lot เดียวกัน (ต่างจาก internal lot ที่ต้องไม่ซ้ำเสมอ)
    */
   private buildSupplierLotNo(productionDate: string): string {
-    return `${SUPPLIER_LOT_PREFIX}-${lotDatePart(productionDate)}`;
+    return buildLotDatePart(productionDate);
   }
 
   /**
@@ -1521,6 +1565,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
             id: receiving.material.id,
             code: receiving.material.code,
             name: receiving.material.name,
+            imagePath: receiving.material.imagePath,
           }
         : null,
       packages: receiving.packages
@@ -1529,6 +1574,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
             packageNo: pkg.packageNo,
             lotDetailNo: pkg.lotDetailNo,
             quantity: pkg.quantity,
+            remainingQuantity: pkg.remainingQuantity,
             qrCode: pkg.qrCode,
             status: pkg.status,
           }))

@@ -13,6 +13,7 @@ import { MaterialReceiving } from './material-receiving.entity';
 export const PACKAGE_STATUSES = [
   'pending',
   'in_stock',
+  'partial',
   'issued',
   'damaged',
   'returned',
@@ -43,6 +44,15 @@ export class MaterialReceivingPackage {
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
   quantity: string;
+
+  /**
+   * Remaining/current quantity in this box — starts equal to `quantity` at
+   * receive time. Nothing decrements this yet (materials-disbursement's
+   * FIFO consumption logic is unchanged/out of scope for Material
+   * Receiving) — see AGENTS.md § Material Receiving for the follow-up.
+   */
+  @Column({ name: 'remaining_quantity', type: 'numeric', precision: 18, scale: 4 })
+  remainingQuantity: string;
 
   @Column({ name: 'qr_code', type: 'text', nullable: true })
   qrCode: string | null;

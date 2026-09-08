@@ -21,6 +21,7 @@ import { SupplierMaterial } from '../../entities/master/supplier-material.entity
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { MaterialsReceivingService } from './materials-receiving.service';
+import { buildLotDatePart } from './lot-code.util';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -447,10 +448,12 @@ describe('MaterialsReceivingService', () => {
       const receivingSaved = repos.receivingRepo.save.mock.calls[0][0];
       expect(receivingSaved.packageCount).toBe(5);
       expect(receivingSaved.packingQuantity).toBe(200);
+      // Internal Lot format is CCI-{YY}{MonthCode}{DD}-{SEQ} (fixed prefix,
+      // not the material's own code — see AGENTS.md § Material Receiving).
       expect(receivingSaved.internalLotNo).toMatch(
-        new RegExp(`^CCI-${TODAY.replace(/-/g, '')}-\\d{3}$`),
+        new RegExp(`^CCI-${buildLotDatePart(TODAY)}-\\d{3}$`),
       );
-      expect(receivingSaved.supplierLotNo).toBe('SUP-20260801');
+      expect(receivingSaved.supplierLotNo).toBe(buildLotDatePart('2026-08-01'));
       expect(savedPackages).toHaveLength(5);
       const total = savedPackages.reduce(
         (sum, pkg: { quantity: string }) => sum + Number(pkg.quantity),

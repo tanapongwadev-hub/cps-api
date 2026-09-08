@@ -68,7 +68,8 @@ export class ListMaterialsReceivingQueryDto {
   @IsOptional()
   @IsString()
   @Matches(INTERNAL_LOT_NO_PATTERN, {
-    message: 'internalLotNo must look like CCI-YYYYMMDD-XXX',
+    message:
+      'internalLotNo must look like CCI-{YY}{MonthCode}{DD}-{SEQ}, e.g. CCI-26J07-001',
   })
   internalLotNo?: string;
 

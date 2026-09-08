@@ -130,6 +130,19 @@ export class MaterialsReceivingController {
     return this.materialsReceivingService.cancel(id, dto, userId);
   }
 
+  /**
+   * Scan-a-box lookup — resolves a package's printed QR content
+   * (its lotDetailNo, e.g. MAT-A-26J07-001-001) to the latest tracking
+   * data. Declared before `packages/:packageId/qr` per this controller's
+   * existing "static before dynamic" convention, even though the two don't
+   * actually collide (different segment shapes).
+   */
+  @Get('packages/by-code/:lotDetailNo')
+  @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
+  getPackageByCode(@Param('lotDetailNo') lotDetailNo: string) {
+    return this.materialsReceivingService.findPackageByLotDetailNo(lotDetailNo);
+  }
+
   @Get('packages/:packageId/qr')
   @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
   async getPackageQr(@Param('packageId') packageId: string, @Res() res: Response) {

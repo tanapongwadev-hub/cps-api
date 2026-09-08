@@ -9,11 +9,15 @@ export const DECIMAL_18_4 = /^\d{1,14}(\.\d{1,4})?$/;
 /** วันที่แบบ YYYY-MM-DD ตรงกับคอลัมน์ชนิด DATE */
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Internal Lot No. ของ Materials Receiving: CCI-YYYYMMDD-XXX */
-export const INTERNAL_LOT_NO_PATTERN = /^CCI-\d{8}-\d{3}$/;
+/**
+ * Internal Lot No. ของ Materials Receiving: CCI-{YY}{MonthCode}{DD}-{SEQ}
+ * เช่น CCI-26J07-001 — prefix เป็นค่าคงที่ ไม่ใช่รหัสวัสดุ (ดู lot-code.util.ts
+ * สำหรับ MonthCode mapping — ตัด "E" ออกโดยตั้งใจ จึงใช้ [A-DF-M] ไม่ใช่ [A-M])
+ */
+export const INTERNAL_LOT_NO_PATTERN = /^CCI-\d{2}[A-DF-M]\d{2}-\d{3}$/;
 
-/** Supplier Lot No.: SUP-YYYYMMDD */
-export const SUPPLIER_LOT_NO_PATTERN = /^SUP-\d{8}$/;
+/** Supplier Lot No.: {YY}{MonthCode}{DD} เช่น 26J07 — ไม่มี prefix, ไม่มี running number */
+export const SUPPLIER_LOT_NO_PATTERN = /^\d{2}[A-DF-M]\d{2}$/;
 
 /** PO No. — ตัวอักษร/ตัวเลข/dash/underscore/space ความยาว 1–30 ตัว */
 export const PO_NO_PATTERN = /^[A-Za-z0-9_/ \-]{1,30}$/;
