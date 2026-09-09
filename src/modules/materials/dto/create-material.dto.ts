@@ -6,6 +6,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -88,7 +89,10 @@ export class CreateMaterialDto {
       o.materialType === null ||
       o.materialType !== MaterialShape.PCS,
   )
-  @IsInt({ message: 'ratio is required and must be an integer when materialType is PIPE / SHEET / COIL' })
+  @IsInt({
+    message:
+      'ratio is required and must be an integer when materialType is PIPE / SHEET / COIL',
+  })
   @Min(1, { message: 'ratio must be >= 1' })
   ratio?: number | null;
 
@@ -148,6 +152,12 @@ export class CreateMaterialDto {
   @IsInt()
   @Min(1)
   packingQuantity?: number | null;
+
+  @Transform(sourceValue)
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  minimumStock?: number;
 
   @Transform(trimStringArray)
   @IsOptional()

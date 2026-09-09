@@ -35,6 +35,7 @@ describe('Material DTOs', () => {
       specification: '  ASTM A36  ',
       description: '',
       supplierIds: [' 30 ', '31'],
+      minimumStock: 12.5,
       isActive: true,
     });
 
@@ -55,6 +56,7 @@ describe('Material DTOs', () => {
       specification: 'ASTM A36',
       description: null,
       supplierIds: ['30', '31'],
+      minimumStock: 12.5,
       isActive: true,
     });
   });
@@ -179,6 +181,28 @@ describe('Material DTOs', () => {
 
     expect(materialTypeErrors).toContain('materialType');
     expect(ratioErrors).toContain('ratio');
+  });
+
+  it('accepts non-negative minimum stock and rejects negative values', async () => {
+    const valid = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-MIN-1',
+      name: 'Bolt',
+      unitId: '1',
+      materialType: 'PCS',
+      minimumStock: 0,
+    });
+    const invalid = plainToInstance(CreateMaterialDto, {
+      code: 'MAT-MIN-2',
+      name: 'Bolt',
+      unitId: '1',
+      materialType: 'PCS',
+      minimumStock: -0.1,
+    });
+
+    expect(await validate(valid)).toEqual([]);
+    expect((await validate(invalid)).map((error) => error.property)).toContain(
+      'minimumStock',
+    );
   });
 
   it('requires ratio when creating with PIPE / SHEET / COIL but not for PCS', async () => {

@@ -7,6 +7,7 @@ import {
   IsISO8601,
   IsIn,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -155,6 +156,12 @@ export class UpdateMaterialDto {
   @IsInt()
   @Min(1)
   packingQuantity?: number | null;
+
+  @Transform(sourceValue)
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0)
+  minimumStock?: number;
 
   @Transform(trimStringArray)
   @IsOptional()

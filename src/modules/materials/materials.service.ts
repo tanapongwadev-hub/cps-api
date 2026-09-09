@@ -10,10 +10,7 @@ import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
-import {
-  Material,
-  MaterialShape,
-} from '../../entities/master/material.entity';
+import { Material, MaterialShape } from '../../entities/master/material.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
@@ -139,6 +136,7 @@ export class MaterialsService {
           specification: dto.specification ?? null,
           description: dto.description ?? null,
           packingQuantity: dto.packingQuantity ?? null,
+          minimumStock: String(dto.minimumStock ?? 0),
           isActive: dto.isActive ?? true,
           createdBy: userId,
           updatedBy: userId,
@@ -480,6 +478,7 @@ export class MaterialsService {
       'specification',
       'description',
       'packingQuantity',
+      'minimumStock',
       'isActive',
       'createdBy',
       'updatedBy',
@@ -784,6 +783,7 @@ export class MaterialsService {
       'specification',
       'description',
       'packingQuantity',
+      'minimumStock',
       'isActive',
     ] as const) {
       if (dto[field] !== undefined) {

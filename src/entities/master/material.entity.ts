@@ -121,6 +121,15 @@ export class Material {
   })
   imagePath: string | null;
 
+  @Column({
+    name: 'minimum_stock',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    default: 0,
+  })
+  minimumStock: string;
+
   @Column({ type: 'text', nullable: true })
   specification: string | null;
 

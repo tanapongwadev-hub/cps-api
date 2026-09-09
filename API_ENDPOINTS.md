@@ -322,12 +322,13 @@ Create body:
   "specification": "...",
   "description": "...",
   "packingQuantity": 10,
+  "minimumStock": 25,
   "supplierIds": ["1", "2"],
   "isActive": true
 }
 ```
 
-`code`, `name`, `materialType`, `unitId` are required. `PCS` requires `ratio` absent/null; PIPE/SHEET/COIL require integer `ratio >= 1`. Supplier IDs must be unique and active.
+`code`, `name`, `materialType`, `unitId` are required. `PCS` requires `ratio` absent/null; PIPE/SHEET/COIL require integer `ratio >= 1`. `minimumStock` is optional, supports up to 4 decimal places, must be `>= 0`, and defaults to `0`. Supplier IDs must be unique and active.
 
 Image upload accepts JPEG, PNG or WebP up to 5 MiB and returns:
 
@@ -546,6 +547,7 @@ These routes reuse `MATERIALS_RECEIVING_VIEW`.
 | Method | Path                          | Response                                                                           |
 | ------ | ----------------------------- | ---------------------------------------------------------------------------------- |
 | `GET`  | `/stock-balances`             | Array of materials that currently have stock-balance rows                          |
+| `GET`  | `/stock-balances/inventory`   | Paginated material inventory, stock KPI summary, filters and sorting               |
 | `GET`  | `/stock-balances/:materialId` | One material; returns quantity `"0"` if the material exists but has no balance row |
 
 ```json
@@ -561,6 +563,8 @@ These routes reuse `MATERIALS_RECEIVING_VIEW`.
 ```
 
 Unknown material returns `404 Material not found`.
+
+Inventory query supports `page`, `limit` (max 100), `search`, `isActive`, `type`, `supplierId`, `modelId`, `loadingPointId`, `processLineName`, `stockStatus` (`NORMAL|LOW_STOCK|OUT_OF_STOCK`), `sortBy` (`code|name|currentStock|lastReceivedAt`) and `sortOrder` (`asc|desc`). It returns full material rows plus `currentStock`, `minimumStock`, `stockStatus`, `lastMovementAt`, and the latest confirmed `lastReceivedAt`, along with pagination metadata and `{ total, normal, lowStock, outOfStock }` summary counts. Status logic is: current `<= 0` = out, current `> 0` and below minimum = low, otherwise normal. Summary counts retain the non-stock filters while ignoring the selected stock-status facet so all four KPI choices remain useful.
 
 ## 12. Permission code matrix
 
