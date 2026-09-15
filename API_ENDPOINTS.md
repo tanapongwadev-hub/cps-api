@@ -253,6 +253,7 @@ The following modules expose the same six route shapes:
 | `/suppliers`       | `SUPPLIER`        | `code(50)`, `nameTh(255)`, `nameEn?`, `taxId?`, `contactName?`, `telephone?`, `email?`, `address?`, `isActive?` |
 | `/material-models` | `MATERIAL_MODEL`  | `code`, `nameTh`, `nameEn?`, `description?`, `isActive?`                                                        |
 | `/delivery-types`  | `DELIVERY_TYPE`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?`                                               |
+| `/material-types`  | `MATERIAL_TYPE`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?` — seeded `PC`, `OF`, `OF_MAT` (the values used by `materials.type`) |
 | `/loading-points`  | `LOADING_POINT`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?`                                               |
 | `/categories`      | `CATEGORY`        | `code`, `nameTh`, `nameEn?`, `parentId?`, `sortOrder?`, `iconColor?`, `description?`, `isActive?`               |
 | `/organizations`   | `ORGANIZATION`    | `code`, `nameTh`, `nameEn?`, contact fields, `parentId?`, `type`, `logoUrl?`, `isActive?`                       |
@@ -297,7 +298,7 @@ List query:
 | `page`, `limit`                                                       | Default 1/20; limit max 100 |
 | `search`                                                              | Trimmed text                |
 | `isActive`                                                            | Boolean                     |
-| `unitId`, `modelId`, `deliveryTypeId`, `loadingPointId`, `supplierId` | Positive numeric strings    |
+| `unitId`, `modelId`, `deliveryTypeId`, `materialTypeId`, `loadingPointId`, `supplierId` | Positive numeric strings    |
 | `type`                                                                | `PC                         | OF    | OF_MAT`  |
 | `materialType`                                                        | `PCS                        | PIPE  | SHEET    | COIL`     |
 | `sortBy`                                                              | `code                       | name  | isActive | createdAt | updatedAt` |
@@ -314,6 +315,7 @@ Create body:
   "ratio": 4,
   "unitId": "1",
   "deliveryTypeId": "2",
+  "materialTypeId": "1",
   "modelId": "3",
   "loadingPointId": "1",
   "processLineName": "Cutting 1",
@@ -328,7 +330,7 @@ Create body:
 }
 ```
 
-`code`, `name`, `materialType`, `unitId` are required. `PCS` requires `ratio` absent/null; PIPE/SHEET/COIL require integer `ratio >= 1`. `minimumStock` is optional, supports up to 4 decimal places, must be `>= 0`, and defaults to `0`. Supplier IDs must be unique and active.
+`code`, `name`, `materialType`, `unitId` are required. `PCS` requires `ratio` absent/null; PIPE/SHEET/COIL require integer `ratio >= 1`. `minimumStock` is optional, supports up to 4 decimal places, must be `>= 0`, and defaults to `0`. Supplier IDs must be unique and active. `materialTypeId` (added 2026-09-16) is an optional FK into `/material-types` (must be active); it is independent of the legacy `type` string, which stays the page-scope discriminator. Responses include `materialTypeId` and a `materialTypeMaster` lookup `{ id, code, nameTh, nameEn }`, and `GET /materials/lookups` now also returns `materialTypes`.
 
 Image upload accepts JPEG, PNG or WebP up to 5 MiB and returns:
 

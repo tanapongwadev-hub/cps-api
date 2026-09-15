@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
+import { MaterialTypeMaster } from '../../entities/master/material-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
 import { Material } from '../../entities/master/material.entity';
@@ -40,6 +41,7 @@ describe('MaterialsService read operations', () => {
   let suppliers: RepositoryStub<Supplier>;
   let models: RepositoryStub<MaterialModel>;
   let deliveryTypes: RepositoryStub<DeliveryType>;
+  let materialTypes: RepositoryStub<MaterialTypeMaster>;
   let loadingPoints: RepositoryStub<LoadingPoint>;
   let service: MaterialsService;
 
@@ -49,6 +51,7 @@ describe('MaterialsService read operations', () => {
     suppliers = repositoryStub<Supplier>();
     models = repositoryStub<MaterialModel>();
     deliveryTypes = repositoryStub<DeliveryType>();
+    materialTypes = repositoryStub<MaterialTypeMaster>();
     loadingPoints = repositoryStub<LoadingPoint>();
     service = new MaterialsService(
       materials as unknown as Repository<Material>,
@@ -56,6 +59,7 @@ describe('MaterialsService read operations', () => {
       suppliers as unknown as Repository<Supplier>,
       models as unknown as Repository<MaterialModel>,
       deliveryTypes as unknown as Repository<DeliveryType>,
+      materialTypes as unknown as Repository<MaterialTypeMaster>,
       loadingPoints as unknown as Repository<LoadingPoint>,
     );
   });
@@ -213,6 +217,7 @@ describe('MaterialsService read operations', () => {
     suppliers.find!.mockResolvedValue([{ id: '2', code: 'SUP-002' }]);
     models.find!.mockResolvedValue([{ id: '3', code: 'MODEL-3' }]);
     deliveryTypes.find!.mockResolvedValue([{ id: '4', code: 'TRUCK' }]);
+    materialTypes.find!.mockResolvedValue([{ id: '6', code: 'PC' }]);
     loadingPoints.find!.mockResolvedValue([{ id: '5', code: 'DOCK-1' }]);
 
     await expect(service.getLookups()).resolves.toEqual({
@@ -220,6 +225,7 @@ describe('MaterialsService read operations', () => {
       suppliers: [{ id: '2', code: 'SUP-002' }],
       models: [{ id: '3', code: 'MODEL-3' }],
       deliveryTypes: [{ id: '4', code: 'TRUCK' }],
+      materialTypes: [{ id: '6', code: 'PC' }],
       loadingPoints: [{ id: '5', code: 'DOCK-1' }],
     });
 
@@ -228,6 +234,7 @@ describe('MaterialsService read operations', () => {
       suppliers,
       models,
       deliveryTypes,
+      materialTypes,
       loadingPoints,
     ]) {
       expect(repository.find).toHaveBeenCalledWith({

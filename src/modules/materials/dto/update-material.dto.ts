@@ -115,6 +115,12 @@ export class UpdateMaterialDto {
   @IsOptional()
   @IsString()
   @Matches(POSITIVE_DECIMAL_ID)
+  materialTypeId?: string | null;
+
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @Matches(POSITIVE_DECIMAL_ID)
   modelId?: string | null;
 
   @Transform(nullableTrimmedString)

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { DataSource, Repository } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
+import { MaterialTypeMaster } from '../../entities/master/material-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
 import { Material } from '../../entities/master/material.entity';
@@ -62,12 +63,14 @@ describe('MaterialsService aggregate commands', () => {
   let rootSuppliers: RepositoryStub<Supplier>;
   let rootModels: RepositoryStub<MaterialModel>;
   let rootDeliveryTypes: RepositoryStub<DeliveryType>;
+  let rootMaterialTypes: RepositoryStub<MaterialTypeMaster>;
   let rootLoadingPoints: RepositoryStub<LoadingPoint>;
   let materials: RepositoryStub<Material>;
   let units: RepositoryStub<Unit>;
   let suppliers: RepositoryStub<Supplier>;
   let models: RepositoryStub<MaterialModel>;
   let deliveryTypes: RepositoryStub<DeliveryType>;
+  let materialTypes: RepositoryStub<MaterialTypeMaster>;
   let loadingPoints: RepositoryStub<LoadingPoint>;
   let supplierMaterials: RepositoryStub<SupplierMaterial>;
   let transactionManager: {
@@ -104,12 +107,14 @@ describe('MaterialsService aggregate commands', () => {
     rootSuppliers = repositoryStub<Supplier>();
     rootModels = repositoryStub<MaterialModel>();
     rootDeliveryTypes = repositoryStub<DeliveryType>();
+    rootMaterialTypes = repositoryStub<MaterialTypeMaster>();
     rootLoadingPoints = repositoryStub<LoadingPoint>();
     materials = repositoryStub<Material>();
     units = repositoryStub<Unit>();
     suppliers = repositoryStub<Supplier>();
     models = repositoryStub<MaterialModel>();
     deliveryTypes = repositoryStub<DeliveryType>();
+    materialTypes = repositoryStub<MaterialTypeMaster>();
     loadingPoints = repositoryStub<LoadingPoint>();
     supplierMaterials = repositoryStub<SupplierMaterial>();
     savedMaterialWrites = [];
@@ -123,6 +128,9 @@ describe('MaterialsService aggregate commands', () => {
         if (entity === MaterialModel) return models;
         if (entity === DeliveryType) {
           return deliveryTypes;
+        }
+        if (entity === MaterialTypeMaster) {
+          return materialTypes;
         }
         if (entity === LoadingPoint) {
           return loadingPoints;
@@ -146,6 +154,7 @@ describe('MaterialsService aggregate commands', () => {
       rootSuppliers as unknown as Repository<Supplier>,
       rootModels as unknown as Repository<MaterialModel>,
       rootDeliveryTypes as unknown as Repository<DeliveryType>,
+      rootMaterialTypes as unknown as Repository<MaterialTypeMaster>,
       rootLoadingPoints as unknown as Repository<LoadingPoint>,
       { transaction } as unknown as DataSource,
       imageStorage as unknown as MaterialImageStorageService,

@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { resolve as resolvePath } from 'node:path';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
+import { MaterialTypeMaster } from '../../entities/master/material-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
 import { Material } from '../../entities/master/material.entity';
@@ -26,6 +27,7 @@ import { MaterialsService } from './materials.service';
       SupplierMaterial,
       Unit,
       DeliveryType,
+      MaterialTypeMaster,
       MaterialModel,
       LoadingPoint,
       Supplier,

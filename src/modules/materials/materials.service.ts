@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
+import { MaterialTypeMaster } from '../../entities/master/material-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
 import { Material, MaterialShape } from '../../entities/master/material.entity';
@@ -42,7 +43,12 @@ export interface MaterialLookupResponse {
 
 export type MaterialWithSuppliers = Omit<
   Material,
-  'supplierMaterials' | 'unit' | 'model' | 'deliveryType' | 'loadingPoint'
+  | 'supplierMaterials'
+  | 'unit'
+  | 'model'
+  | 'deliveryType'
+  | 'materialTypeMaster'
+  | 'loadingPoint'
 > & {
   type?: string | null;
   materialType?: string | null;
@@ -50,12 +56,18 @@ export type MaterialWithSuppliers = Omit<
   unit?: MaterialLookupResponse | null;
   model?: MaterialLookupResponse | null;
   deliveryType?: MaterialLookupResponse | null;
+  materialTypeMaster?: MaterialLookupResponse | null;
   loadingPoint?: MaterialLookupResponse | null;
   suppliers: MaterialLookupResponse[];
 };
 
 type MasterLookupEntity =
-  Unit | Supplier | MaterialModel | DeliveryType | LoadingPoint;
+  | Unit
+  | Supplier
+  | MaterialModel
+  | DeliveryType
+  | MaterialTypeMaster
+  | LoadingPoint;
 
 @Injectable()
 export class MaterialsService {
@@ -72,6 +84,8 @@ export class MaterialsService {
     private modelRepository: Repository<MaterialModel>,
     @InjectRepository(DeliveryType)
     private deliveryTypeRepository: Repository<DeliveryType>,
+    @InjectRepository(MaterialTypeMaster)
+    private materialTypeRepository: Repository<MaterialTypeMaster>,
     @InjectRepository(LoadingPoint)
     private loadingPointRepository: Repository<LoadingPoint>,
     private dataSource?: DataSource,
@@ -92,6 +106,8 @@ export class MaterialsService {
         const supplierRepository = manager.getRepository(Supplier);
         const modelRepository = manager.getRepository(MaterialModel);
         const deliveryTypeRepository = manager.getRepository(DeliveryType);
+        const materialTypeRepository =
+          manager.getRepository(MaterialTypeMaster);
         const loadingPointRepository = manager.getRepository(LoadingPoint);
         const supplierMaterialRepository =
           manager.getRepository(SupplierMaterial);
@@ -102,6 +118,7 @@ export class MaterialsService {
           {
             unitId: dto.unitId,
             deliveryTypeId: dto.deliveryTypeId ?? null,
+            materialTypeId: dto.materialTypeId ?? null,
             modelId: dto.modelId ?? null,
             loadingPointId: dto.loadingPointId ?? null,
             supplierIds: dto.supplierIds,
@@ -111,6 +128,7 @@ export class MaterialsService {
             supplierRepository,
             modelRepository,
             deliveryTypeRepository,
+            materialTypeRepository,
             loadingPointRepository,
           },
         );
@@ -128,6 +146,7 @@ export class MaterialsService {
           ratio: resolvedRatio,
           unitId: dto.unitId,
           deliveryTypeId: dto.deliveryTypeId ?? null,
+          materialTypeId: dto.materialTypeId ?? null,
           modelId: dto.modelId ?? null,
           loadingPointId: dto.loadingPointId ?? null,
           processLineName: dto.processLineName ?? null,
@@ -187,6 +206,8 @@ export class MaterialsService {
         const supplierRepository = manager.getRepository(Supplier);
         const modelRepository = manager.getRepository(MaterialModel);
         const deliveryTypeRepository = manager.getRepository(DeliveryType);
+        const materialTypeRepository =
+          manager.getRepository(MaterialTypeMaster);
         const loadingPointRepository = manager.getRepository(LoadingPoint);
         const supplierMaterialRepository =
           manager.getRepository(SupplierMaterial);
@@ -222,6 +243,10 @@ export class MaterialsService {
               dto.deliveryTypeId === undefined
                 ? material.deliveryTypeId
                 : dto.deliveryTypeId,
+            materialTypeId:
+              dto.materialTypeId === undefined
+                ? material.materialTypeId
+                : dto.materialTypeId,
             modelId: dto.modelId === undefined ? material.modelId : dto.modelId,
             loadingPointId:
               dto.loadingPointId === undefined
@@ -234,6 +259,7 @@ export class MaterialsService {
             supplierRepository,
             modelRepository,
             deliveryTypeRepository,
+            materialTypeRepository,
             loadingPointRepository,
           },
         );
@@ -324,6 +350,11 @@ export class MaterialsService {
         modelId: query.modelId,
       });
     }
+    if (query.materialTypeId) {
+      queryBuilder.andWhere('material.materialTypeId = :materialTypeId', {
+        materialTypeId: query.materialTypeId,
+      });
+    }
     if (query.deliveryTypeId) {
       queryBuilder.andWhere('material.deliveryTypeId = :deliveryTypeId', {
         deliveryTypeId: query.deliveryTypeId,
@@ -405,14 +436,21 @@ export class MaterialsService {
       where: { isActive: true },
       order: { code: 'ASC' as const },
     };
-    const [units, suppliers, models, deliveryTypes, loadingPoints] =
-      await Promise.all([
-        this.unitRepository.find(lookupOptions),
-        this.supplierRepository.find(lookupOptions),
-        this.modelRepository.find(lookupOptions),
-        this.deliveryTypeRepository.find(lookupOptions),
-        this.loadingPointRepository.find(lookupOptions),
-      ]);
+    const [
+      units,
+      suppliers,
+      models,
+      deliveryTypes,
+      materialTypes,
+      loadingPoints,
+    ] = await Promise.all([
+      this.unitRepository.find(lookupOptions),
+      this.supplierRepository.find(lookupOptions),
+      this.modelRepository.find(lookupOptions),
+      this.deliveryTypeRepository.find(lookupOptions),
+      this.materialTypeRepository.find(lookupOptions),
+      this.loadingPointRepository.find(lookupOptions),
+    ]);
 
     return {
       units: units.map((unit) => this.mapLookup(unit)),
@@ -420,6 +458,9 @@ export class MaterialsService {
       models: models.map((model) => this.mapLookup(model)),
       deliveryTypes: deliveryTypes.map((deliveryType) =>
         this.mapLookup(deliveryType),
+      ),
+      materialTypes: materialTypes.map((materialType) =>
+        this.mapLookup(materialType),
       ),
       loadingPoints: loadingPoints.map((loadingPoint) =>
         this.mapLookup(loadingPoint),
@@ -435,6 +476,7 @@ export class MaterialsService {
       .leftJoinAndSelect('material.unit', 'unit')
       .leftJoinAndSelect('material.model', 'model')
       .leftJoinAndSelect('material.deliveryType', 'deliveryType')
+      .leftJoinAndSelect('material.materialTypeMaster', 'materialTypeMaster')
       .leftJoinAndSelect('material.loadingPoint', 'loadingPoint')
       .leftJoinAndSelect(
         'material.supplierMaterials',
@@ -470,6 +512,7 @@ export class MaterialsService {
       'ratio',
       'unitId',
       'deliveryTypeId',
+      'materialTypeId',
       'modelId',
       'loadingPointId',
       'processLineName',
@@ -494,6 +537,7 @@ export class MaterialsService {
       'unit',
       'model',
       'deliveryType',
+      'materialTypeMaster',
       'loadingPoint',
     ] as const) {
       if (field in material) {
@@ -673,6 +717,7 @@ export class MaterialsService {
     references: {
       unitId: string;
       deliveryTypeId: string | null;
+      materialTypeId: string | null;
       modelId: string | null;
       loadingPointId: string | null;
       supplierIds?: string[];
@@ -682,6 +727,7 @@ export class MaterialsService {
       supplierRepository: Repository<Supplier>;
       modelRepository: Repository<MaterialModel>;
       deliveryTypeRepository: Repository<DeliveryType>;
+      materialTypeRepository: Repository<MaterialTypeMaster>;
       loadingPointRepository: Repository<LoadingPoint>;
     },
   ): Promise<void> {
@@ -695,6 +741,13 @@ export class MaterialsService {
         repositories.deliveryTypeRepository,
         references.deliveryTypeId,
         'Delivery type',
+      );
+    }
+    if (references.materialTypeId) {
+      await this.assertActiveReference(
+        repositories.materialTypeRepository,
+        references.materialTypeId,
+        'Material type',
       );
     }
     if (references.modelId) {
@@ -775,6 +828,7 @@ export class MaterialsService {
       'ratio',
       'unitId',
       'deliveryTypeId',
+      'materialTypeId',
       'modelId',
       'loadingPointId',
       'processLineName',

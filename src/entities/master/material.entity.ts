@@ -12,6 +12,7 @@ import {
 import { DeliveryType } from './delivery-type.entity';
 import { LoadingPoint } from './loading-point.entity';
 import { MaterialModel } from './material-model.entity';
+import { MaterialTypeMaster } from './material-type.entity';
 import { SupplierMaterial } from './supplier-material.entity';
 import { Unit } from './unit.entity';
 
@@ -98,6 +99,14 @@ export class Material {
   @Column({ name: 'model_id', type: 'bigint', nullable: true })
   modelId: string | null;
 
+  /**
+   * FK into master.material_types (PC / OF / OF-MAT catalog). Independent of
+   * the legacy `type` string and of `materialType` (the physical shape).
+   */
+  @Index()
+  @Column({ name: 'material_type_id', type: 'bigint', nullable: true })
+  materialTypeId: string | null;
+
   @Index()
   @Column({ name: 'loading_point_id', type: 'bigint', nullable: true })
   loadingPointId: string | null;
@@ -168,6 +177,13 @@ export class Material {
   })
   @JoinColumn({ name: 'delivery_type_id' })
   deliveryType: DeliveryType | null;
+
+  @ManyToOne(() => MaterialTypeMaster, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({ name: 'material_type_id' })
+  materialTypeMaster: MaterialTypeMaster | null;
 
   @ManyToOne(() => MaterialModel, {
     nullable: true,

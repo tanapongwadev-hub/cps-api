@@ -3,6 +3,7 @@ import { CATEGORY_PERMISSIONS } from '../../modules/categories/category-permissi
 import { DELIVERY_TYPE_PERMISSIONS } from '../../modules/delivery-types/delivery-type-permissions';
 import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
+import { MATERIAL_TYPE_PERMISSIONS } from '../../modules/material-types/material-type-permissions';
 import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissions';
 import { MATERIALS_DISBURSEMENT_PERMISSIONS } from '../../modules/materials-disbursement/materials-disbursement-permissions';
 import { MATERIALS_RECEIVING_PERMISSIONS } from '../../modules/materials-receiving/materials-receiving-permissions';
@@ -89,6 +90,7 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   SUPPLIER_MANAGEMENT: fromCrud(SUPPLIER_PERMISSIONS),
   MATERIAL_MODEL_MANAGEMENT: fromCrud(MATERIAL_MODEL_PERMISSIONS),
   DELIVERY_TYPE_MANAGEMENT: fromCrud(DELIVERY_TYPE_PERMISSIONS),
+  MATERIAL_TYPE_MANAGEMENT: fromCrud(MATERIAL_TYPE_PERMISSIONS),
   LOADING_POINT_MANAGEMENT: fromCrud(LOADING_POINT_PERMISSIONS),
   CATEGORY_MANAGEMENT: fromCrud(CATEGORY_PERMISSIONS),
   STATUS_ITEM_MANAGEMENT: fromCrud(STATUS_ITEM_PERMISSIONS),

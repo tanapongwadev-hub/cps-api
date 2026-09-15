@@ -20,6 +20,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { MaterialModelsModule } from './modules/material-models/material-models.module';
 import { DeliveryTypesModule } from './modules/delivery-types/delivery-types.module';
 import { LoadingPointsModule } from './modules/loading-points/loading-points.module';
+import { MaterialTypesModule } from './modules/material-types/material-types.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { StatusItemsModule } from './modules/status-items/status-items.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
@@ -60,6 +61,7 @@ import { ProcessStepsModule } from './modules/process-steps/process-steps.module
     SuppliersModule,
     MaterialModelsModule,
     DeliveryTypesModule,
+    MaterialTypesModule,
     LoadingPointsModule,
     CategoriesModule,
     StatusItemsModule,

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
@@ -406,6 +407,14 @@ export async function seed(dataSource: DataSource) {
         path: '/master-data/reject-reasons',
         icon: 'x-circle',
         sort_order: 98,
+      },
+      {
+        code: 'MATERIAL_TYPE_MANAGEMENT',
+        name_th: 'จัดการประเภทวัสดุ',
+        name_en: 'Material Type Management',
+        path: '/master-data/material-types',
+        icon: 'tag',
+        sort_order: 99,
       },
     ];
 
