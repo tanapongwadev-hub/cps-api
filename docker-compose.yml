@@ -1,6 +1,12 @@
 services:
+  # Not started by default: this machine runs PostgreSQL 18 natively on 5432, and
+  # both servers binding that port makes the native one silently win every
+  # connection. Start it only on a machine without a local Postgres:
+  #   docker compose --profile local-db up -d
   postgres:
     image: postgres:16
+    profiles:
+      - local-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USERNAME}
@@ -17,14 +23,15 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: postgres
+      # Reach the Postgres running on the host rather than a container.
+      DB_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${PORT}:3001"
     volumes:
       - .:/app
       - /app/node_modules
-    depends_on:
-      - postgres
 
 volumes:
   pgdata:
