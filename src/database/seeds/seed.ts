@@ -1,4 +1,10 @@
 import 'dotenv/config';
+// Must load .env before `new ConfigService()` below: a standalone ConfigService
+// only reads process.env, so without this the INITIAL_SUPER_ADMIN_* values in
+// .env are silently ignored and the hardcoded fallbacks are used instead —
+// which meant the seeded admin password was the well-known default from source
+// no matter what the operator configured.
+import 'dotenv/config';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
