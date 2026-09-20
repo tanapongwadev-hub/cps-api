@@ -30,6 +30,13 @@ export class BomsController {
     return this.bomsService.findByProduct(productId);
   }
 
+  /** "Which BOM/product uses this material?" — see boms.service.ts#findByMaterial */
+  @Get('material/:materialId')
+  @RequirePermissions(BOMS_PERMISSIONS.VIEW)
+  findByMaterial(@Param('materialId') materialId: string) {
+    return this.bomsService.findByMaterial(materialId);
+  }
+
   @Get(':id')
   @RequirePermissions(BOMS_PERMISSIONS.VIEW)
   findOne(@Param('id') id: string) {

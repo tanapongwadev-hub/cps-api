@@ -626,6 +626,90 @@ describe('MaterialsReceivingService', () => {
     });
   });
 
+  describe('receive', () => {
+    const dto = {
+      materialId: '3',
+      supplierId: '2',
+      receiveQuantity: '2',
+      supplierProductionDate: '2026-08-01',
+      receiveDate: TODAY,
+    };
+
+    it('creates MAIN/SUB QR records and stock in one transaction', async () => {
+      const { service, dataSource, repos } = setup();
+      let createdReceiving: MaterialReceiving | null = null;
+      repos.materialRepo.findOne.mockResolvedValue(
+        makeMaterial({
+          code: 'OF-STPIPE-002',
+          materialType: MaterialShape.PIPE,
+          ratio: 20,
+          packingQuantity: 20,
+        }),
+      );
+      repos.supplierRepo.findOne.mockResolvedValue(makeSupplier());
+      repos.supplierMaterialRepo.findOne.mockResolvedValue({ id: '99' });
+      repos.organizationRepo.findOne.mockResolvedValue(makeOrganization());
+      repos.receivingRepo.save.mockImplementation(
+        (entity: MaterialReceiving) => {
+          if (!entity.id) entity.id = '10';
+          createdReceiving = entity;
+          return Promise.resolve(entity);
+        },
+      );
+      repos.receivingRepo.findOne.mockImplementation(() =>
+        Promise.resolve(createdReceiving),
+      );
+      repos.stockBalanceRepo.findOne.mockResolvedValue(null);
+
+      await service.receive(dto, '9');
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      const savedPackages = repos.packageRepo.save.mock.calls[0][0] as Array<{
+        materialReceivingId: string;
+        quantity: string;
+      }>;
+      expect(savedPackages).toHaveLength(2);
+      expect(
+        savedPackages.every((pkg) => pkg.materialReceivingId === '10'),
+      ).toBe(true);
+      expect(savedPackages.map((pkg) => Number(pkg.quantity))).toEqual([
+        20, 20,
+      ]);
+      expect(repos.stockBalanceRepo.save.mock.calls[0][0].quantity).toBe(
+        '40.0000',
+      );
+      expect(repos.stockTransactionRepo.save.mock.calls[0][0].quantityIn).toBe(
+        '40.0000',
+      );
+    });
+
+    it('does not update stock when SUB QR creation fails', async () => {
+      const { service, repos } = setup();
+      repos.materialRepo.findOne.mockResolvedValue(
+        makeMaterial({
+          code: 'OF-STPIPE-002',
+          materialType: MaterialShape.PIPE,
+          ratio: 20,
+          packingQuantity: 20,
+        }),
+      );
+      repos.supplierRepo.findOne.mockResolvedValue(makeSupplier());
+      repos.supplierMaterialRepo.findOne.mockResolvedValue({ id: '99' });
+      repos.organizationRepo.findOne.mockResolvedValue(makeOrganization());
+      repos.receivingRepo.save.mockImplementation(
+        (entity: MaterialReceiving) => {
+          if (!entity.id) entity.id = '10';
+          return Promise.resolve(entity);
+        },
+      );
+      repos.packageRepo.save.mockRejectedValue(new Error('sub qr failed'));
+
+      await expect(service.receive(dto, '9')).rejects.toThrow('sub qr failed');
+      expect(repos.stockBalanceRepo.save).not.toHaveBeenCalled();
+      expect(repos.stockTransactionRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
   describe('remove', () => {
     it('rejects delete of confirmed receiving', async () => {
       const { service, dataSource, repos } = setup();
@@ -712,6 +796,33 @@ describe('MaterialsReceivingService', () => {
       );
       await expect(service.confirm('10', '9')).rejects.toBeInstanceOf(
         ConflictException,
+      );
+    });
+
+    it('adds converted quantity to stock for ratio-based materials', async () => {
+      const { service, repos } = setup();
+      repos.receivingRepo.findOne.mockResolvedValue(
+        makeReceiving({
+          materialType: MaterialShape.PIPE,
+          receiveQuantity: '2',
+          ratio: 20,
+          piecesQuantity: '40.0000',
+        }),
+      );
+      repos.stockBalanceRepo.findOne.mockResolvedValue({
+        id: '1',
+        materialId: '3',
+        quantity: '10',
+        lastMovementAt: null,
+      });
+
+      await service.confirm('10', '9');
+
+      expect(repos.stockBalanceRepo.save.mock.calls[0][0].quantity).toBe(
+        '50.0000',
+      );
+      expect(repos.stockTransactionRepo.save.mock.calls[0][0].quantityIn).toBe(
+        '40.0000',
       );
     });
   });
@@ -807,6 +918,100 @@ describe('MaterialsReceivingService', () => {
   });
 
   describe('package count math', () => {
+    it.each([MaterialShape.PIPE, MaterialShape.SHEET, MaterialShape.COIL])(
+      'uses converted quantity for %s package breakdown',
+      (materialType) => {
+        const { service } = setup();
+        const calculator = service as unknown as {
+          computeStockQuantity: (
+            receiveQuantity: string,
+            materialType: string | null,
+            ratio: number | null,
+          ) => string;
+          computePackageCount: (
+            stockQuantity: string,
+            packingQuantity: number,
+          ) => number;
+          buildPackageBreakdown: (
+            stockQuantity: string,
+            packingQuantity: number,
+            packageCount: number,
+          ) => { packageNo: number; quantity: string }[];
+        };
+
+        const stockQuantity = calculator.computeStockQuantity(
+          materialType === MaterialShape.PIPE ? '3' : '2',
+          materialType,
+          20,
+        );
+        const packingQuantity = materialType === MaterialShape.PIPE ? 25 : 20;
+        const packageCount = calculator.computePackageCount(
+          stockQuantity,
+          packingQuantity,
+        );
+        const packages = calculator.buildPackageBreakdown(
+          stockQuantity,
+          packingQuantity,
+          packageCount,
+        );
+
+        expect(stockQuantity).toBe(
+          materialType === MaterialShape.PIPE ? '60.0000' : '40.0000',
+        );
+        expect(packageCount).toBe(materialType === MaterialShape.PIPE ? 3 : 2);
+        expect(packages.map((pkg) => Number(pkg.quantity))).toEqual(
+          materialType === MaterialShape.PIPE ? [25, 25, 10] : [20, 20],
+        );
+        expect(
+          packages.reduce((sum, pkg) => sum + Number(pkg.quantity), 0),
+        ).toBe(Number(stockQuantity));
+      },
+    );
+
+    it('keeps the existing package calculation for non-converted shapes', () => {
+      const { service } = setup();
+      const calculator = service as unknown as {
+        computeStockQuantity: (
+          receiveQuantity: string,
+          materialType: string | null,
+          ratio: number | null,
+        ) => string;
+      };
+
+      expect(
+        calculator.computeStockQuantity('3', MaterialShape.PCS, null),
+      ).toBe('3.0000');
+    });
+
+    it.each([0, null])('rejects invalid ratio %s for PIPE', (ratio) => {
+      const { service } = setup();
+      const calculator = service as unknown as {
+        computeStockQuantity: (
+          receiveQuantity: string,
+          materialType: string | null,
+          ratio: number | null,
+        ) => string;
+      };
+
+      expect(() =>
+        calculator.computeStockQuantity('2', MaterialShape.PIPE, ratio),
+      ).toThrow(BadRequestException);
+    });
+
+    it('rejects zero packing quantity', () => {
+      const { service } = setup();
+      const calculator = service as unknown as {
+        computePackageCount: (
+          stockQuantity: string,
+          packingQuantity: number,
+        ) => number;
+      };
+
+      expect(() => calculator.computePackageCount('40', 0)).toThrow(
+        BadRequestException,
+      );
+    });
+
     it('CEIL behaviour — 100/3 yields 34', () => {
       // Use the public service to exercise the private method indirectly via create
       // 100 / 3 = 33.33 -> 34

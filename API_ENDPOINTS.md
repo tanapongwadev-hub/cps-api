@@ -254,18 +254,18 @@ The following modules expose the same six route shapes:
 | `DELETE` | `/:id`         | `<PREFIX>_DELETE` | Soft deactivate                       |
 | `PATCH`  | `/:id/restore` | `<PREFIX>_UPDATE` | Restore                               |
 
-| Base path          | Permission prefix | Core fields                                                                                                     |
-| ------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------- |
-| `/units`           | `UNIT`            | `code(20)`, `nameTh(100)`, `nameEn?`, `symbol?(20)`, `description?`, `isActive?`                                |
-| `/suppliers`       | `SUPPLIER`        | `code(50)`, `nameTh(255)`, `nameEn?`, `taxId?`, `contactName?`, `telephone?`, `email?`, `address?`, `isActive?` |
-| `/material-models` | `MATERIAL_MODEL`  | `code`, `nameTh`, `nameEn?`, `description?`, `isActive?`                                                        |
-| `/delivery-types`  | `DELIVERY_TYPE`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?`                                               |
+| Base path          | Permission prefix | Core fields                                                                                                                           |
+| ------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `/units`           | `UNIT`            | `code(20)`, `nameTh(100)`, `nameEn?`, `symbol?(20)`, `description?`, `isActive?`                                                      |
+| `/suppliers`       | `SUPPLIER`        | `code(50)`, `nameTh(255)`, `nameEn?`, `taxId?`, `contactName?`, `telephone?`, `email?`, `address?`, `isActive?`                       |
+| `/material-models` | `MATERIAL_MODEL`  | `code`, `nameTh`, `nameEn?`, `description?`, `isActive?`                                                                              |
+| `/delivery-types`  | `DELIVERY_TYPE`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?`                                                                     |
 | `/material-types`  | `MATERIAL_TYPE`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?` — seeded `PC`, `OF`, `OF_MAT` (the values used by `materials.type`) |
-| `/loading-points`  | `LOADING_POINT`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?`                                               |
-| `/categories`      | `CATEGORY`        | `code`, `nameTh`, `nameEn?`, `parentId?`, `sortOrder?`, `iconColor?`, `description?`, `isActive?`               |
-| `/organizations`   | `ORGANIZATION`    | `code`, `nameTh`, `nameEn?`, contact fields, `parentId?`, `type`, `logoUrl?`, `isActive?`                       |
-| `/status-items`    | `STATUS_ITEM`     | `code`, `nameTh`, `nameEn?`, `color`, `module`, `isDefault?`, `sortOrder?`, `description?`, `isActive?`         |
-| `/reject-reasons`  | `REJECT_REASON`   | `code`, `nameTh`, `nameEn?`, `description?`, `isActive?`                                                        |
+| `/loading-points`  | `LOADING_POINT`   | `code(50)`, `nameTh(100)`, `nameEn?`, `description?`, `isActive?`                                                                     |
+| `/categories`      | `CATEGORY`        | `code`, `nameTh`, `nameEn?`, `parentId?`, `sortOrder?`, `iconColor?`, `description?`, `isActive?`                                     |
+| `/organizations`   | `ORGANIZATION`    | `code`, `nameTh`, `nameEn?`, contact fields, `parentId?`, `type`, `logoUrl?`, `isActive?`                                             |
+| `/status-items`    | `STATUS_ITEM`     | `code`, `nameTh`, `nameEn?`, `color`, `module`, `isDefault?`, `sortOrder?`, `description?`, `isActive?`                               |
+| `/reject-reasons`  | `REJECT_REASON`   | `code`, `nameTh`, `nameEn?`, `description?`, `isActive?`                                                                              |
 
 Common list query is `page` (default 1), `limit` (default 20, maximum 100), `search?`, `isActive?`, `sortBy`, `sortOrder=asc|desc`. Categories default to `sortOrder`; other simple masters typically default to `code`. Organization adds `type?`.
 
@@ -300,16 +300,16 @@ All routes use active-assignment permission checks.
 
 List query:
 
-| Field                                                                 | Rules                       |
-| --------------------------------------------------------------------- | --------------------------- |
-| `page`, `limit`                                                       | Default 1/20; limit max 100 |
-| `search`                                                              | Trimmed text                |
-| `isActive`                                                            | Boolean                     |
+| Field                                                                                   | Rules                       |
+| --------------------------------------------------------------------------------------- | --------------------------- |
+| `page`, `limit`                                                                         | Default 1/20; limit max 100 |
+| `search`                                                                                | Trimmed text                |
+| `isActive`                                                                              | Boolean                     |
 | `unitId`, `modelId`, `deliveryTypeId`, `materialTypeId`, `loadingPointId`, `supplierId` | Positive numeric strings    |
-| `type`                                                                | `PC                         | OF    | OF_MAT`  |
-| `materialType`                                                        | `PCS                        | PIPE  | SHEET    | COIL`     |
-| `sortBy`                                                              | `code                       | name  | isActive | createdAt | updatedAt` |
-| `sortOrder`                                                           | `asc                        | desc` |
+| `type`                                                                                  | `PC                         | OF    | OF_MAT`  |
+| `materialType`                                                                          | `PCS                        | PIPE  | SHEET    | COIL`     |
+| `sortBy`                                                                                | `code                       | name  | isActive | createdAt | updatedAt` |
+| `sortOrder`                                                                             | `asc                        | desc` |
 
 Create body:
 
@@ -438,29 +438,32 @@ Items: 1–200; `quantity >= 0.0001`; `wastagePercent` 0–100. Version is serve
 
 ### 9.1 Routes
 
-| Method   | Path                                          | Permission                    | Response/behavior                                          |
-| -------- | --------------------------------------------- | ----------------------------- | ---------------------------------------------------------- |
-| `GET`    | `/materials-receiving`                        | `MATERIALS_RECEIVING_VIEW`    | Paginated list                                             |
-| `GET`    | `/materials-receiving/report`                 | VIEW                          | Receiving traceability report                              |
-| `GET`    | `/materials-receiving/unified-report`         | VIEW                          | Combined receiving/disbursement report                     |
-| `GET`    | `/materials-receiving/lookups`                | VIEW                          | Material lookups                                           |
-| `GET`    | `/materials-receiving/suppliers?materialId=`  | VIEW                          | Active suppliers mapped to material; `materialId` required |
-| `GET`    | `/materials-receiving/by-lot/:internalLotNo`  | VIEW                          | Full receiving by internal lot                             |
-| `GET`    | `/materials-receiving/:id`                    | VIEW                          | Full receiving with packages/relations                     |
-| `POST`   | `/materials-receiving`                        | `MATERIALS_RECEIVING_CREATE`  | Create draft receiving/packages/QR in transaction          |
-| `PATCH`  | `/materials-receiving/:id`                    | `MATERIALS_RECEIVING_UPDATE`  | Update draft with optimistic concurrency                   |
-| `DELETE` | `/materials-receiving/:id`                    | `MATERIALS_RECEIVING_DELETE`  | Delete draft; `204 No Content`                             |
-| `POST`   | `/materials-receiving/:id/confirm`            | `MATERIALS_RECEIVING_CONFIRM` | Add stock and ledger; set confirmed                        |
-| `POST`   | `/materials-receiving/:id/cancel`             | `MATERIALS_RECEIVING_CANCEL`  | Cancel and reverse confirmed stock                         |
-| `GET`    | `/materials-receiving/packages/:packageId/qr` | VIEW                          | Binary `image/png` package QR                              |
-| `GET`    | `/materials-receiving/packages/by-code/:lotDetailNo` | VIEW                   | Scan-a-box lookup — resolves a printed package QR's content (its `lotDetailNo`) to current tracking data (material, both lot numbers, box number, initial/current qty, unit, dates, status). Added alongside the Internal Lot format change below. |
-| `GET`    | `/materials-receiving/:id/pieces-qr`          | VIEW                          | Binary `image/png`; only PIPE/SHEET/COIL                   |
+| Method   | Path                                                 | Permission                    | Response/behavior                                                                                                                                                                                                                                  |
+| -------- | ---------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/materials-receiving`                               | `MATERIALS_RECEIVING_VIEW`    | Paginated list                                                                                                                                                                                                                                     |
+| `GET`    | `/materials-receiving/report`                        | VIEW                          | Receiving traceability report                                                                                                                                                                                                                      |
+| `GET`    | `/materials-receiving/unified-report`                | VIEW                          | Combined receiving/disbursement report                                                                                                                                                                                                             |
+| `GET`    | `/materials-receiving/lookups`                       | VIEW                          | Material lookups                                                                                                                                                                                                                                   |
+| `GET`    | `/materials-receiving/suppliers?materialId=`         | VIEW                          | Active suppliers mapped to material; `materialId` required                                                                                                                                                                                         |
+| `GET`    | `/materials-receiving/by-lot/:internalLotNo`         | VIEW                          | Full receiving by internal lot                                                                                                                                                                                                                     |
+| `GET`    | `/materials-receiving/:id`                           | VIEW                          | Full receiving with packages/relations                                                                                                                                                                                                             |
+| `POST`   | `/materials-receiving`                               | `MATERIALS_RECEIVING_CREATE`  | Create draft receiving/packages/QR in transaction                                                                                                                                                                                                  |
+| `POST`   | `/materials-receiving/receive`                       | CREATE + CONFIRM              | Atomically create MAIN/SUB QRs, confirm, update stock and write the stock transaction                                                                                                                                                              |
+| `PATCH`  | `/materials-receiving/:id`                           | `MATERIALS_RECEIVING_UPDATE`  | Update draft with optimistic concurrency                                                                                                                                                                                                           |
+| `DELETE` | `/materials-receiving/:id`                           | `MATERIALS_RECEIVING_DELETE`  | Delete draft; `204 No Content`                                                                                                                                                                                                                     |
+| `POST`   | `/materials-receiving/:id/confirm`                   | `MATERIALS_RECEIVING_CONFIRM` | Add stock and ledger; set confirmed                                                                                                                                                                                                                |
+| `POST`   | `/materials-receiving/:id/cancel`                    | `MATERIALS_RECEIVING_CANCEL`  | Cancel and reverse confirmed stock                                                                                                                                                                                                                 |
+| `GET`    | `/materials-receiving/packages/:packageId/qr`        | VIEW                          | Binary `image/png` package QR                                                                                                                                                                                                                      |
+| `GET`    | `/materials-receiving/packages/by-code/:lotDetailNo` | VIEW                          | Scan-a-box lookup — resolves a printed package QR's content (its `lotDetailNo`) to current tracking data (material, both lot numbers, box number, initial/current qty, unit, dates, status). Added alongside the Internal Lot format change below. |
+| `GET`    | `/materials-receiving/:id/pieces-qr`                 | VIEW                          | Binary `image/png`; only PIPE/SHEET/COIL                                                                                                                                                                                                           |
 
 Static paths are declared before `/:id`; clients should use the exact paths above.
 
 **Internal Lot / Supplier Lot date format changed 2026-09-07** (see AGENTS.md § Material Receiving for the full writeup): Internal Lot No. is now `CCI-{YY}{MonthCode}{DD}-{SEQ}` (e.g. `CCI-26J07-001`) instead of the old `CCI-YYYYMMDD-XXX` — same fixed `CCI` prefix and the same global-per-day sequence (`inventory.material_receiving_lot_counters`, unchanged), only the date portion's format changed from raw `YYYYMMDD` to the custom `{YY}{MonthCode}{DD}` scheme. **The material's own code is deliberately NOT part of the Internal Lot** (an earlier revision of this change tried that; reverted — the lot number's uniqueness relies on staying keyed by date alone across every material, not per-material, so the prefix has to stay a fixed literal). `MonthCode` is a custom mapping, **not** a calendar abbreviation — Jan-Dec = A,B,C,D,F,G,H,I,J,K,L,M (deliberately skips "E"), see `lot-code.util.ts`. Supplier Lot No. is now `{YY}{MonthCode}{DD}` (e.g. `26J07`) instead of `SUP-YYYYMMDD` — still deterministic from `supplierProductionDate` alone (no running number, so multiple receives on the same supplier production date share one supplier lot). `run_no` (the header document number, `MR-YYYYMMDD-XXXX`) is unrelated and unchanged.
 
 `material_receiving_packages` gained a `remaining_quantity` column (defaults to the package's own `quantity` at receive time) and a new `partial` package status (alongside the existing `pending/in_stock/issued/damaged/returned`), so a box can represent partial consumption (`IN_STOCK` when `remaining_quantity === quantity`, `PARTIAL` when `0 < remaining_quantity < quantity`, `ISSUED` when `remaining_quantity === 0`). **Nothing currently decrements `remaining_quantity`** — materials-disbursement's existing FIFO consumption logic (which flips a package straight to `issued`) was intentionally left untouched; wiring partial-quantity disbursement is a separate follow-up task.
+
+**Ratio-based receiving (2026-09-20):** for material shapes `PIPE`, `SHEET`, and `COIL`, `receiveQuantity` remains the physical quantity entered by the user and `piecesQuantity` is the converted inventory quantity (`receiveQuantity × ratio`). Package count, package quantities, stock balance, stock ledger entries, and cancellation reversal use `piecesQuantity`; other shapes retain the historical 1:1 behavior. The response also exposes this value as `convertedQuantity`, identifies the receiving as `qrLevel: "MAIN"`, and identifies packages as `qrLevel: "SUB"` with `parentQrId`/`mainQrId` pointing to the receiving id.
 
 ### 9.2 List/report queries
 
@@ -577,23 +580,23 @@ Inventory query supports `page`, `limit` (max 100), `search`, `isActive`, `type`
 
 ## 12. Permission code matrix
 
-| Resource       | Codes                                                                                            |
-| -------------- | ------------------------------------------------------------------------------------------------ |
-| Material       | `MATERIAL_VIEW`, `MATERIAL_CREATE`, `MATERIAL_UPDATE`, `MATERIAL_DELETE`                         |
-| Unit           | `UNIT_VIEW`, `UNIT_CREATE`, `UNIT_UPDATE`, `UNIT_DELETE`                                         |
-| Supplier       | `SUPPLIER_VIEW`, `SUPPLIER_CREATE`, `SUPPLIER_UPDATE`, `SUPPLIER_DELETE`                         |
-| Material model | `MATERIAL_MODEL_VIEW`, `MATERIAL_MODEL_CREATE`, `MATERIAL_MODEL_UPDATE`, `MATERIAL_MODEL_DELETE` |
-| Delivery type  | `DELIVERY_TYPE_VIEW`, `DELIVERY_TYPE_CREATE`, `DELIVERY_TYPE_UPDATE`, `DELIVERY_TYPE_DELETE`     |
-| Loading point  | `LOADING_POINT_VIEW`, `LOADING_POINT_CREATE`, `LOADING_POINT_UPDATE`, `LOADING_POINT_DELETE`     |
-| Category       | `CATEGORY_VIEW`, `CATEGORY_CREATE`, `CATEGORY_UPDATE`, `CATEGORY_DELETE`                         |
-| Organization   | `ORGANIZATION_VIEW`, `ORGANIZATION_CREATE`, `ORGANIZATION_UPDATE`, `ORGANIZATION_DELETE`         |
-| Status item    | `STATUS_ITEM_VIEW`, `STATUS_ITEM_CREATE`, `STATUS_ITEM_UPDATE`, `STATUS_ITEM_DELETE`             |
-| Reject reason  | `REJECT_REASON_VIEW`, `REJECT_REASON_CREATE`, `REJECT_REASON_UPDATE`, `REJECT_REASON_DELETE`     |
-| Receiving      | `MATERIALS_RECEIVING_VIEW                                                                        | CREATE | UPDATE | DELETE                                                                                                                   | CONFIRM  | CANCEL` |
-| Disbursement   | `MATERIALS_DISBURSEMENT_VIEW                                                                     | CREATE | UPDATE | DELETE                                                                                                                   | CONFIRM  | CANCEL` |
-| Product        | `PRODUCTS_VIEW                                                                                   | CREATE | UPDATE | DELETE                                                                                                                   | RESTORE` |
-| BOM            | `BOMS_VIEW                                                                                       | CREATE | UPDATE | DELETE`; constants `BOMS_ACTIVATE`, `BOMS_DEACTIVATE`exist but activate/deactivate routes currently require`BOMS_UPDATE` |
-| Product Workflow | `PRODUCT_WORKFLOWS_VIEW                                                                        | CREATE | UPDATE | DELETE` — activate/deactivate routes require `PRODUCT_WORKFLOWS_UPDATE`, same pattern as BOMs |
+| Resource              | Codes                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Material              | `MATERIAL_VIEW`, `MATERIAL_CREATE`, `MATERIAL_UPDATE`, `MATERIAL_DELETE`                                                                                     |
+| Unit                  | `UNIT_VIEW`, `UNIT_CREATE`, `UNIT_UPDATE`, `UNIT_DELETE`                                                                                                     |
+| Supplier              | `SUPPLIER_VIEW`, `SUPPLIER_CREATE`, `SUPPLIER_UPDATE`, `SUPPLIER_DELETE`                                                                                     |
+| Material model        | `MATERIAL_MODEL_VIEW`, `MATERIAL_MODEL_CREATE`, `MATERIAL_MODEL_UPDATE`, `MATERIAL_MODEL_DELETE`                                                             |
+| Delivery type         | `DELIVERY_TYPE_VIEW`, `DELIVERY_TYPE_CREATE`, `DELIVERY_TYPE_UPDATE`, `DELIVERY_TYPE_DELETE`                                                                 |
+| Loading point         | `LOADING_POINT_VIEW`, `LOADING_POINT_CREATE`, `LOADING_POINT_UPDATE`, `LOADING_POINT_DELETE`                                                                 |
+| Category              | `CATEGORY_VIEW`, `CATEGORY_CREATE`, `CATEGORY_UPDATE`, `CATEGORY_DELETE`                                                                                     |
+| Organization          | `ORGANIZATION_VIEW`, `ORGANIZATION_CREATE`, `ORGANIZATION_UPDATE`, `ORGANIZATION_DELETE`                                                                     |
+| Status item           | `STATUS_ITEM_VIEW`, `STATUS_ITEM_CREATE`, `STATUS_ITEM_UPDATE`, `STATUS_ITEM_DELETE`                                                                         |
+| Reject reason         | `REJECT_REASON_VIEW`, `REJECT_REASON_CREATE`, `REJECT_REASON_UPDATE`, `REJECT_REASON_DELETE`                                                                 |
+| Receiving             | `MATERIALS_RECEIVING_VIEW                                                                                                                                    | CREATE | UPDATE | DELETE                                                                                                                   | CONFIRM  | CANCEL` |
+| Disbursement          | `MATERIALS_DISBURSEMENT_VIEW                                                                                                                                 | CREATE | UPDATE | DELETE                                                                                                                   | CONFIRM  | CANCEL` |
+| Product               | `PRODUCTS_VIEW                                                                                                                                               | CREATE | UPDATE | DELETE                                                                                                                   | RESTORE` |
+| BOM                   | `BOMS_VIEW                                                                                                                                                   | CREATE | UPDATE | DELETE`; constants `BOMS_ACTIVATE`, `BOMS_DEACTIVATE`exist but activate/deactivate routes currently require`BOMS_UPDATE` |
+| Product Workflow      | `PRODUCT_WORKFLOWS_VIEW                                                                                                                                      | CREATE | UPDATE | DELETE`— activate/deactivate routes require`PRODUCT_WORKFLOWS_UPDATE`, same pattern as BOMs                              |
 | Process Step (master) | `PROCESS_STEP_VIEW`, `PROCESS_STEP_CREATE`, `PROCESS_STEP_UPDATE`, `PROCESS_STEP_DELETE` — restore uses `PROCESS_STEP_UPDATE`, same pattern as Delivery type |
 
 ## 13. HTTP status/error guide
@@ -620,19 +623,19 @@ Not every module uses the same exception class for an equivalent semantic condit
 
 ## 15. Product Workflows — `/product-workflows`
 
-Production routing for a product — the ordered sequence of process steps a product must go through (e.g. order production → weld → CNC → stamp → polish → inspect → QC → close), as distinct from a BOM (which is *what materials* are used, not *what steps* production goes through). Same versioning/status shape as BOMs (`DRAFT` → `ACTIVE` → `INACTIVE`, one `ACTIVE` per product, `activate` demotes any other `ACTIVE` workflow of the same product), added 2026-09-06.
+Production routing for a product — the ordered sequence of process steps a product must go through (e.g. order production → weld → CNC → stamp → polish → inspect → QC → close), as distinct from a BOM (which is _what materials_ are used, not _what steps_ production goes through). Same versioning/status shape as BOMs (`DRAFT` → `ACTIVE` → `INACTIVE`, one `ACTIVE` per product, `activate` demotes any other `ACTIVE` workflow of the same product), added 2026-09-06.
 
-| Method   | Path                                  | Permission                | Behavior                                                    |
-| -------- | -------------------------------------- | -------------------------- | ------------------------------------------------------------ |
-| `GET`    | `/product-workflows/product/:productId` | `PRODUCT_WORKFLOWS_VIEW`   | Workflow versions for product, newest first                  |
-| `GET`    | `/product-workflows/:id`               | `PRODUCT_WORKFLOWS_VIEW`   | Workflow with ordered steps                                   |
-| `POST`   | `/product-workflows`                   | `PRODUCT_WORKFLOWS_CREATE` | Create next version in DRAFT                                  |
-| `PATCH`  | `/product-workflows/:id`               | `PRODUCT_WORKFLOWS_UPDATE` | Update header (`remark`) only; ACTIVE prohibited              |
-| `POST`   | `/product-workflows/:id/steps`         | `PRODUCT_WORKFLOWS_UPDATE` | Append step; ACTIVE prohibited                                 |
-| `DELETE` | `/product-workflows/:id/steps/:stepId` | `PRODUCT_WORKFLOWS_UPDATE` | Remove step; ACTIVE prohibited                                 |
-| `PATCH`  | `/product-workflows/:id/activate`      | `PRODUCT_WORKFLOWS_UPDATE` | Activate and deactivate other ACTIVE workflows of product      |
-| `PATCH`  | `/product-workflows/:id/deactivate`    | `PRODUCT_WORKFLOWS_UPDATE` | Set INACTIVE                                                   |
-| `DELETE` | `/product-workflows/:id`               | `PRODUCT_WORKFLOWS_DELETE` | Hard delete; ACTIVE prohibited                                 |
+| Method   | Path                                    | Permission                 | Behavior                                                  |
+| -------- | --------------------------------------- | -------------------------- | --------------------------------------------------------- |
+| `GET`    | `/product-workflows/product/:productId` | `PRODUCT_WORKFLOWS_VIEW`   | Workflow versions for product, newest first               |
+| `GET`    | `/product-workflows/:id`                | `PRODUCT_WORKFLOWS_VIEW`   | Workflow with ordered steps                               |
+| `POST`   | `/product-workflows`                    | `PRODUCT_WORKFLOWS_CREATE` | Create next version in DRAFT                              |
+| `PATCH`  | `/product-workflows/:id`                | `PRODUCT_WORKFLOWS_UPDATE` | Update header (`remark`) only; ACTIVE prohibited          |
+| `POST`   | `/product-workflows/:id/steps`          | `PRODUCT_WORKFLOWS_UPDATE` | Append step; ACTIVE prohibited                            |
+| `DELETE` | `/product-workflows/:id/steps/:stepId`  | `PRODUCT_WORKFLOWS_UPDATE` | Remove step; ACTIVE prohibited                            |
+| `PATCH`  | `/product-workflows/:id/activate`       | `PRODUCT_WORKFLOWS_UPDATE` | Activate and deactivate other ACTIVE workflows of product |
+| `PATCH`  | `/product-workflows/:id/deactivate`     | `PRODUCT_WORKFLOWS_UPDATE` | Set INACTIVE                                              |
+| `DELETE` | `/product-workflows/:id`                | `PRODUCT_WORKFLOWS_DELETE` | Hard delete; ACTIVE prohibited                            |
 
 Create body:
 
@@ -661,14 +664,14 @@ Permission codes (`PRODUCT_WORKFLOWS_VIEW/CREATE/UPDATE/DELETE`) are not seeded 
 
 Master data catalog for Product Workflow steps (§ 15) — full CRUD, structurally a mirror of `/delivery-types` (same soft-delete-via-`isActive`/restore shape, same optimistic-concurrency `updatedAt` on update). Added 2026-09-06 so a workflow step can be picked from a dropdown instead of typed as free text.
 
-| Method   | Path                      | Permission             | Behavior                                    |
-| -------- | ------------------------- | ----------------------- | -------------------------------------------- |
-| `GET`    | `/process-steps`          | `PROCESS_STEP_VIEW`     | Paginated list (`page`, `limit`, `search`, `isActive`, `sortBy`, `sortOrder`) |
-| `GET`    | `/process-steps/:id`      | `PROCESS_STEP_VIEW`     | One process step                             |
-| `POST`   | `/process-steps`          | `PROCESS_STEP_CREATE`   | Create (`code` unique, `nameTh` required)    |
-| `PATCH`  | `/process-steps/:id`      | `PROCESS_STEP_UPDATE`   | Update; requires matching `updatedAt`        |
-| `DELETE` | `/process-steps/:id`      | `PROCESS_STEP_DELETE`   | Soft-deactivate (`isActive: false`), not a hard delete |
-| `PATCH`  | `/process-steps/:id/restore` | `PROCESS_STEP_UPDATE` | Reactivate (`isActive: true`)              |
+| Method   | Path                         | Permission            | Behavior                                                                      |
+| -------- | ---------------------------- | --------------------- | ----------------------------------------------------------------------------- |
+| `GET`    | `/process-steps`             | `PROCESS_STEP_VIEW`   | Paginated list (`page`, `limit`, `search`, `isActive`, `sortBy`, `sortOrder`) |
+| `GET`    | `/process-steps/:id`         | `PROCESS_STEP_VIEW`   | One process step                                                              |
+| `POST`   | `/process-steps`             | `PROCESS_STEP_CREATE` | Create (`code` unique, `nameTh` required)                                     |
+| `PATCH`  | `/process-steps/:id`         | `PROCESS_STEP_UPDATE` | Update; requires matching `updatedAt`                                         |
+| `DELETE` | `/process-steps/:id`         | `PROCESS_STEP_DELETE` | Soft-deactivate (`isActive: false`), not a hard delete                        |
+| `PATCH`  | `/process-steps/:id/restore` | `PROCESS_STEP_UPDATE` | Reactivate (`isActive: true`)                                                 |
 
 Row shape: `{ id, code, nameTh, nameEn, description, isActive, createdBy, updatedBy, createdAt, updatedAt }`. Seeded on creation (migration `1786700000007-AddProcessStepsMaster.ts`) with 8 example rows (`PS-01` สั่งผลิต … `PS-08` ปิดกระบวนการผลิต) — an editable starting catalog, not a fixed enum; add/deactivate more via this CRUD. `product_workflow_steps.process_step_id` has `ON DELETE RESTRICT` against this table, so a process step referenced by any workflow step cannot be hard-deleted (not that this API exposes a hard delete anyway — only soft-deactivate).
 

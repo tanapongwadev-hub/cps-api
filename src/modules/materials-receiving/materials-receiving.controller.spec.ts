@@ -19,6 +19,7 @@ describe('MaterialsReceivingController', () => {
     findByInternalLotNo: jest.fn(),
     getMaterialLookups: jest.fn(),
     create: jest.fn(),
+    receive: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
     confirm: jest.fn(),
@@ -120,9 +121,24 @@ describe('MaterialsReceivingController', () => {
     ).toEqual(['MATERIALS_RECEIVING_CANCEL']);
   });
 
+  it('requires both create and confirm permissions for atomic receiving', () => {
+    const handler = handlerFor('receive');
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('receive');
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(
+      RequestMethod.POST,
+    );
+    expect(Reflect.getMetadata(REQUIRE_PERMISSIONS_KEY, handler)).toEqual([
+      MATERIALS_RECEIVING_PERMISSIONS.CREATE,
+      MATERIALS_RECEIVING_PERMISSIONS.CONFIRM,
+    ]);
+  });
+
   it('passes user id from the request into mutating calls', () => {
     void controller.create({} as never, '42');
     expect(service.create).toHaveBeenCalledWith({}, '42');
+
+    void controller.receive({} as never, '42');
+    expect(service.receive).toHaveBeenCalledWith({}, '42');
 
     void controller.update('10', {} as never, '42');
     expect(service.update).toHaveBeenCalledWith('10', {}, '42');

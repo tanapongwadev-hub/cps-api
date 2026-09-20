@@ -97,6 +97,18 @@ export class MaterialsReceivingController {
     return this.materialsReceivingService.create(dto, userId);
   }
 
+  @Post('receive')
+  @RequirePermissions(
+    MATERIALS_RECEIVING_PERMISSIONS.CREATE,
+    MATERIALS_RECEIVING_PERMISSIONS.CONFIRM,
+  )
+  receive(
+    @Body() dto: CreateMaterialsReceivingDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.materialsReceivingService.receive(dto, userId);
+  }
+
   @Patch(':id')
   @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.UPDATE)
   update(
@@ -145,8 +157,12 @@ export class MaterialsReceivingController {
 
   @Get('packages/:packageId/qr')
   @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.VIEW)
-  async getPackageQr(@Param('packageId') packageId: string, @Res() res: Response) {
-    const base64 = await this.materialsReceivingService.getPackageQrCode(packageId);
+  async getPackageQr(
+    @Param('packageId') packageId: string,
+    @Res() res: Response,
+  ) {
+    const base64 =
+      await this.materialsReceivingService.getPackageQrCode(packageId);
     if (!base64) {
       throw new NotFoundException('QR code not found');
     }
@@ -157,7 +173,10 @@ export class MaterialsReceivingController {
     }
     const buffer = Buffer.from(matches[1], 'base64');
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Content-Disposition', `inline; filename="qr-${packageId}.png"`);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="qr-${packageId}.png"`,
+    );
     res.send(buffer);
   }
 
@@ -170,7 +189,9 @@ export class MaterialsReceivingController {
   async getPiecesQr(@Param('id') id: string, @Res() res: Response) {
     const base64 = await this.materialsReceivingService.getPiecesQrCode(id);
     if (!base64) {
-      throw new NotFoundException('Pieces QR code not found (not applicable for this material type)');
+      throw new NotFoundException(
+        'Pieces QR code not found (not applicable for this material type)',
+      );
     }
     const matches = base64.match(/^data:image\/png;base64,(.+)$/);
     if (!matches) {
@@ -178,7 +199,10 @@ export class MaterialsReceivingController {
     }
     const buffer = Buffer.from(matches[1], 'base64');
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Content-Disposition', `inline; filename="pieces-qr-${id}.png"`);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="pieces-qr-${id}.png"`,
+    );
     res.send(buffer);
   }
 }

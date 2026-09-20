@@ -119,153 +119,185 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     this.assertPositiveQuantity(dto.receiveQuantity);
     this.assertReceiveDateNotFuture(dto.receiveDate);
 
+    const result = await this.dataSource.transaction((manager) =>
+      this.createDraft(manager, dto, userId),
+    );
+    return this.findOne(result.id);
+  }
+
+  /**
+   * Create and confirm a receiving in one database transaction. This is the
+   * command used by the warehouse UI so MAIN QR, SUB QRs, stock and the stock
+   * transaction either all commit together or all roll back together.
+   */
+  async receive(
+    dto: CreateMaterialsReceivingDto,
+    userId: string,
+  ): Promise<MaterialReceiving> {
+    this.assertPositiveQuantity(dto.receiveQuantity);
+    this.assertReceiveDateNotFuture(dto.receiveDate);
+
     const result = await this.dataSource.transaction(async (manager) => {
-      // 1) Validate active material + derive or validate supplier
-      const material = await this.assertActiveMaterial(manager, dto.materialId);
-      const supplierId = await this.resolveSupplier(
-        manager,
-        dto.materialId,
-        dto.supplierId,
-      );
-
-      // 2) Snapshot material shape + ratio (override-able per receive)
-      const materialType = material.materialType ?? null;
-      const ratio = dto.ratioOverride ?? material.ratio ?? null;
-      if (this.requiresRatio(materialType) && (ratio === null || ratio < 1)) {
-        throw new BadRequestException(
-          `Material shape ${materialType} requires a ratio. Set ratio on the material or supply ratioOverride.`,
-        );
-      }
-
-      // 3) Snapshot packing quantity (override หรือจาก master)
-      const packingQuantity =
-        dto.packingQuantityOverride ?? material.packingQuantity;
-      if (
-        packingQuantity === null ||
-        packingQuantity === undefined ||
-        packingQuantity < 1
-      ) {
-        throw new BadRequestException(
-          'Material has no packing quantity. Set packingQuantity on the material or supply packingQuantityOverride.',
-        );
-      }
-
-      // 4) Calculate package count
-      const receiveQuantity = dto.receiveQuantity;
-      const packageCount = this.computePackageCount(
-        receiveQuantity,
-        packingQuantity,
-      );
-      const packages = this.buildPackageBreakdown(
-        receiveQuantity,
-        packingQuantity,
-        packageCount,
-      );
-
-      // 4.5) Calculate piecesQuantity (ชิ้นที่ใช้ได้จริง) — only for PIPE/SHEET/COIL
-      const piecesQuantity = this.computePiecesQuantity(
-        receiveQuantity,
-        materialType,
-        ratio,
-      );
-
-      // 5) Generate internal lot no (concurrency-safe via lot counter lock)
-      const internalLotNo = await this.allocateInternalLotNo(
-        manager,
-        dto.receiveDate,
-      );
-
-      // 6) Generate run no (concurrency-safe)
-      const runNo = await this.allocateRunNo(manager, dto.receiveDate);
-
-      // 7) Generate supplier lot no
-      const supplierLotNo = this.buildSupplierLotNo(dto.supplierProductionDate);
-
-      // 8) Generate QR payload + base64 PNG (using internalLotNo as primary key)
-      const qrPayload: QrPayload = {
-        version: QR_PAYLOAD_VERSION,
-        internalLotNo,
-        materialCode: material.code,
-        receiveQuantity,
-        supplierLotNo,
-      };
-      const qrCode = await this.generateQrCode(internalLotNo);
-
-      // 8.5) Generate pieces QR Code (PIPE / SHEET / COIL only)
-      const [piecesQrCode, piecesQrPayload] = this.requiresRatio(materialType)
-        ? await Promise.all([
-            this.generatePiecesQrCode(internalLotNo),
-            Promise.resolve({
-              version: PIECES_QR_PAYLOAD_VERSION,
-              internalLotNo,
-              runNo,
-              materialCode: material.code,
-              piecesQuantity: piecesQuantity!,
-              materialType: materialType!,
-            } as const),
-          ])
-        : [null, null];
-
-      // 9) Generate QR codes for each package
-      const packageQrCodes = await this.generatePackageQrCodes(
-        packages,
-        internalLotNo,
-      );
-
-      // 10) Snapshot material code/name (เผื่ออนาคต master เปลี่ยน)
-      const organizationId = await this.resolveOrganizationId(manager);
-
-      // 11) Save receiving
-      const receivingRepository = manager.getRepository(MaterialReceiving);
-      const receiving = receivingRepository.create({
-        runNo,
-        internalLotNo,
-        organizationId,
-        supplierId,
-        materialId: dto.materialId,
-        unitId: material.unitId,
-        receiveQuantity,
-        packingQuantity,
-        packageCount,
-        supplierLotNo,
-        supplierProductionDate: dto.supplierProductionDate,
-        receiveDate: dto.receiveDate,
-        qrCode,
-        qrPayload,
-        status: 'draft',
-        poNo: dto.poNo ?? null,
-        materialType,
-        ratio,
-        piecesQuantity,
-        piecesQrCode,
-        piecesQrPayload,
-        attachmentUrl: dto.attachmentUrl ?? null,
-        attachmentName: dto.attachmentName ?? null,
-        remark: dto.remark ?? null,
-        createdBy: userId,
-        updatedBy: userId,
-      });
-      const saved = await this.saveReceiving(receivingRepository, receiving);
-
-      // 12) Save package breakdown with LOT-DETAIL and QR codes
-      const packageRepository = manager.getRepository(MaterialReceivingPackage);
-      const packageRows = packages.map((pkg) => {
-        const lotDetailNo = this.buildLotDetailNo(internalLotNo, pkg.packageNo);
-        return packageRepository.create({
-          materialReceivingId: saved.id,
-          packageNo: pkg.packageNo,
-          lotDetailNo,
-          quantity: pkg.quantity,
-          remainingQuantity: pkg.quantity,
-          qrCode: packageQrCodes.get(pkg.packageNo) ?? null,
-          status: 'pending',
-        });
-      });
-      await packageRepository.save(packageRows);
-
+      const saved = await this.createDraft(manager, dto, userId);
+      await this.confirmWithManager(manager, saved.id, userId);
       return saved;
     });
     return this.findOne(result.id);
+  }
+
+  private async createDraft(
+    manager: EntityManager,
+    dto: CreateMaterialsReceivingDto,
+    userId: string,
+  ): Promise<MaterialReceiving> {
+    // 1) Validate active material + derive or validate supplier
+    const material = await this.assertActiveMaterial(manager, dto.materialId);
+    const supplierId = await this.resolveSupplier(
+      manager,
+      dto.materialId,
+      dto.supplierId,
+    );
+
+    // 2) Snapshot material shape + ratio (override-able per receive)
+    const materialType = material.materialType ?? null;
+    const ratio = dto.ratioOverride ?? material.ratio ?? null;
+    if (this.requiresRatio(materialType) && (ratio === null || ratio < 1)) {
+      throw new BadRequestException(
+        `Material ${material.code} requires a valid ratio for ${materialType} receiving.`,
+      );
+    }
+
+    // 3) Snapshot packing quantity (override หรือจาก master)
+    const packingQuantity =
+      dto.packingQuantityOverride ?? material.packingQuantity;
+    if (
+      packingQuantity === null ||
+      packingQuantity === undefined ||
+      packingQuantity < 1
+    ) {
+      throw new BadRequestException(
+        `Material ${material.code} requires pack quantity before receiving.`,
+      );
+    }
+
+    // 4) Convert the user-entered quantity into the inventory unit for
+    // PIPE/SHEET/COIL. Other shapes keep the historical 1:1 behaviour.
+    const receiveQuantity = dto.receiveQuantity;
+    const stockQuantity = this.computeStockQuantity(
+      receiveQuantity,
+      materialType,
+      ratio,
+    );
+    const packageCount = this.computePackageCount(
+      stockQuantity,
+      packingQuantity,
+    );
+    const packages = this.buildPackageBreakdown(
+      stockQuantity,
+      packingQuantity,
+      packageCount,
+    );
+
+    // Keep the existing column as the converted/stock quantity snapshot.
+    const piecesQuantity = this.requiresRatio(materialType)
+      ? stockQuantity
+      : null;
+
+    // 5) Generate internal lot no (concurrency-safe via lot counter lock)
+    const internalLotNo = await this.allocateInternalLotNo(
+      manager,
+      dto.receiveDate,
+    );
+
+    // 6) Generate run no (concurrency-safe)
+    const runNo = await this.allocateRunNo(manager, dto.receiveDate);
+
+    // 7) Generate supplier lot no
+    const supplierLotNo = this.buildSupplierLotNo(dto.supplierProductionDate);
+
+    // 8) Generate QR payload + base64 PNG (using internalLotNo as primary key)
+    const qrPayload: QrPayload = {
+      version: QR_PAYLOAD_VERSION,
+      internalLotNo,
+      materialCode: material.code,
+      receiveQuantity,
+      supplierLotNo,
+    };
+    const qrCode = await this.generateQrCode(internalLotNo);
+
+    // 8.5) Generate pieces QR Code (PIPE / SHEET / COIL only)
+    const [piecesQrCode, piecesQrPayload] = this.requiresRatio(materialType)
+      ? await Promise.all([
+          this.generatePiecesQrCode(internalLotNo),
+          Promise.resolve({
+            version: PIECES_QR_PAYLOAD_VERSION,
+            internalLotNo,
+            runNo,
+            materialCode: material.code,
+            piecesQuantity: piecesQuantity!,
+            materialType: materialType!,
+          } as const),
+        ])
+      : [null, null];
+
+    // 9) Generate QR codes for each package
+    const packageQrCodes = await this.generatePackageQrCodes(
+      packages,
+      internalLotNo,
+    );
+
+    // 10) Snapshot material code/name (เผื่ออนาคต master เปลี่ยน)
+    const organizationId = await this.resolveOrganizationId(manager);
+
+    // 11) Save receiving
+    const receivingRepository = manager.getRepository(MaterialReceiving);
+    const receiving = receivingRepository.create({
+      runNo,
+      internalLotNo,
+      organizationId,
+      supplierId,
+      materialId: dto.materialId,
+      unitId: material.unitId,
+      receiveQuantity,
+      packingQuantity,
+      packageCount,
+      supplierLotNo,
+      supplierProductionDate: dto.supplierProductionDate,
+      receiveDate: dto.receiveDate,
+      qrCode,
+      qrPayload,
+      status: 'draft',
+      poNo: dto.poNo ?? null,
+      materialType,
+      ratio,
+      piecesQuantity,
+      piecesQrCode,
+      piecesQrPayload,
+      attachmentUrl: dto.attachmentUrl ?? null,
+      attachmentName: dto.attachmentName ?? null,
+      remark: dto.remark ?? null,
+      createdBy: userId,
+      updatedBy: userId,
+    });
+    const saved = await this.saveReceiving(receivingRepository, receiving);
+
+    // 12) Save package breakdown with LOT-DETAIL and QR codes
+    const packageRepository = manager.getRepository(MaterialReceivingPackage);
+    const packageRows = packages.map((pkg) => {
+      const lotDetailNo = this.buildLotDetailNo(internalLotNo, pkg.packageNo);
+      return packageRepository.create({
+        materialReceivingId: saved.id,
+        packageNo: pkg.packageNo,
+        lotDetailNo,
+        quantity: pkg.quantity,
+        remainingQuantity: pkg.quantity,
+        qrCode: packageQrCodes.get(pkg.packageNo) ?? null,
+        status: 'pending',
+      });
+    });
+    await packageRepository.save(packageRows);
+
+    return saved;
   }
 
   async update(
@@ -314,11 +346,6 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       if (packingQuantity < 1) {
         throw new BadRequestException('packingQuantity must be >= 1');
       }
-      const packageCount = this.computePackageCount(
-        newReceiveQuantity,
-        packingQuantity,
-      );
-
       // Recompute materialType/ratio if receiveQuantity or ratioOverride changes
       const newMaterialType =
         receiving.materialType ?? material.materialType ?? null;
@@ -326,16 +353,26 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         dto.ratioOverride !== undefined
           ? dto.ratioOverride
           : (receiving.ratio ?? material.ratio ?? null);
-      if (this.requiresRatio(newMaterialType) && (newRatio === null || newRatio < 1)) {
+      if (
+        this.requiresRatio(newMaterialType) &&
+        (newRatio === null || newRatio < 1)
+      ) {
         throw new BadRequestException(
-          `Material shape ${newMaterialType} requires a ratio`,
+          `Material ${material.code} requires a valid ratio for ${newMaterialType} receiving.`,
         );
       }
-      const newPiecesQuantity = this.computePiecesQuantity(
+      const stockQuantity = this.computeStockQuantity(
         newReceiveQuantity,
         newMaterialType,
         newRatio,
       );
+      const packageCount = this.computePackageCount(
+        stockQuantity,
+        packingQuantity,
+      );
+      const newPiecesQuantity = this.requiresRatio(newMaterialType)
+        ? stockQuantity
+        : null;
 
       // ถ้าวันที่ supplier ผลิตเปลี่ยน ต้องออก supplier lot ใหม่
       const supplierProductionDate =
@@ -344,9 +381,13 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         ? this.buildSupplierLotNo(supplierProductionDate)
         : receiving.supplierLotNo;
 
-      if (dto.receiveQuantity || dto.packingQuantityOverride) {
+      if (
+        dto.receiveQuantity ||
+        dto.packingQuantityOverride ||
+        dto.ratioOverride !== undefined
+      ) {
         const packages = this.buildPackageBreakdown(
-          newReceiveQuantity,
+          stockQuantity,
           packingQuantity,
           packageCount,
         );
@@ -393,21 +434,23 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         dto.receiveQuantity !== undefined ||
         dto.ratioOverride !== undefined ||
         dto.packingQuantityOverride !== undefined ||
-        (needsPiecesQr && !this.requiresRatio(receiving.materialType ?? null)) ||
+        (needsPiecesQr &&
+          !this.requiresRatio(receiving.materialType ?? null)) ||
         (!needsPiecesQr && this.requiresRatio(receiving.materialType ?? null));
-      const [newPiecesQrCode, newPiecesQrPayload] = needsPiecesQr && piecesQrChanged
-        ? await Promise.all([
-            this.generatePiecesQrCode(receiving.internalLotNo),
-            Promise.resolve({
-              version: PIECES_QR_PAYLOAD_VERSION,
-              internalLotNo: receiving.internalLotNo,
-              runNo: receiving.runNo,
-              materialCode: material.code,
-              piecesQuantity: newPiecesQuantity!,
-              materialType: newMaterialType!,
-            } as const),
-          ])
-        : [receiving.piecesQrCode, receiving.piecesQrPayload];
+      const [newPiecesQrCode, newPiecesQrPayload] =
+        needsPiecesQr && piecesQrChanged
+          ? await Promise.all([
+              this.generatePiecesQrCode(receiving.internalLotNo),
+              Promise.resolve({
+                version: PIECES_QR_PAYLOAD_VERSION,
+                internalLotNo: receiving.internalLotNo,
+                runNo: receiving.runNo,
+                materialCode: material.code,
+                piecesQuantity: newPiecesQuantity!,
+                materialType: newMaterialType!,
+              } as const),
+            ])
+          : [receiving.piecesQrCode, receiving.piecesQrPayload];
 
       receiving.supplierId = supplierId;
       receiving.receiveQuantity = newReceiveQuantity;
@@ -459,79 +502,84 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   async confirm(id: string, userId: string): Promise<MaterialReceiving> {
-    await this.dataSource.transaction(async (manager) => {
-      const receivingRepository = manager.getRepository(MaterialReceiving);
-      const receiving = await receivingRepository.findOne({
-        where: { id },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!receiving) {
-        throw new NotFoundException('Material receiving not found');
-      }
-      if (receiving.status !== 'draft') {
-        throw new ConflictException(
-          'Only a draft material receiving can be confirmed',
-        );
-      }
-      this.assertReceiveDateNotFuture(receiving.receiveDate);
-
-      // ล็อก stock balance แถวของ material นี้ แล้วบวกยอด
-      const stockBalanceRepository = manager.getRepository(StockBalance);
-      let balance = await stockBalanceRepository.findOne({
-        where: { materialId: receiving.materialId },
-        lock: { mode: 'pessimistic_write' },
-      });
-      const quantityBefore = balance ? balance.quantity : '0';
-      const quantityAfter = this.addDecimals(
-        quantityBefore,
-        receiving.receiveQuantity,
-      );
-
-      if (!balance) {
-        balance = stockBalanceRepository.create({
-          materialId: receiving.materialId,
-          quantity: quantityAfter,
-          lastMovementAt: new Date(),
-        });
-      } else {
-        balance.quantity = quantityAfter;
-        balance.lastMovementAt = new Date();
-      }
-      await stockBalanceRepository.save(balance);
-
-      // บันทึก stock transaction
-      const stockTransactionRepository =
-        manager.getRepository(StockTransaction);
-      const transaction = stockTransactionRepository.create({
-        materialId: receiving.materialId,
-        transactionType: 'RECEIVE',
-        referenceType: 'MATERIAL_RECEIVING',
-        referenceId: receiving.id,
-        referenceLotNo: receiving.internalLotNo,
-        quantityBefore: this.fromScaled(this.toScaled(quantityBefore)),
-        quantityIn: this.fromScaled(this.toScaled(receiving.receiveQuantity)),
-        quantityOut: this.fromScaled(0n),
-        quantityAfter,
-        transactionDate: new Date(),
-        remark: `Confirmed from receiving ${receiving.internalLotNo}`,
-        createdBy: userId,
-      });
-      await stockTransactionRepository.save(transaction);
-
-      // Update all package status to in_stock
-      const packageRepository = manager.getRepository(MaterialReceivingPackage);
-      await packageRepository.update(
-        { materialReceivingId: id },
-        { status: 'in_stock' },
-      );
-
-      receiving.status = 'confirmed';
-      receiving.confirmedBy = userId;
-      receiving.confirmedAt = new Date();
-      receiving.updatedBy = userId;
-      await this.saveReceiving(receivingRepository, receiving);
-    });
+    await this.dataSource.transaction((manager) =>
+      this.confirmWithManager(manager, id, userId),
+    );
     return this.findOne(id);
+  }
+
+  private async confirmWithManager(
+    manager: EntityManager,
+    id: string,
+    userId: string,
+  ): Promise<void> {
+    const receivingRepository = manager.getRepository(MaterialReceiving);
+    const receiving = await receivingRepository.findOne({
+      where: { id },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!receiving) {
+      throw new NotFoundException('Material receiving not found');
+    }
+    if (receiving.status !== 'draft') {
+      throw new ConflictException(
+        'Only a draft material receiving can be confirmed',
+      );
+    }
+    this.assertReceiveDateNotFuture(receiving.receiveDate);
+
+    // ล็อก stock balance แถวของ material นี้ แล้วบวกยอด
+    const stockBalanceRepository = manager.getRepository(StockBalance);
+    let balance = await stockBalanceRepository.findOne({
+      where: { materialId: receiving.materialId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const quantityBefore = balance ? balance.quantity : '0';
+    const stockQuantity = receiving.piecesQuantity ?? receiving.receiveQuantity;
+    const quantityAfter = this.addDecimals(quantityBefore, stockQuantity);
+
+    if (!balance) {
+      balance = stockBalanceRepository.create({
+        materialId: receiving.materialId,
+        quantity: quantityAfter,
+        lastMovementAt: new Date(),
+      });
+    } else {
+      balance.quantity = quantityAfter;
+      balance.lastMovementAt = new Date();
+    }
+    await stockBalanceRepository.save(balance);
+
+    // บันทึก stock transaction
+    const stockTransactionRepository = manager.getRepository(StockTransaction);
+    const transaction = stockTransactionRepository.create({
+      materialId: receiving.materialId,
+      transactionType: 'RECEIVE',
+      referenceType: 'MATERIAL_RECEIVING',
+      referenceId: receiving.id,
+      referenceLotNo: receiving.internalLotNo,
+      quantityBefore: this.fromScaled(this.toScaled(quantityBefore)),
+      quantityIn: this.fromScaled(this.toScaled(stockQuantity)),
+      quantityOut: this.fromScaled(0n),
+      quantityAfter,
+      transactionDate: new Date(),
+      remark: `Confirmed from receiving ${receiving.internalLotNo}`,
+      createdBy: userId,
+    });
+    await stockTransactionRepository.save(transaction);
+
+    // Update all package status to in_stock
+    const packageRepository = manager.getRepository(MaterialReceivingPackage);
+    await packageRepository.update(
+      { materialReceivingId: id },
+      { status: 'in_stock' },
+    );
+
+    receiving.status = 'confirmed';
+    receiving.confirmedBy = userId;
+    receiving.confirmedAt = new Date();
+    receiving.updatedBy = userId;
+    await this.saveReceiving(receivingRepository, receiving);
   }
 
   async cancel(
@@ -560,9 +608,11 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
           lock: { mode: 'pessimistic_write' },
         });
         const quantityBefore = balance ? balance.quantity : '0';
+        const stockQuantity =
+          receiving.piecesQuantity ?? receiving.receiveQuantity;
         const quantityAfter = this.subtractDecimals(
           quantityBefore,
-          receiving.receiveQuantity,
+          stockQuantity,
         );
         if (balance) {
           balance.quantity = quantityAfter;
@@ -581,9 +631,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
             referenceLotNo: receiving.internalLotNo,
             quantityBefore: this.fromScaled(this.toScaled(quantityBefore)),
             quantityIn: this.fromScaled(0n),
-            quantityOut: this.fromScaled(
-              this.toScaled(receiving.receiveQuantity),
-            ),
+            quantityOut: this.fromScaled(this.toScaled(stockQuantity)),
             quantityAfter,
             transactionDate: new Date(),
             remark: `Cancelled receiving ${receiving.internalLotNo}: ${dto.cancelReason.trim()}`,
@@ -770,8 +818,10 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       }
     }
 
-    const showReceive = !query.type || query.type === 'receive' || query.type === 'both';
-    const showDisbursement = !query.type || query.type === 'disbursement' || query.type === 'both';
+    const showReceive =
+      !query.type || query.type === 'receive' || query.type === 'both';
+    const showDisbursement =
+      !query.type || query.type === 'disbursement' || query.type === 'both';
 
     const receiveDateCondition = (prefix: string) => {
       const parts: string[] = [];
@@ -793,9 +843,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     };
 
     const materialCondition = (matAlias: string) =>
-      query.materialId
-        ? `AND ${matAlias}.id = '${query.materialId}'`
-        : '';
+      query.materialId ? `AND ${matAlias}.id = '${query.materialId}'` : '';
 
     // ── 1) Receiving rows ─────────────────────────────────────────────────────
     if (showReceive) {
@@ -828,7 +876,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         WHERE 1=1 ${receiveDateCondition('mr')} ${materialCondition('m')}
         ORDER BY mr.receive_date DESC, mr.internal_lot_no DESC
       `;
-      const receiveRows = await this.dataSource.query(receiveSql);
+      const receiveRows =
+        await this.dataSource.query<UnifiedReportRow[]>(receiveSql);
       rows.push(...receiveRows);
     }
 
@@ -889,7 +938,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
           AND agg.material_code IS NOT NULL
         ORDER BY md.disbursement_date DESC, md.disbursement_no DESC
       `;
-      const disburseRows = await this.dataSource.query(disburseSql);
+      const disburseRows =
+        await this.dataSource.query<UnifiedReportRow[]>(disburseSql);
       rows.push(...disburseRows);
     }
 
@@ -909,7 +959,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       meta: {
         totalItems: rows.length,
         totalReceive: rows.filter((r) => r.docType === 'receive').length,
-        totalDisbursement: rows.filter((r) => r.docType === 'disbursement').length,
+        totalDisbursement: rows.filter((r) => r.docType === 'disbursement')
+          .length,
         generatedAt: new Date().toISOString(),
         filters: query,
       },
@@ -945,7 +996,19 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       where: { materialReceivingId: id },
       order: { packageNo: 'ASC' },
     });
-    return Object.assign(receiving, { packages });
+    return Object.assign(receiving, {
+      qrLevel: 'MAIN' as const,
+      convertedQuantity: receiving.piecesQuantity ?? receiving.receiveQuantity,
+      packages: packages.map((pkg) =>
+        Object.assign(pkg, {
+          parentQrId: receiving.id,
+          mainQrId: receiving.id,
+          qrLevel: 'SUB' as const,
+          initialQuantity: pkg.quantity,
+          currentQuantity: pkg.remainingQuantity,
+        }),
+      ),
+    });
   }
 
   async findByInternalLotNo(
@@ -1002,7 +1065,9 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
    * Return the base64 QR code for a specific package.
    */
   async getPackageQrCode(packageId: string): Promise<string | null> {
-    const pkg = await this.packageRepository.findOne({ where: { id: packageId } });
+    const pkg = await this.packageRepository.findOne({
+      where: { id: packageId },
+    });
     return pkg?.qrCode ?? null;
   }
 
@@ -1024,7 +1089,10 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
    * matching the convention used by Material / Unit / MaterialSupplier).
    */
   async getSuppliersByMaterial(materialId: string) {
-    await this.assertActiveMaterial(this.receivingRepository.manager, materialId);
+    await this.assertActiveMaterial(
+      this.receivingRepository.manager,
+      materialId,
+    );
     const mappings = await this.receivingRepository.manager
       .getRepository(SupplierMaterial)
       .find({
@@ -1057,6 +1125,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         order: { code: 'ASC' },
       }),
     ]);
+    const unitsById = new Map(units.map((unit) => [unit.id, unit]));
     return {
       suppliers: suppliers.map((s) => this.toLookup(s)),
       materials: materials.map((m) => ({
@@ -1067,7 +1136,10 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         materialType: m.materialType ?? null,
         ratio: m.ratio ?? null,
         unitId: m.unitId,
-        unit: m.unitId,
+        unit:
+          unitsById.get(m.unitId)?.symbol ??
+          unitsById.get(m.unitId)?.code ??
+          m.unitId,
       })),
       units: units.map((u) => this.toLookup(u)),
     };
@@ -1265,17 +1337,18 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     return mappings[0].supplierId;
   }
 
-  /** packageCount = CEIL(receiveQuantity / packingQuantity) */
+  /** packageCount = CEIL(stockQuantity / packingQuantity) */
   private computePackageCount(
-    receiveQuantity: string,
+    stockQuantity: string,
     packingQuantity: number,
   ): number {
     if (packingQuantity < 1) {
       throw new BadRequestException('packingQuantity must be >= 1');
     }
-    const qty =
-      Number(this.toScaled(receiveQuantity)) / Math.pow(10, DECIMAL_SCALE);
-    return Math.ceil(qty / packingQuantity);
+    const qty = this.toScaled(stockQuantity);
+    const scaledPacking =
+      BigInt(packingQuantity) * 10n ** BigInt(DECIMAL_SCALE);
+    return Number((qty + scaledPacking - 1n) / scaledPacking);
   }
 
   /** Material shapes that require a `ratio` value (cut per piece). */
@@ -1288,48 +1361,48 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   /**
-   * คำนวณจำนวนชิ้นที่ใช้ได้จริง (piecesQuantity)
-   *   - PCS  → null (1 ชิ้น = 1 ชิ้น, ใช้ receiveQuantity แทน)
-   *   - PIPE / SHEET / COIL → receiveQuantity × ratio (เก็บทั้งต้นทางและชิ้นสุดท้าย)
-   * คืนเป็น string ที่ scaled ตาม DECIMAL_SCALE เพื่อเก็บใน numeric column
+   * Resolve the quantity used by packaging and inventory.
+   *   - other shapes → receiveQuantity (existing 1:1 behaviour)
+   *   - PIPE / SHEET / COIL → receiveQuantity × ratio
+   * Returns a DECIMAL_SCALE string; callers only persist it to
+   * piecesQuantity for ratio-based shapes.
    */
-  private computePiecesQuantity(
+  private computeStockQuantity(
     receiveQuantity: string,
     materialType: string | null,
     ratio: number | null,
-  ): string | null {
+  ): string {
     if (!this.requiresRatio(materialType)) {
-      return null;
+      return this.fromScaled(this.toScaled(receiveQuantity));
     }
     if (ratio === null || ratio < 1) {
       throw new BadRequestException(
-        `Cannot compute piecesQuantity without a valid ratio for materialType=${materialType}`,
+        `Material shape ${materialType} requires a valid ratio for receiving.`,
       );
     }
-    const qty =
-      Number(this.toScaled(receiveQuantity)) / Math.pow(10, DECIMAL_SCALE);
-    const pieces = qty * ratio;
-    return pieces.toFixed(DECIMAL_SCALE);
+    return this.fromScaled(this.toScaled(receiveQuantity) * BigInt(ratio));
   }
 
   /**
    * คำนวณ breakdown: package 1..N-1 เต็ม packingQuantity, package สุดท้ายเอาเศษ
-   * SUM(package.quantity) === receiveQuantity เสมอ
+   * SUM(package.quantity) === stockQuantity เสมอ
    */
   private buildPackageBreakdown(
-    receiveQuantity: string,
+    stockQuantity: string,
     packingQuantity: number,
     packageCount: number,
   ): { packageNo: number; quantity: string }[] {
-    const total =
-      Number(this.toScaled(receiveQuantity)) / Math.pow(10, DECIMAL_SCALE);
-    const fullQty = packingQuantity;
+    let remaining = this.toScaled(stockQuantity);
+    const fullQty = BigInt(packingQuantity) * 10n ** BigInt(DECIMAL_SCALE);
     const packages: { packageNo: number; quantity: string }[] = [];
-    let remaining = total;
     for (let i = 1; i <= packageCount; i += 1) {
       const value =
-        i === packageCount ? remaining : Math.min(fullQty, remaining);
-      packages.push({ packageNo: i, quantity: value.toFixed(DECIMAL_SCALE) });
+        i === packageCount
+          ? remaining
+          : remaining < fullQty
+            ? remaining
+            : fullQty;
+      packages.push({ packageNo: i, quantity: this.fromScaled(value) });
       remaining -= value;
     }
     return packages;
@@ -1535,6 +1608,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       materialId: receiving.materialId,
       unitId: receiving.unitId,
       receiveQuantity: receiving.receiveQuantity,
+      convertedQuantity: receiving.piecesQuantity ?? receiving.receiveQuantity,
+      qrLevel: 'MAIN' as const,
       packingQuantity: receiving.packingQuantity,
       packageCount: receiving.packageCount,
       piecesQuantity: receiving.piecesQuantity,
@@ -1560,6 +1635,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       createdAt: receiving.createdAt,
       updatedAt: receiving.updatedAt,
       supplier: receiving.supplier ? this.toLookup(receiving.supplier) : null,
+      unit: receiving.unit ? this.toLookup(receiving.unit) : null,
       material: receiving.material
         ? {
             id: receiving.material.id,
@@ -1571,10 +1647,15 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       packages: receiving.packages
         ? receiving.packages.map((pkg) => ({
             id: pkg.id,
+            parentQrId: receiving.id,
+            mainQrId: receiving.id,
+            qrLevel: 'SUB' as const,
             packageNo: pkg.packageNo,
             lotDetailNo: pkg.lotDetailNo,
             quantity: pkg.quantity,
+            initialQuantity: pkg.quantity,
             remainingQuantity: pkg.remainingQuantity,
+            currentQuantity: pkg.remainingQuantity,
             qrCode: pkg.qrCode,
             status: pkg.status,
           }))

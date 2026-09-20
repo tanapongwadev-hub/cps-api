@@ -31,6 +31,28 @@ export type BomWithItems = Omit<ProductBom, 'items' | 'product'> & {
   }>;
 };
 
+/** One row of "which BOM/product uses this material" — the result shape of
+ *  `findByMaterial()`. Deliberately a flat, per-item shape (not grouped into
+ *  a nested BomWithItems tree) since the consumer (Materials PC's BOM/Product
+ *  usage dialog) wants one row per product/BOM/qty, not a full item list. */
+export interface BomUsageRow {
+  bomItemId: string;
+  bomId: string;
+  bomVersion: string;
+  bomStatus: BomStatus;
+  productId: string;
+  productCode: string;
+  productName: string;
+  materialId: string;
+  materialCode: string;
+  materialName: string;
+  quantity: number;
+  unitId: string;
+  unitNameTh: string;
+  isScrap: boolean;
+  wastagePercent: number | null;
+}
+
 @Injectable()
 export class BomsService {
   private readonly logger = new Logger(BomsService.name);
@@ -38,6 +60,8 @@ export class BomsService {
   constructor(
     @InjectRepository(ProductBom)
     private bomRepository: Repository<ProductBom>,
+    @InjectRepository(ProductBomItem)
+    private bomItemRepository: Repository<ProductBomItem>,
     @InjectRepository(Material)
     private materialRepository: Repository<Material>,
     @InjectRepository(Unit)
@@ -109,6 +133,46 @@ export class BomsService {
       order: { createdAt: 'DESC' },
     });
     return boms.map((bom) => this.buildBomResponse(bom));
+  }
+
+  /**
+   * "Where is this material used?" — every BOM item across every product
+   * that references this material, newest BOM first. One query (item ->
+   * bom -> product, item -> material, item -> unit all joined in a single
+   * SelectQueryBuilder), so listing usage for N materials never turns into
+   * N+1 — this method is only ever called for one material at a time
+   * (on-demand from a dialog), but the query shape itself already supports
+   * an `IN (...)` batch call later if a future caller needs it.
+   */
+  async findByMaterial(materialId: string): Promise<BomUsageRow[]> {
+    const items = await this.bomItemRepository
+      .createQueryBuilder('item')
+      .innerJoinAndSelect('item.bom', 'bom')
+      .innerJoinAndSelect('bom.product', 'product')
+      .leftJoinAndSelect('item.material', 'material')
+      .leftJoinAndSelect('item.unit', 'unit')
+      .where('item.materialId = :materialId', { materialId })
+      .orderBy('bom.createdAt', 'DESC')
+      .addOrderBy('item.sortOrder', 'ASC')
+      .getMany();
+
+    return items.map((item) => ({
+      bomItemId: item.id,
+      bomId: item.bomId,
+      bomVersion: item.bom.version,
+      bomStatus: item.bom.status,
+      productId: item.bom.productId,
+      productCode: item.bom.product?.code ?? '',
+      productName: item.bom.product?.name ?? '',
+      materialId: item.materialId,
+      materialCode: item.material?.code ?? '',
+      materialName: item.material?.name ?? '',
+      quantity: Number(item.quantity),
+      unitId: item.unitId,
+      unitNameTh: item.unit?.nameTh ?? '',
+      isScrap: item.isScrap,
+      wastagePercent: item.wastagePercent ? Number(item.wastagePercent) : null,
+    }));
   }
 
   async findOne(id: string): Promise<BomWithItems> {

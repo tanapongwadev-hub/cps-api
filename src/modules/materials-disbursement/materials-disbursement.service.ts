@@ -564,13 +564,13 @@ export class MaterialsDisbursementService {
         SELECT mr.id FROM inventory.material_receivings mr
         WHERE mr.material_id = :materialId
       )`, { materialId: item.materialId })
-      .andWhere('pkg.status = :status', { status: 'in_stock' })
+      .andWhere('pkg.status IN (:...statuses)', { statuses: ['in_stock', 'partial'] })
       .orderBy('receiving.receiveDate', 'ASC')
       .addOrderBy('pkg.id', 'ASC')
       .getMany();
 
     const totalAvailable = packages.reduce(
-      (sum, p) => sum + this.toScaled(p.quantity),
+      (sum, p) => sum + this.toScaled(p.remainingQuantity),
       0n,
     );
 
@@ -598,20 +598,18 @@ export class MaterialsDisbursementService {
     for (const pkg of packages) {
       if (remainingQty <= 0n) break;
 
-      const pkgQty = this.toScaled(pkg.quantity);
+      const pkgQty = this.toScaled(pkg.remainingQuantity);
       const qtyToDeduct = pkgQty < remainingQty ? pkgQty : remainingQty;
 
-      // Update package
-      const newPkgQty = this.fromScaled(pkgQty - qtyToDeduct);
-      if (newPkgQty === '0.0000') {
-        // Fully used
-        pkg.quantity = '0.0000';
-        pkg.status = 'issued';
-      } else {
-        // Partial use
-        pkg.quantity = newPkgQty;
-        // status stays 'in_stock'
-      }
+      // Update package — decrement remainingQuantity (the live/current amount
+      // in the box). `quantity` is the immutable original box size recorded
+      // at receive time and must never be mutated here: doing so both
+      // destroys that record and trips the DB's `qty > 0` check constraint
+      // the moment a box is fully consumed (remainingQuantity is allowed to
+      // reach 0; `quantity` never should).
+      const newRemainingQty = this.fromScaled(pkgQty - qtyToDeduct);
+      pkg.remainingQuantity = newRemainingQty;
+      pkg.status = newRemainingQty === '0.0000' ? 'issued' : 'partial';
       await packageRepo.save(pkg);
 
       // Record which package was used
@@ -693,11 +691,16 @@ export class MaterialsDisbursementService {
       if (!pkg) continue;
 
       const restoredQty = this.toScaled(record.disbursedQuantity);
-      const currentPkgQty = this.toScaled(pkg.quantity);
+      const currentRemaining = this.toScaled(pkg.remainingQuantity);
+      const originalQty = this.toScaled(pkg.quantity);
 
-      // Restore package quantity
-      pkg.quantity = this.fromScaled(currentPkgQty + restoredQty);
-      pkg.status = 'in_stock';
+      // Restore remainingQuantity (never `quantity`, the immutable original
+      // box size — see processFifoForItem's comment above), clamped to the
+      // original amount as a defensive guard against ever exceeding it.
+      let newRemaining = currentRemaining + restoredQty;
+      if (newRemaining > originalQty) newRemaining = originalQty;
+      pkg.remainingQuantity = this.fromScaled(newRemaining);
+      pkg.status = newRemaining >= originalQty ? 'in_stock' : 'partial';
       await packageRepo.save(pkg);
 
       totalRestored += restoredQty;
@@ -780,6 +783,17 @@ export class MaterialsDisbursementService {
     if (query.disbursementDateTo) {
       queryBuilder.andWhere('disbursement.disbursement_date <= :disbursementDateTo', {
         disbursementDateTo: query.disbursementDateTo,
+      });
+    }
+    if (query.materialId) {
+      // `items`/`material` are already left-joined above, so this narrows
+      // the SQL result set to rows whose item references this material —
+      // no extra join, no N+1. The hydrated `items` array on each returned
+      // disbursement will only contain the line(s) for this material, which
+      // is the intended "history for this material" scoping used by
+      // /materials/pc's "รายการจ่ายออก" action.
+      queryBuilder.andWhere('material.id = :materialId', {
+        materialId: query.materialId,
       });
     }
     return queryBuilder;
@@ -883,7 +897,12 @@ export class MaterialsDisbursementService {
             requestedQuantity: item.requestedQuantity,
             disbursedQuantity: item.disbursedQuantity,
             material: item.material
-              ? { id: item.material.id, code: item.material.code, name: item.material.name }
+              ? {
+                  id: item.material.id,
+                  code: item.material.code,
+                  name: item.material.name,
+                  imagePath: item.material.imagePath,
+                }
               : null,
           }))
         : [],
@@ -918,7 +937,12 @@ export class MaterialsDisbursementService {
         requestedQuantity: item.requestedQuantity,
         disbursedQuantity: item.disbursedQuantity,
         material: item.material
-          ? { id: item.material.id, code: item.material.code, name: item.material.name }
+          ? {
+              id: item.material.id,
+              code: item.material.code,
+              name: item.material.name,
+              imagePath: item.material.imagePath,
+            }
           : null,
         packages: (packagesByItem.get(item.id) ?? []).map((pkg) => ({
           id: pkg.id,

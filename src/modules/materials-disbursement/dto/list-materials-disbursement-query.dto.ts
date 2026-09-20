@@ -41,6 +41,11 @@ export class ListMaterialsDisbursementQueryDto {
   @IsString()
   disbursementDateTo?: string;
 
+  /** กรองรายการจ่ายออกเฉพาะที่มี item อ้างอิงวัสดุนี้ */
+  @IsOptional()
+  @IsString()
+  materialId?: string;
+
   @IsOptional()
   @IsIn(DISBURSEMENT_SORT_COLUMNS)
   sortBy?: DisbursementSortBy = 'disbursementDate';
