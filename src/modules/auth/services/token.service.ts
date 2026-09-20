@@ -13,7 +13,7 @@ export class TokenService {
   signAccess(payload: Record<string, unknown>): string {
     return this.jwtService.sign(payload, {
       secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-      expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '8h'),
+      expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
     });
   }
 

@@ -356,6 +356,15 @@ export async function seed(dataSource: DataSource) {
         sort_order: 97,
       },
       {
+        code: 'MATERIALS_PC_OVERVIEW',
+        name_th: 'ภาพรวมวัตถุดิบ',
+        name_en: 'Materials Overview',
+        path: '/materials/pc',
+        icon: 'gauge',
+        sort_order: 85,
+        parentCode: 'MATERIALS_MANAGEMENTS', // submenu under จัดการวัสดุ — the real Materials CRUD page (create/edit/disable), same resource/permission as its own parent
+      },
+      {
         code: 'MATERIALS_RECEIVING',
         name_th: 'รับเข้าวัตถุดิบ',
         name_en: 'Materials Receiving',

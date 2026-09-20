@@ -106,6 +106,15 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     POST: MATERIALS_DISBURSEMENT_PERMISSIONS.CONFIRM,
     CANCEL: MATERIALS_DISBURSEMENT_PERMISSIONS.CANCEL,
   },
+  // /materials/pc — the real Materials CRUD page, added as a sidebar
+  // submenu under MATERIALS_MANAGEMENTS (see migration
+  // 1786700000013-AddMaterialsPcOverviewMenu.ts). Same resource/permission
+  // as its own parent menu — reuses MATERIAL_VIEW rather than minting a new
+  // code, same "share a sibling's VIEW permission" pattern as the report
+  // menus below.
+  MATERIALS_PC_OVERVIEW: {
+    READ: `${MATERIAL_PERMISSIONS.VIEW}`,
+  },
   // Report menus — read-only (VIEW only)
   MATERIALS_RECEIVING_REPORT: {
     READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
@@ -135,6 +144,7 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
 
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
 export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
+  MATERIALS_PC_OVERVIEW: ['READ'],
   MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
   MATERIALS_DISBURSEMENT: MATERIALS_DISBURSEMENT_ACTION_CODES,
   // Report menus — read-only

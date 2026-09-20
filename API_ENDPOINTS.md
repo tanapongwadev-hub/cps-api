@@ -69,6 +69,7 @@ Exceptions: Products return only `meta.totalItems`; lookup/report/single endpoin
 | `POST` | `/auth/refresh`           | Public     | `{ refreshToken: string }`                                                    | Rotate/refresh access context after session checks                                         |
 | `POST` | `/auth/refresh-token`     | Public     | Same as `/refresh`                                                            | Alias                                                                                      |
 | `POST` | `/auth/logout`            | JWT        | none                                                                          | Revoke current session; returns `{ success: true, message: "Logout successful" }`          |
+| `POST` | `/auth/logout-refresh`    | Public     | `{ refreshToken: string }`                                                    | Verify refresh signature and revoke its session without a valid access token               |
 | `GET`  | `/auth/me`                | JWT        | none                                                                          | Current user and active assignment context                                                 |
 | `GET`  | `/auth/me/menus`          | JWT        | none                                                                          | Returns `{ menus: [...] }` for current role                                                |
 | `GET`  | `/auth/me/permissions`    | JWT        | none                                                                          | Returns `{ permissions: string[] }`                                                        |
@@ -76,6 +77,12 @@ Exceptions: Products return only `meta.totalItems`; lookup/report/single endpoin
 Login may return either a complete authentication result or a department-selection token when the user must choose an assignment. Failed login can increment failure count and lock the account after the configured threshold.
 
 Common auth failures include `INVALID_CREDENTIALS`, inactive/locked user, invalid or expired selection/refresh token, revoked/expired session, and inactive/invalid assignment.
+
+Refresh lifecycle (2026-09-19): `/auth/refresh` preserves the login response envelope, including `data.authentication`. It locks the existing `iam.auth_sessions` row, rotates Argon2 hashes and keeps the session ID and absolute expiry. Concurrent use of the previous token within 30 seconds returns the identical successor; use after that grace period revokes the session. Only hashes and non-secret JWT claims are persisted. Apply migration `1789800000000-AddRefreshRotation` before deploying this code.
+
+Access expiry returns `401 ACCESS_TOKEN_EXPIRED`; malformed access credentials return `ACCESS_TOKEN_INVALID`. Refresh errors use `REFRESH_TOKEN_EXPIRED`, `REFRESH_TOKEN_INVALID`, or `REFRESH_TOKEN_REVOKED`; session/account failures use `SESSION_EXPIRED`, `SESSION_REVOKED`, or `ACCOUNT_DISABLED`. Permission denial remains 403. Defaults: `JWT_ACCESS_EXPIRES_IN=15m`, `JWT_REFRESH_EXPIRES_IN=7d`. Session expiry follows the original signed refresh expiry and is not extended by rotation.
+
+`/auth/logout-refresh` supports server-side web clients whose access token has expired. It verifies the refresh signature/expiry and atomically revokes its session. The web client owns clearing its HttpOnly cookies; the API does not receive browser cookies in this architecture.
 
 ## 4. SUPER_ADMIN administration
 

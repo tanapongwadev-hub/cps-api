@@ -31,6 +31,18 @@ export class AuthSession {
   @Column({ name: 'refresh_token_hash', type: 'varchar', length: 255 })
   refreshTokenHash: string;
 
+  @Column({ name: 'previous_refresh_token_hash', type: 'varchar', length: 255, nullable: true })
+  previousRefreshTokenHash: string | null;
+
+  @Column({ name: 'refresh_grace_until', type: 'timestamp', nullable: true })
+  refreshGraceUntil: Date | null;
+
+  @Column({ name: 'refresh_claims', type: 'jsonb', nullable: true })
+  refreshClaims: Record<string, unknown> | null;
+
+  @Column({ name: 'last_used_at', type: 'timestamp', nullable: true })
+  lastUsedAt: Date | null;
+
   @Column({ name: 'ip_address', type: 'varchar', length: 45, nullable: true })
   ipAddress: string;
 

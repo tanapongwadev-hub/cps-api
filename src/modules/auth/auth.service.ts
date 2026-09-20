@@ -25,6 +25,7 @@ import {
   UserLockedException,
 } from '../../common/exceptions/custom-exceptions';
 import { getEnvNumber } from '../../config/env.utils';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class AuthService {
@@ -229,79 +230,128 @@ export class AuthService {
     return await this.selectDepartment(userId, userDepartmentRoleId);
   }
 
+  private verifyRefreshToken(token: string): JwtPayload {
+    const secret = this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
+    try {
+      const payload = this.jwtService.verify<JwtPayload>(token, {
+        secret,
+        algorithms: ['HS256'],
+      });
+      if (!payload.sub || !payload.sessionId) throw new Error('Invalid claims');
+      return payload;
+    } catch (error) {
+      throw new UnauthorizedException({
+        code: error instanceof Error && error.name === 'TokenExpiredError'
+          ? 'REFRESH_TOKEN_EXPIRED' : 'REFRESH_TOKEN_INVALID',
+        message: 'Refresh token rejected',
+      });
+    }
+  }
+
   async refreshToken(refreshToken: string) {
-    // Verify refresh token and load session
-    const payload = this.jwtService.verify(refreshToken, {
-      secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
-    });
-
-    const session = await this.authSessionRepository
-      .createQueryBuilder('session')
-      .leftJoinAndSelect('session.activeUserDepartmentRole', 'udr')
-      .leftJoinAndSelect('udr.department', 'department')
-      .leftJoinAndSelect('udr.role', 'role')
-      .where('session.id = :sessionId', { sessionId: payload.sessionId })
-      .andWhere('session.userId = :userId', { userId: payload.sub })
-      .andWhere('session.revokedAt IS NULL')
-      .andWhere('session.expiresAt > :now', { now: new Date() })
-      .getOne();
-
-    if (!session) {
-      throw new UnauthorizedException('Invalid or expired refresh token');
-    }
-
-    if (
-      !(await this.tokenService.compareRefreshToken(
-        refreshToken,
-        session.refreshTokenHash,
-      ))
-    ) {
-      session.revokedAt = new Date();
-      await this.authSessionRepository.save(session);
-      throw new UnauthorizedException('Invalid or expired refresh token');
-    }
-
-    const user = await this.userRepository.findOne({
-      where: { id: payload.sub },
-    });
-    if (!user || !user.isActive || user.isLocked) {
-      // Revoke session
-      session.revokedAt = new Date();
-      await this.authSessionRepository.save(session);
-      throw new UnauthorizedException('User account is inactive or locked');
-    }
-
-    // Check permission version
-    if (user.permissionVersion !== payload.permissionVersion) {
-      // Revoke session
-      session.revokedAt = new Date();
-      await this.authSessionRepository.save(session);
-      throw new UnauthorizedException(
-        'Permission version changed, please login again',
+    const payload = this.verifyRefreshToken(refreshToken);
+    // The database lock serializes rotation across API workers and browser tabs.
+    // Return terminal errors from the transaction so revocation is committed.
+    const result = await this.authSessionRepository.manager.transaction(async (manager) => {
+      const sessions = manager.getRepository(AuthSession);
+      const session = await sessions.findOne({
+        where: { id: payload.sessionId, userId: payload.sub },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const failure = (code: string) => ({ error: code } as const);
+      if (!session) return failure('REFRESH_TOKEN_INVALID');
+      if (session.revokedAt) return failure('REFRESH_TOKEN_REVOKED');
+      const now = Date.now();
+      if (new Date(session.expiresAt).getTime() <= now) return failure('SESSION_EXPIRED');
+      const current = await this.tokenService.compareRefreshToken(refreshToken, session.refreshTokenHash);
+      const previous = !current && session.previousRefreshTokenHash &&
+        await this.tokenService.compareRefreshToken(refreshToken, session.previousRefreshTokenHash);
+      if (!current && !(previous && session.refreshGraceUntil && new Date(session.refreshGraceUntil).getTime() > now)) {
+        session.revokedAt = new Date(now);
+        await sessions.save(session);
+        return failure('REFRESH_TOKEN_REVOKED');
+      }
+      const user = await manager.getRepository(User).findOne({ where: { id: payload.sub } });
+      if (!user || !user.isActive || user.isLocked || user.permissionVersion !== payload.permissionVersion) {
+        session.revokedAt = new Date(now);
+        await sessions.save(session);
+        return failure(!user || !user.isActive || user.isLocked ? 'ACCOUNT_DISABLED' : 'SESSION_REVOKED');
+      }
+      const assignment = session.activeUserDepartmentRoleId
+        ? await manager.getRepository(UserDepartmentRole).findOne({
+            where: { id: session.activeUserDepartmentRoleId, userId: user.id },
+            relations: ['role', 'department'],
+          })
+        : null;
+      if (session.activeUserDepartmentRoleId && (!assignment || !assignment.isActive ||
+          (assignment.expiredAt && new Date(assignment.expiredAt).getTime() <= now) ||
+          !assignment.role?.isActive || (assignment.department && !assignment.department.isActive))) {
+        session.revokedAt = new Date(now);
+        await sessions.save(session);
+        return failure('SESSION_REVOKED');
+      }
+      const claims: JwtPayload = {
+        sub: user.id, sessionId: session.id,
+        userDepartmentRoleId: assignment?.id ?? null,
+        departmentId: assignment?.departmentId ?? null,
+        roleCode: (assignment?.role?.code as RoleCode) ?? null,
+        permissionVersion: user.permissionVersion,
+      };
+      if (current) {
+        session.previousRefreshTokenHash = session.refreshTokenHash;
+        session.refreshGraceUntil = new Date(now + 30_000);
+        session.refreshClaims = {
+          ...claims, jti: randomUUID(), iat: Math.floor(now / 1000),
+          exp: Math.floor(new Date(session.expiresAt).getTime() / 1000),
+        };
+      }
+      if (!session.refreshClaims) return failure('REFRESH_TOKEN_INVALID');
+      // Only non-secret signed claims are stored. Concurrent retries reconstruct
+      // the identical successor token instead of creating another generation.
+      const stored = session.refreshClaims;
+      // jsonb does not preserve object key order. Canonicalize before signing
+      // so every worker reconstructs byte-for-byte identical JWTs.
+      const refreshClaims = Object.fromEntries(
+        Object.keys(stored).filter((key) => key !== 'exp').sort().map((key) => [key, stored[key]]),
       );
+      const successor = this.jwtService.sign(refreshClaims, {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        algorithm: 'HS256',
+        expiresIn: Number(stored.exp) - Number(refreshClaims.iat),
+      });
+      if (current) session.refreshTokenHash = await this.tokenService.hashRefreshToken(successor);
+      session.lastUsedAt = new Date(now);
+      await sessions.save(session);
+      const accessToken = this.tokenService.signAccess({ ...claims });
+      return { user, assignment, authentication: {
+        accessToken, refreshToken: successor, tokenType: 'Bearer',
+        expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
+      } };
+    });
+    if ('error' in result) {
+      throw new UnauthorizedException({ code: result.error, message: 'Authentication session cannot be refreshed' });
     }
-
-    // Generate new tokens
-    const newTokens = await this.generateTokens(
-      user,
-      session.activeUserDepartmentRole,
+    return this.buildAuthenticationResponse(
+      result.user, result.assignment,
+      result.authentication.accessToken, result.authentication.refreshToken,
     );
+  }
 
-    // Revoke old session
-    session.revokedAt = new Date();
-    await this.authSessionRepository.save(session);
-
-    return newTokens;
+  async logoutWithRefreshToken(refreshToken: string) {
+    const payload = this.verifyRefreshToken(refreshToken);
+    // A signed token identifies its session even after rotation. Revoking is
+    // deliberately idempotent and does not require a live access token.
+    await this.authSessionRepository.update(
+      { id: payload.sessionId, userId: payload.sub },
+      { revokedAt: new Date() },
+    );
   }
 
   async logout(sessionId: string) {
-    const session = await this.authSessionRepository.findOne({
-      where: { id: sessionId },
-    });
-    if (session) {
-      session.revokedAt = new Date();
-      await this.authSessionRepository.save(session);
-    }
+    await this.authSessionRepository.update(
+      { id: sessionId },
+      { revokedAt: new Date() },
+    );
   }
 
   private async generateTokens(
@@ -322,7 +372,8 @@ export class AuthService {
     session.userId = user.id;
     session.activeUserDepartmentRoleId = assignment?.id || null;
     session.refreshTokenHash = ''; // Will be set after token generation
-    session.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    // Set below from the signed refresh token so JWT and session TTL agree.
+    session.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const savedSession = await this.authSessionRepository.save(session);
     payload.sessionId = savedSession.id;
@@ -330,7 +381,7 @@ export class AuthService {
     // Generate tokens
     const accessToken = this.jwtService.sign(payload, {
       secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-      expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '8h'),
+      expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
     });
 
     const refreshToken = this.jwtService.sign(payload, {
@@ -342,6 +393,8 @@ export class AuthService {
     const refreshTokenHash =
       await this.tokenService.hashRefreshToken(refreshToken);
     savedSession.refreshTokenHash = refreshTokenHash;
+    const refreshClaims = this.jwtService.decode(refreshToken) as { exp: number };
+    savedSession.expiresAt = new Date(refreshClaims.exp * 1000);
     await this.authSessionRepository.save(savedSession);
 
     // Update last login
@@ -410,7 +463,7 @@ export class AuthService {
           accessToken,
           refreshToken,
           tokenType: 'Bearer',
-          expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '8h'),
+          expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
         },
         user: {
           id: user.id,

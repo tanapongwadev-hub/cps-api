@@ -5,6 +5,6 @@ export interface JwtPayload {
   sessionId: string;
   userDepartmentRoleId: string | null;
   departmentId: string | null;
-  roleCode: RoleCode;
+  roleCode: RoleCode | null;
   permissionVersion: number;
 }

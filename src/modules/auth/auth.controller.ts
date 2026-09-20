@@ -95,6 +95,13 @@ export class AuthController {
     return { success: true, message: 'Logout successful' };
   }
 
+  @Public()
+  @Post('logout-refresh')
+  async logoutRefresh(@Body() body: RefreshTokenDto) {
+    await this.authService.logoutWithRefreshToken(body.refreshToken);
+    return { success: true, message: 'Logout successful' };
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me')
   async getMe(@CurrentUser() user: CurrentUserWithAssignment) {
