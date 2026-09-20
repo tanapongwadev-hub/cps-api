@@ -12,9 +12,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * 6. เพิ่ม `attachment_name` (varchar 255, nullable) — ชื่อไฟล์เดิม
  * 7. ลบ `idempotency_key` และ unique index ที่เกี่ยวข้อง
  */
-export class AddPoNoAndMaterialSnapshotToReceiving1786700000001
-  implements MigrationInterface
-{
+export class AddPoNoAndMaterialSnapshotToReceiving1786700000001 implements MigrationInterface {
   name = 'AddPoNoAndMaterialSnapshotToReceiving1786700000001';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

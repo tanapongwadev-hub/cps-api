@@ -516,7 +516,7 @@ draft --confirm--> confirmed --cancel--> cancelled
   └----------------cancel--------------> cancelled
 ```
 
-Confirm increases `stock_balances`, creates a RECEIVE `stock_transactions` row, and changes packages to `in_stock`. Cancel of a confirmed document subtracts the received quantity and records an ADJUST transaction atomically; current code does not reset receiving-package status or guard against downstream FIFO use. Numeric fields remain decimal strings in JSON.
+**Traceability ledger (added 2026-09-20, see `docs/material-traceability.md`):** every receiving/disbursement document, `stock_transactions` row, and audit-log entry now carries a `traceId` (`TRC-RCV-...`/`TRC-ISS-...`), so the full set of records produced by one business transaction can be found by that single id. Confirm increases `stock_balances` and writes **one `RECEIVE` `stock_transactions` row per SUB QR (package)** — not one aggregate row per document — with `mainQrId` (the receiving id) and `subQrId` (the package id) populated, and changes packages to `in_stock`. Cancel of a confirmed document is blocked once any package has been partially or fully issued; otherwise it subtracts the received quantity, writes one `CANCEL` reversal `stock_transactions` row per package (never an `ADJUST` row — `ADJUST_IN`/`ADJUST_OUT` are reserved for physical-count corrections), and sets every package's status to `cancelled` (packages are never hard-deleted). Every command (`create`/`update`/`remove`/`confirm`/`cancel`) also writes a transactional `iam.audit_logs` row (`CREATE`/`UPDATE`/`DELETE`/`APPROVE`/`CANCEL`) inside the same database transaction as the ledger/balance writes — see `src/common/stock-ledger.ts`, the one write seam both this module and Materials Disbursement share. `remove` (`DELETE /materials-receiving/:id`) is a soft cancel (`status: 'cancelled'`), not a hard delete, and now requires the caller's user id for the audit trail. Numeric fields remain decimal strings in JSON.
 
 ## 10. Materials Disbursement — `/materials-disbursement`
 
@@ -548,7 +548,11 @@ Create body:
 }
 ```
 
-`stock_cut` requires `reason`. At least one item is required by service and each quantity must be greater than zero. Confirm processes oldest receiving packages first and fails the entire transaction when available stock is insufficient. Cancel body is `{ cancelReason: non-empty string }`.
+`stock_cut` requires `reason`. At least one item is required by service and each quantity must be greater than zero. Create/update also accept `departmentId?`, `productionOrder?`, `referenceNo?`, `requestedBy?` — destination/reference metadata added for traceability (2026-09-20).
+
+Confirm processes oldest receiving packages first (true FIFO — ordered by `receiving.receiveDate` then `package.id`) and fails the entire transaction when available stock is insufficient. It writes **one `ISSUE` `stock_transactions` row per package it draws from**, each carrying `mainQrId`/`subQrId`, `departmentId`, `productionOrder`, and `referenceNo`, plus one `material_disbursement_packages` row per package recording `fifoOrder` (1-based, in draw order). `remove` (`DELETE /materials-disbursement/:id`) is a soft cancel, not a hard delete, and now requires the caller's user id.
+
+Cancel body is `{ cancelReason: non-empty string }`. Cancelling a **confirmed** disbursement restores each drawn package's `remainingQuantity` (clamped to its original `quantity`, status becomes `in_stock` or `partial`), writes one `CANCEL` reversal `stock_transactions` row per package, and marks each `material_disbursement_packages` allocation row `reversedAt`/`reversedBy` — **the allocation row itself is never deleted**, so FIFO trace history survives a cancellation. Cancelling an already-cancelled document 409s (idempotent). Every command writes a transactional `iam.audit_logs` row with a real `traceId`; see `docs/material-traceability.md`.
 
 Report query: `startDate?`, `endDate?`, `status?`, `disbursementType?`. Report rows include requested/disbursed quantities, document/type/status labels, and source lot numbers.
 
@@ -598,6 +602,7 @@ Inventory query supports `page`, `limit` (max 100), `search`, `isActive`, `type`
 | BOM                   | `BOMS_VIEW                                                                                                                                                   | CREATE | UPDATE | DELETE`; constants `BOMS_ACTIVATE`, `BOMS_DEACTIVATE`exist but activate/deactivate routes currently require`BOMS_UPDATE` |
 | Product Workflow      | `PRODUCT_WORKFLOWS_VIEW                                                                                                                                      | CREATE | UPDATE | DELETE`— activate/deactivate routes require`PRODUCT_WORKFLOWS_UPDATE`, same pattern as BOMs                              |
 | Process Step (master) | `PROCESS_STEP_VIEW`, `PROCESS_STEP_CREATE`, `PROCESS_STEP_UPDATE`, `PROCESS_STEP_DELETE` — restore uses `PROCESS_STEP_UPDATE`, same pattern as Delivery type |
+| Material Traceability | No dedicated code — every route requires **either** `MATERIALS_RECEIVING_VIEW` **or** `MATERIALS_DISBURSEMENT_VIEW` via `@RequireAnyPermissions` (OR semantics, distinct from `@RequirePermissions`'s AND). Read-only; the report reuses the two source modules' own VIEW permissions rather than minting a new one. |
 
 ## 13. HTTP status/error guide
 
@@ -676,3 +681,54 @@ Master data catalog for Product Workflow steps (§ 15) — full CRUD, structural
 Row shape: `{ id, code, nameTh, nameEn, description, isActive, createdBy, updatedBy, createdAt, updatedAt }`. Seeded on creation (migration `1786700000007-AddProcessStepsMaster.ts`) with 8 example rows (`PS-01` สั่งผลิต … `PS-08` ปิดกระบวนการผลิต) — an editable starting catalog, not a fixed enum; add/deactivate more via this CRUD. `product_workflow_steps.process_step_id` has `ON DELETE RESTRICT` against this table, so a process step referenced by any workflow step cannot be hard-deleted (not that this API exposes a hard delete anyway — only soft-deactivate).
 
 Permission codes (`PROCESS_STEP_VIEW/CREATE/UPDATE/DELETE`) are not seeded into any permissions table yet — same caveat as `BOMS_*`/`PRODUCT_WORKFLOWS_*`, work for `SUPER_ADMIN` only until seeded.
+
+## 17. Material Traceability — `/material-traceability`
+
+Read-only reporting module added 2026-09-20 for end-to-end Receiving ↔ Disbursement traceability. Uses `inventory.stock_transactions` as the single source of truth (never re-derives a running balance from receiving/disbursement rows directly) — see `docs/material-traceability.md` for the full design writeup and the data model this module reads.
+
+| Method | Path                                | Permission                                    | Behavior                                                                              |
+| ------ | ----------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `GET`  | `/material-traceability`            | `MATERIALS_RECEIVING_VIEW` OR `MATERIALS_DISBURSEMENT_VIEW` | Summary + paginated movements in one call, same filter set                            |
+| `GET`  | `/material-traceability/summary`    | (same)                                          | Summary cards + running-balance reconciliation only                                    |
+| `GET`  | `/material-traceability/movements`  | (same)                                          | Paginated `stock_transactions` rows only                                               |
+| `GET`  | `/material-traceability/qr/:code`   | (same)                                          | Scan-and-resolve — tries a SUB QR (`lotDetailNo`) first, falls back to a MAIN QR (`internalLotNo`); 404 if neither matches |
+| `GET`  | `/material-traceability/main-qr/:id`| (same)                                          | MAIN QR (receiving) detail: packages, movements, issue history, current remaining      |
+| `GET`  | `/material-traceability/sub-qr/:id` | (same)                                          | SUB QR (package) detail: parent MAIN QR, movements, issue history, adjustment history   |
+| `GET`  | `/material-traceability/receivings/:id`   | (same)                                    | Receiving-centered trace (alias of `main-qr/:id` after existence-checking the receiving) |
+| `GET`  | `/material-traceability/disbursements/:id`| (same)                                    | Disbursement-centered trace: header, items, FIFO allocations (including reversed ones), movements |
+
+### 17.1 Query filters (all optional, all combinable)
+
+`page`, `limit` (max 200, default 50), `dateFrom`, `dateTo` (both `YYYY-MM-DD`, inclusive), `materialId`, `materialCode`, `materialName`, `materialType` (`PC`/`OF`/`OF_MAT` — the *type*), `shape` (`PCS`/`PIPE`/`SHEET`/`COIL` — the physical *shape*), `internalLotNo`, `supplierLotNo`, `mainQr` (partial match on internal lot no), `subQr` (partial match on lot-detail no), `transactionType` (one of the 8 `stock_transactions` types), `receivingNo` (partial match), `disbursementNo` (partial match), `supplierId`, `departmentId`, `productionOrder` (partial match), `referenceNo` (partial match), `operator` (partial match on username), `status` (the linked document's `draft|confirmed|cancelled`).
+
+**Every filter binds as a parameterized query value — never string-concatenated into SQL.** The exact same `QueryMaterialTraceabilityDto` shape drives the summary, the paginated table, both drill-downs' underlying movement lists, and (client-side, in the frontend export code) CSV/Excel/PDF exports, so a filtered screen and its export can never disagree.
+
+### 17.2 Summary response shape
+
+```json
+{
+  "receivingCount": 12,
+  "disbursementCount": 8,
+  "totalReceived": "480.0000",
+  "totalIssued": "120.0000",
+  "currentBalance": "360.0000",
+  "lotCount": 12,
+  "mainQrCount": 12,
+  "subQrCount": 34,
+  "activeQrCount": 21,
+  "exhaustedQrCount": 13,
+  "reconciliation": [
+    { "materialId": "3", "materialCode": "OF-STPIPE-002", "ledgerBalance": "40.0000", "stockBalance": "40.0000", "isMatched": true }
+  ],
+  "hasMismatch": false,
+  "reconciliationTruncated": false
+}
+```
+
+`currentBalance` is the net of the **filtered** ledger slice (informational). `reconciliation[]` is the authoritative check — for every distinct material touched by the current filter (capped at 25 materials per request, see `MAX_RECONCILED_MATERIALS` in the service; `reconciliationTruncated: true` if the cap was hit), it sums that material's **entire, unfiltered** `stock_transactions` history (`quantity_in - quantity_out`) and compares it against the live `stock_balances.quantity` row. `isMatched: false` on any entry is a real **STOCK MISMATCH** per the spec's §11 — the frontend must surface this visibly, not silently.
+
+### 17.3 Design notes
+
+- No new tables or duplicate business logic — this module only reads `stock_transactions`/`material_receivings`/`material_receiving_packages`/`materials_disbursements`/`material_disbursement_packages`, all of which already existed (or were extended, see the migration in §9/§10) for the operational write paths.
+- MAIN QR = a `MaterialReceiving` row; SUB QR = a `MaterialReceivingPackage` row. These aren't separate QR entities — this module's "QR trace" is a read-oriented view over the receiving/package hierarchy that already carries the real QR image data.
+- FIFO allocation history (`material_disbursement_packages`) is never deleted on cancel — only `reversedAt`/`reversedBy` are set — so `disbursements/:id`'s `fifoAllocations[]` always shows the original allocation plus, if reversed, who/when reversed it.

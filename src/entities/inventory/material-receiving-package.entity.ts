@@ -17,6 +17,7 @@ export const PACKAGE_STATUSES = [
   'issued',
   'damaged',
   'returned',
+  'cancelled',
 ] as const;
 
 export type PackageStatus = (typeof PACKAGE_STATUSES)[number];
@@ -39,7 +40,12 @@ export class MaterialReceivingPackage {
    * Populated from the receiving's internal lot no + sequential package suffix.
    */
   @Index({ unique: true })
-  @Column({ name: 'lot_detail_no', type: 'varchar', length: 40, nullable: true })
+  @Column({
+    name: 'lot_detail_no',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
   lotDetailNo: string | null;
 
   @Column({ type: 'numeric', precision: 18, scale: 4 })
@@ -47,11 +53,17 @@ export class MaterialReceivingPackage {
 
   /**
    * Remaining/current quantity in this box — starts equal to `quantity` at
-   * receive time. Nothing decrements this yet (materials-disbursement's
-   * FIFO consumption logic is unchanged/out of scope for Material
-   * Receiving) — see AGENTS.md § Material Receiving for the follow-up.
+   * receive time. Decremented by materials-disbursement's FIFO consumption
+   * (`processFifoForItem`), which also flips `status` to `partial`/`issued`
+   * as this reaches zero, and restored by its cancel-side reversal
+   * (`revertFifoForItem`) — see docs/material-traceability.md.
    */
-  @Column({ name: 'remaining_quantity', type: 'numeric', precision: 18, scale: 4 })
+  @Column({
+    name: 'remaining_quantity',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+  })
   remainingQuantity: string;
 
   @Column({ name: 'qr_code', type: 'text', nullable: true })
@@ -68,7 +80,7 @@ export class MaterialReceivingPackage {
   updatedAt: Date;
 
   @ManyToOne(() => MaterialReceiving, (receiving) => receiving.packages, {
-    onDelete: 'CASCADE',
+    onDelete: 'RESTRICT',
   })
   @JoinColumn({ name: 'material_receiving_id' })
   materialReceiving: MaterialReceiving;

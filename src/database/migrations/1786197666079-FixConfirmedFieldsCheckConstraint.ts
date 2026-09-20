@@ -7,9 +7,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * cancelled fields ถูกตรวจใน chk_material_receivings_cancelled_fields แยกแล้ว
  */
-export class FixConfirmedFieldsCheckConstraint1786197666079
-  implements MigrationInterface
-{
+export class FixConfirmedFieldsCheckConstraint1786197666079 implements MigrationInterface {
   name = 'FixConfirmedFieldsCheckConstraint1786197666079';
 
   async up(queryRunner: QueryRunner): Promise<void> {

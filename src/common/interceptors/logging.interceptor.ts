@@ -71,8 +71,16 @@ export class LoggingInterceptor implements NestInterceptor {
     if (!data) return data;
     // Auth responses contain nested tokens. Redact before truncating so no
     // prefix of an access/refresh/selection token reaches application logs.
-    const sensitive = new Set(['accessToken', 'refreshToken', 'departmentSelectionToken', 'password', 'token']);
-    const stringified = JSON.stringify(data, (key, value) => sensitive.has(key) ? '***' : value);
+    const sensitive = new Set([
+      'accessToken',
+      'refreshToken',
+      'departmentSelectionToken',
+      'password',
+      'token',
+    ]);
+    const stringified = JSON.stringify(data, (key, value) =>
+      sensitive.has(key) ? '***' : value,
+    );
     if (stringified.length > 500) {
       return stringified.substring(0, 500) + '... (truncated)';
     }

@@ -156,9 +156,17 @@ export class CreateMaterialsDisbursement1786700000003 implements MigrationInterf
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE IF EXISTS inventory.material_disbursement_packages`);
-    await queryRunner.query(`DROP TABLE IF EXISTS inventory.material_disbursement_items`);
-    await queryRunner.query(`DROP TABLE IF EXISTS inventory.materials_disbursements`);
-    await queryRunner.query(`DROP TABLE IF EXISTS inventory.materials_disbursement_counters`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS inventory.material_disbursement_packages`,
+    );
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS inventory.material_disbursement_items`,
+    );
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS inventory.materials_disbursements`,
+    );
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS inventory.materials_disbursement_counters`,
+    );
   }
 }

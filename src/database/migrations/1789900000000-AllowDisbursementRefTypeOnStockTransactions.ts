@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AllowDisbursementRefTypeOnStockTransactions1789900000000
-  implements MigrationInterface
-{
+export class AllowDisbursementRefTypeOnStockTransactions1789900000000 implements MigrationInterface {
   name = 'AllowDisbursementRefTypeOnStockTransactions1789900000000';
 
   // stock_transactions.reference_type's check constraint (from the original

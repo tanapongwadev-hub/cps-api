@@ -33,6 +33,15 @@ export class MaterialDisbursementPackage {
   })
   disbursedQuantity: string;
 
+  @Column({ name: 'fifo_order', type: 'integer', nullable: true })
+  fifoOrder: number | null;
+
+  @Column({ name: 'reversed_at', type: 'timestamp', nullable: true })
+  reversedAt: Date | null;
+
+  @Column({ name: 'reversed_by', type: 'bigint', nullable: true })
+  reversedBy: string | null;
+
   @Column({ name: 'created_by', type: 'bigint', nullable: true })
   createdBy: string | null;
 

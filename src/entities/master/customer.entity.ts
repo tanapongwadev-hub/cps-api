@@ -29,7 +29,12 @@ export class Customer {
   @Column({ name: 'tax_id', type: 'varchar', length: 20, nullable: true })
   taxId: string | null;
 
-  @Column({ name: 'contact_name', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'contact_name',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   contactName: string | null;
 
   @Column({ type: 'varchar', length: 50, nullable: true })

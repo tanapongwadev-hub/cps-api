@@ -56,6 +56,10 @@ export class MaterialReceiving {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id: string;
 
+  @Index({ unique: true })
+  @Column({ name: 'trace_id', type: 'varchar', length: 40 })
+  traceId: string;
+
   @Column({ name: 'run_no', type: 'varchar', length: 20, nullable: true })
   runNo: string | null;
 
@@ -129,7 +133,12 @@ export class MaterialReceiving {
    * Snapshot of material.materialType at the time of receiving
    * (PCS / PIPE / SHEET / COIL). Used to decide how `piecesQuantity` is computed.
    */
-  @Column({ name: 'material_type', type: 'varchar', length: 20, nullable: true })
+  @Column({
+    name: 'material_type',
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
   materialType: string | null;
 
   /**
@@ -171,11 +180,21 @@ export class MaterialReceiving {
   piecesQrPayload: PiecesQrPayload | null;
 
   /** Path ของไฟล์แนบ (รูปภาพ / เอกสาร PO) — optional */
-  @Column({ name: 'attachment_url', type: 'varchar', length: 500, nullable: true })
+  @Column({
+    name: 'attachment_url',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   attachmentUrl: string | null;
 
   /** ชื่อไฟล์เดิมของไฟล์แนบ */
-  @Column({ name: 'attachment_name', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'attachment_name',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   attachmentName: string | null;
 
   @Column({ type: 'text', nullable: true })

@@ -72,7 +72,9 @@ export async function seed(dataSource: DataSource) {
       'DEFAULT_ORGANIZATION_CODE',
       'CPS',
     );
-    const defaultOrganizationCode = configuredOrganizationCode.trim().toUpperCase();
+    const defaultOrganizationCode = configuredOrganizationCode
+      .trim()
+      .toUpperCase();
     if (!defaultOrganizationCode) {
       throw new Error('DEFAULT_ORGANIZATION_CODE must not be empty');
     }
@@ -461,7 +463,9 @@ export async function seed(dataSource: DataSource) {
           ],
         );
         menuIdMap[menu.code] = result[0].id;
-        console.log(`  ✓ Created menu: ${menu.code}${parentId ? ' (submenu)' : ''}`);
+        console.log(
+          `  ✓ Created menu: ${menu.code}${parentId ? ' (submenu)' : ''}`,
+        );
       } else {
         const current = existing[0];
         menuIdMap[menu.code] = current.id;
@@ -488,7 +492,9 @@ export async function seed(dataSource: DataSource) {
             values,
           );
           if (needsParentUpdate) {
-            console.log(`  ✓ Updated menu parent: ${menu.code}${parentId ? ' → submenu' : ' → main menu'}`);
+            console.log(
+              `  ✓ Updated menu parent: ${menu.code}${parentId ? ' → submenu' : ' → main menu'}`,
+            );
           }
           if (needsPathUpdate) {
             console.log(`  ✓ Updated menu path: ${menu.code} → ${menu.path}`);

@@ -22,9 +22,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Guarded with IF NOT EXISTS so this is a no-op on databases that predate the
  * deletions and already carry both objects.
  */
-export class RestoreMaterialPackingQuantityAndRejectReasons1786700000010
-  implements MigrationInterface
-{
+export class RestoreMaterialPackingQuantityAndRejectReasons1786700000010 implements MigrationInterface {
   name = 'RestoreMaterialPackingQuantityAndRejectReasons1786700000010';
 
   async up(queryRunner: QueryRunner): Promise<void> {

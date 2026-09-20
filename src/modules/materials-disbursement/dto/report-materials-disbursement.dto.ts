@@ -1,9 +1,8 @@
+import { IsOptional, IsDateString, IsIn } from 'class-validator';
 import {
-  IsOptional,
-  IsDateString,
-  IsIn,
-} from 'class-validator';
-import { DISBURSEMENT_STATUSES, DISBURSEMENT_TYPES } from '../materials-disbursement.entity';
+  DISBURSEMENT_STATUSES,
+  DISBURSEMENT_TYPES,
+} from '../materials-disbursement.entity';
 
 export class ReportMaterialsDisbursementQueryDto {
   @IsOptional()

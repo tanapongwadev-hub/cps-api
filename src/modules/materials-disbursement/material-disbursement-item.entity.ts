@@ -53,9 +53,13 @@ export class MaterialDisbursementItem {
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
   updatedAt: Date;
 
-  @ManyToOne(() => MaterialsDisbursement, (disbursement) => disbursement.items, {
-    onDelete: 'CASCADE',
-  })
+  @ManyToOne(
+    () => MaterialsDisbursement,
+    (disbursement) => disbursement.items,
+    {
+      onDelete: 'CASCADE',
+    },
+  )
   @JoinColumn({ name: 'disbursement_id' })
   disbursement: MaterialsDisbursement;
 

@@ -8,7 +8,10 @@ import { StockBalancesController } from './stock-balances.controller';
 import { StockBalancesService } from './stock-balances.service';
 
 @Module({
-  imports: [AccessControlModule, TypeOrmModule.forFeature([StockBalance, Material])],
+  imports: [
+    AccessControlModule,
+    TypeOrmModule.forFeature([StockBalance, Material]),
+  ],
   controllers: [StockBalancesController],
   providers: [StockBalancesService, PermissionGuard],
   exports: [StockBalancesService, PermissionGuard],

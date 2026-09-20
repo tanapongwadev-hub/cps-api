@@ -30,7 +30,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(payload: JwtPayload) {
     if (!payload.sub || !payload.sessionId) {
-      throw new UnauthorizedException({ code: 'ACCESS_TOKEN_INVALID', message: 'Invalid token payload' });
+      throw new UnauthorizedException({
+        code: 'ACCESS_TOKEN_INVALID',
+        message: 'Invalid token payload',
+      });
     }
 
     const [user, session] = await Promise.all([
@@ -41,13 +44,26 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     ]);
     const now = Date.now();
     if (!user || !user.isActive || user.isLocked) {
-      throw new UnauthorizedException({ code: 'ACCOUNT_DISABLED', message: 'Account unavailable' });
+      throw new UnauthorizedException({
+        code: 'ACCOUNT_DISABLED',
+        message: 'Account unavailable',
+      });
     }
-    if (!session || session.revokedAt || user.permissionVersion !== payload.permissionVersion) {
-      throw new UnauthorizedException({ code: 'SESSION_REVOKED', message: 'Session revoked' });
+    if (
+      !session ||
+      session.revokedAt ||
+      user.permissionVersion !== payload.permissionVersion
+    ) {
+      throw new UnauthorizedException({
+        code: 'SESSION_REVOKED',
+        message: 'Session revoked',
+      });
     }
     if (new Date(session.expiresAt).getTime() <= now) {
-      throw new UnauthorizedException({ code: 'SESSION_EXPIRED', message: 'Session expired' });
+      throw new UnauthorizedException({
+        code: 'SESSION_EXPIRED',
+        message: 'Session expired',
+      });
     }
 
     let activeDepartmentId: string | null = null;
@@ -69,7 +85,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         assignment.departmentId !== payload.departmentId ||
         assignment.role.code !== String(payload.roleCode)
       ) {
-        throw new UnauthorizedException({ code: 'SESSION_REVOKED', message: 'Assignment is no longer valid' });
+        throw new UnauthorizedException({
+          code: 'SESSION_REVOKED',
+          message: 'Assignment is no longer valid',
+        });
       }
       activeDepartmentId = assignment.departmentId;
       activeRoleCode = assignment.role.code;

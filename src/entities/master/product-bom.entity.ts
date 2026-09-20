@@ -110,7 +110,13 @@ export class ProductBomItem {
   isScrap: boolean;
 
   /** % ของเสียที่คาดว่าจะเกิด */
-  @Column({ name: 'wastage_percent', type: 'decimal', precision: 5, scale: 2, nullable: true })
+  @Column({
+    name: 'wastage_percent',
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+  })
   wastagePercent: number | null;
 
   /** หมายเหตุ/คำอธิบายเพิ่มเติม */

@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddProcessStepsMaster1786700000007
-  implements MigrationInterface
-{
+export class AddProcessStepsMaster1786700000007 implements MigrationInterface {
   name = 'AddProcessStepsMaster1786700000007';
 
   async up(queryRunner: QueryRunner): Promise<void> {

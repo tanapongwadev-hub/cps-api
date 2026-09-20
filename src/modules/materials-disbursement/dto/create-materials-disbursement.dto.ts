@@ -35,6 +35,22 @@ export class CreateMaterialsDisbursementDto {
 
   @IsOptional()
   @IsString()
+  departmentId?: string;
+
+  @IsOptional()
+  @IsString()
+  productionOrder?: string;
+
+  @IsOptional()
+  @IsString()
+  referenceNo?: string;
+
+  @IsOptional()
+  @IsString()
+  requestedBy?: string;
+
+  @IsOptional()
+  @IsString()
   attachmentUrl?: string;
 
   @IsOptional()

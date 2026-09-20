@@ -40,7 +40,10 @@ async function seedMasterData() {
     const unitIdMap: Record<string, string> = {};
     const unitCodes = ['PCS', 'SET', 'KG', 'LTR', 'COIL', 'SHEET', 'PIPE'];
     for (const code of unitCodes) {
-      const rows = await qr.query(`SELECT id FROM master.units WHERE code = $1`, [code]);
+      const rows = await qr.query(
+        `SELECT id FROM master.units WHERE code = $1`,
+        [code],
+      );
       if (rows.length > 0) {
         unitIdMap[code] = rows[0].id;
         console.log(`  - unit ${code} -> id=${rows[0].id}`);
@@ -58,7 +61,10 @@ async function seedMasterData() {
       { code: 'PICKUP', nameTh: 'รับเอง', nameEn: 'Pickup' },
     ];
     for (const d of deliverySeed) {
-      const existing = await qr.query(`SELECT id FROM master.delivery_types WHERE code = $1`, [d.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.delivery_types WHERE code = $1`,
+        [d.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.delivery_types (code, name_th, name_en, is_active, created_at, updated_at)
@@ -84,7 +90,10 @@ async function seedMasterData() {
       { code: 'DOCK-3', nameTh: 'จุดขนถ่าย 3', nameEn: 'Loading Dock 3' },
     ];
     for (const lp of loadingPointSeed) {
-      const existing = await qr.query(`SELECT id FROM master.loading_points WHERE code = $1`, [lp.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.loading_points WHERE code = $1`,
+        [lp.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.loading_points (code, name_th, name_en, is_active, created_at, updated_at)
@@ -105,14 +114,42 @@ async function seedMasterData() {
     console.log('\nSeeding product_models...');
     const productModelIdMap: Record<string, string> = {};
     const productModelSeed = [
-      { code: 'CMRY-2024', nameTh: 'Toyota Camry 2024', nameEn: 'Toyota Camry 2024', brand: 'Toyota' },
-      { code: 'CIVC-2024', nameTh: 'Honda Civic 2024', nameEn: 'Honda Civic 2024', brand: 'Honda' },
-      { code: 'CRLA-2024', nameTh: 'Toyota Corolla Altis 2024', nameEn: 'Toyota Corolla Altis 2024', brand: 'Toyota' },
-      { code: 'HILX-2024', nameTh: 'Toyota Hilux Revo 2024', nameEn: 'Toyota Hilux Revo 2024', brand: 'Toyota' },
-      { code: 'FRZA-2024', nameTh: 'Mazda BT-50 2024', nameEn: 'Mazda BT-50 2024', brand: 'Mazda' },
+      {
+        code: 'CMRY-2024',
+        nameTh: 'Toyota Camry 2024',
+        nameEn: 'Toyota Camry 2024',
+        brand: 'Toyota',
+      },
+      {
+        code: 'CIVC-2024',
+        nameTh: 'Honda Civic 2024',
+        nameEn: 'Honda Civic 2024',
+        brand: 'Honda',
+      },
+      {
+        code: 'CRLA-2024',
+        nameTh: 'Toyota Corolla Altis 2024',
+        nameEn: 'Toyota Corolla Altis 2024',
+        brand: 'Toyota',
+      },
+      {
+        code: 'HILX-2024',
+        nameTh: 'Toyota Hilux Revo 2024',
+        nameEn: 'Toyota Hilux Revo 2024',
+        brand: 'Toyota',
+      },
+      {
+        code: 'FRZA-2024',
+        nameTh: 'Mazda BT-50 2024',
+        nameEn: 'Mazda BT-50 2024',
+        brand: 'Mazda',
+      },
     ];
     for (const m of productModelSeed) {
-      const existing = await qr.query(`SELECT id FROM master.product_models WHERE code = $1`, [m.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.product_models WHERE code = $1`,
+        [m.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.product_models (code, name_th, name_en, brand, is_active, created_at, updated_at)
@@ -133,18 +170,57 @@ async function seedMasterData() {
     console.log('\nSeeding customers...');
     const customerIdMap: Record<string, string> = {};
     const customerSeed = [
-      { code: 'CUST-TOY', nameTh: 'บริษัท โตโยต้า มอเตอร์ จำกัด', nameEn: 'Toyota Motor Thailand', taxId: '0105556000123', contactName: 'คุณสมชาย ใจดี', telephone: '02-555-6000' },
-      { code: 'CUST-HND', nameTh: 'บริษัท ฮอนด้า ออโตโมบิล จำกัด', nameEn: 'Honda Automobile Thailand', taxId: '0105555000234', contactName: 'คุณสมหญิง รักไทย', telephone: '02-555-5000' },
-      { code: 'CUST-MZD', nameTh: 'บริษัท มาสด้า เซลส์ จำกัด', nameEn: 'Mazda Sales Thailand', taxId: '0105554000345', contactName: 'คุณมานี ขยัน', telephone: '02-555-4000' },
-      { code: 'CUST-ISZ', nameTh: 'บริษัท อีซูซุ มอเตอร์ จำกัด', nameEn: 'Isuzu Motors Thailand', taxId: '0105553000456', contactName: 'คุณมานพ เก่งกล้า', telephone: '02-555-3000' },
+      {
+        code: 'CUST-TOY',
+        nameTh: 'บริษัท โตโยต้า มอเตอร์ จำกัด',
+        nameEn: 'Toyota Motor Thailand',
+        taxId: '0105556000123',
+        contactName: 'คุณสมชาย ใจดี',
+        telephone: '02-555-6000',
+      },
+      {
+        code: 'CUST-HND',
+        nameTh: 'บริษัท ฮอนด้า ออโตโมบิล จำกัด',
+        nameEn: 'Honda Automobile Thailand',
+        taxId: '0105555000234',
+        contactName: 'คุณสมหญิง รักไทย',
+        telephone: '02-555-5000',
+      },
+      {
+        code: 'CUST-MZD',
+        nameTh: 'บริษัท มาสด้า เซลส์ จำกัด',
+        nameEn: 'Mazda Sales Thailand',
+        taxId: '0105554000345',
+        contactName: 'คุณมานี ขยัน',
+        telephone: '02-555-4000',
+      },
+      {
+        code: 'CUST-ISZ',
+        nameTh: 'บริษัท อีซูซุ มอเตอร์ จำกัด',
+        nameEn: 'Isuzu Motors Thailand',
+        taxId: '0105553000456',
+        contactName: 'คุณมานพ เก่งกล้า',
+        telephone: '02-555-3000',
+      },
     ];
     for (const c of customerSeed) {
-      const existing = await qr.query(`SELECT id FROM master.customers WHERE code = $1`, [c.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.customers WHERE code = $1`,
+        [c.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.customers (code, name_th, name_en, tax_id, contact_name, telephone, is_active, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, true, $7, $7) RETURNING id`,
-          [c.code, c.nameTh, c.nameEn, c.taxId, c.contactName, c.telephone, now],
+          [
+            c.code,
+            c.nameTh,
+            c.nameEn,
+            c.taxId,
+            c.contactName,
+            c.telephone,
+            now,
+          ],
         );
         customerIdMap[c.code] = r[0].id;
         console.log(`  ✓ Created customer: ${c.code}`);
@@ -160,12 +236,33 @@ async function seedMasterData() {
     console.log('\nSeeding locations...');
     const locationIdMap: Record<string, string> = {};
     const locationSeed = [
-      { code: 'WH-A1', nameTh: 'คลัง A1', nameEn: 'Warehouse A1', zone: 'A', warehouse: 'Main' },
-      { code: 'WH-A2', nameTh: 'คลัง A2', nameEn: 'Warehouse A2', zone: 'A', warehouse: 'Main' },
-      { code: 'WH-B1', nameTh: 'คลัง B1', nameEn: 'Warehouse B1', zone: 'B', warehouse: 'Annex' },
+      {
+        code: 'WH-A1',
+        nameTh: 'คลัง A1',
+        nameEn: 'Warehouse A1',
+        zone: 'A',
+        warehouse: 'Main',
+      },
+      {
+        code: 'WH-A2',
+        nameTh: 'คลัง A2',
+        nameEn: 'Warehouse A2',
+        zone: 'A',
+        warehouse: 'Main',
+      },
+      {
+        code: 'WH-B1',
+        nameTh: 'คลัง B1',
+        nameEn: 'Warehouse B1',
+        zone: 'B',
+        warehouse: 'Annex',
+      },
     ];
     for (const l of locationSeed) {
-      const existing = await qr.query(`SELECT id FROM master.locations WHERE code = $1`, [l.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.locations WHERE code = $1`,
+        [l.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.locations (code, name_th, name_en, zone, warehouse, is_active, created_at, updated_at)
@@ -186,12 +283,30 @@ async function seedMasterData() {
     console.log('\nSeeding product_types...');
     const productTypeIdMap: Record<string, string> = {};
     const productTypeSeed = [
-      { code: 'FG', nameTh: 'สินค้าสำเร็จรูป', nameEn: 'Finished Goods', sortOrder: 1 },
-      { code: 'SFG', nameTh: 'สินค้ากึ่งสำเร็จรูป', nameEn: 'Semi-Finished Goods', sortOrder: 2 },
-      { code: 'WIP', nameTh: 'งานระหว่างทำ', nameEn: 'Work In Process', sortOrder: 3 },
+      {
+        code: 'FG',
+        nameTh: 'สินค้าสำเร็จรูป',
+        nameEn: 'Finished Goods',
+        sortOrder: 1,
+      },
+      {
+        code: 'SFG',
+        nameTh: 'สินค้ากึ่งสำเร็จรูป',
+        nameEn: 'Semi-Finished Goods',
+        sortOrder: 2,
+      },
+      {
+        code: 'WIP',
+        nameTh: 'งานระหว่างทำ',
+        nameEn: 'Work In Process',
+        sortOrder: 3,
+      },
     ];
     for (const pt of productTypeSeed) {
-      const existing = await qr.query(`SELECT id FROM master.product_types WHERE code = $1`, [pt.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.product_types WHERE code = $1`,
+        [pt.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.product_types (code, name_th, name_en, sort_order, is_active, created_at, updated_at)
@@ -218,7 +333,10 @@ async function seedMasterData() {
       { code: 'MCH-1', nameTh: 'สายกลึง 1', nameEn: 'Machining Line 1' },
     ];
     for (const pl of processLineSeed) {
-      const existing = await qr.query(`SELECT id FROM master.process_lines WHERE code = $1`, [pl.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.process_lines WHERE code = $1`,
+        [pl.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.process_lines (code, name_th, name_en, is_active, created_at, updated_at)
@@ -297,7 +415,10 @@ async function seedMasterData() {
       },
     ];
     for (const p of productSeed) {
-      const existing = await qr.query(`SELECT id FROM master.products WHERE code = $1`, [p.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.products WHERE code = $1`,
+        [p.code],
+      );
       // safety_stock = lotSize, min_stock = packing (formulas match service)
       const safetyStock = p.lotSize;
       const minStock = p.packing;
@@ -328,7 +449,9 @@ async function seedMasterData() {
           ],
         );
         productIdMap[p.code] = r[0].id;
-        console.log(`  ✓ Created product: ${p.code} (safety=${safetyStock}, min=${minStock})`);
+        console.log(
+          `  ✓ Created product: ${p.code} (safety=${safetyStock}, min=${minStock})`,
+        );
       } else {
         productIdMap[p.code] = existing[0].id;
         console.log(`  - product already exists: ${p.code}`);
@@ -346,7 +469,10 @@ async function seedMasterData() {
       { code: 'MAT-005', name: 'ผ้าเบรก', unitCode: 'PCS' },
     ];
     for (const m of materialSeed) {
-      const existing = await qr.query(`SELECT id FROM master.materials WHERE code = $1`, [m.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.materials WHERE code = $1`,
+        [m.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.materials (code, name, unit_id, is_active, packing_quantity, created_at, updated_at)
@@ -373,8 +499,18 @@ async function seedMasterData() {
         specification: 'BOM สำหรับเครื่องยนต์ 4 สูบ',
         remark: 'ใช้วัตถุดิบคุณภาพสูง',
         items: [
-          { materialCode: 'MAT-001', quantity: 250, unitCode: 'KG', wastagePercent: 5 },
-          { materialCode: 'MAT-004', quantity: 5, unitCode: 'LTR', wastagePercent: null },
+          {
+            materialCode: 'MAT-001',
+            quantity: 250,
+            unitCode: 'KG',
+            wastagePercent: 5,
+          },
+          {
+            materialCode: 'MAT-004',
+            quantity: 5,
+            unitCode: 'LTR',
+            wastagePercent: null,
+          },
         ],
       },
       {
@@ -383,7 +519,14 @@ async function seedMasterData() {
         status: 'DRAFT',
         specification: 'BOM สำหรับผ้าเบรกหน้า',
         remark: null,
-        items: [{ materialCode: 'MAT-005', quantity: 2, unitCode: 'PCS', wastagePercent: 10 }],
+        items: [
+          {
+            materialCode: 'MAT-005',
+            quantity: 2,
+            unitCode: 'PCS',
+            wastagePercent: 10,
+          },
+        ],
       },
     ];
     for (const bom of bomSeed) {
@@ -397,13 +540,24 @@ async function seedMasterData() {
         const r = await qr.query(
           `INSERT INTO master.product_boms (product_id, version, status, specification, remark, effective_from, effective_to, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, '2026-01-01', null, $6, $6) RETURNING id`,
-          [productId, bom.version, bom.status, bom.specification, bom.remark, now],
+          [
+            productId,
+            bom.version,
+            bom.status,
+            bom.specification,
+            bom.remark,
+            now,
+          ],
         );
         bomId = r[0].id;
-        console.log(`  ✓ Created BOM: ${bom.productCode} ${bom.version} (${bom.status})`);
+        console.log(
+          `  ✓ Created BOM: ${bom.productCode} ${bom.version} (${bom.status})`,
+        );
       } else {
         bomId = existing[0].id;
-        console.log(`  - BOM already exists: ${bom.productCode} ${bom.version}`);
+        console.log(
+          `  - BOM already exists: ${bom.productCode} ${bom.version}`,
+        );
         continue;
       }
       for (let i = 0; i < bom.items.length; i++) {
@@ -411,7 +565,15 @@ async function seedMasterData() {
         await qr.query(
           `INSERT INTO master.product_bom_items (bom_id, material_id, sort_order, quantity, unit_id, is_scrap, wastage_percent, remark, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, false, $6, null, $7, $7)`,
-          [bomId, matIdMap[item.materialCode], i + 1, item.quantity, unitIdMap[item.unitCode], item.wastagePercent, now],
+          [
+            bomId,
+            matIdMap[item.materialCode],
+            i + 1,
+            item.quantity,
+            unitIdMap[item.unitCode],
+            item.wastagePercent,
+            now,
+          ],
         );
       }
       console.log(`    → Added ${bom.items.length} items`);

@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ProductBom, ProductBomItem } from '../../entities/master/product-bom.entity';
+import {
+  ProductBom,
+  ProductBomItem,
+} from '../../entities/master/product-bom.entity';
 import { Material } from '../../entities/master/material.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { AccessControlModule } from '../access-control/access-control.module';

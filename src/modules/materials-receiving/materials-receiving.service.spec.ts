@@ -10,6 +10,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditLog } from '../../entities/iam/audit-log.entity';
 import { MaterialReceivingLotCounter } from '../../entities/inventory/material-receiving-lot-counter.entity';
 import { MaterialReceivingPackage } from '../../entities/inventory/material-receiving-package.entity';
 import { MaterialReceiving } from '../../entities/inventory/material-receiving.entity';
@@ -69,6 +70,7 @@ function makeQueryBuilder(result: {
     addOrderBy: jest.fn(() => builder),
     skip: jest.fn(() => builder),
     take: jest.fn(() => builder),
+    setLock: jest.fn(() => builder),
     getOne: jest.fn(() => Promise.resolve(result.one ?? null)),
     getMany: jest.fn(() => Promise.resolve(result.many ?? [])),
     getManyAndCount: jest.fn(() =>
@@ -189,6 +191,7 @@ function setup() {
   const unitRepo = makeRepo();
   const supplierMaterialRepo = makeRepo();
   const organizationRepo = makeRepo();
+  const auditLogRepo = makeRepo();
 
   // Default: findOne ด้วย createQueryBuilder ใช้สำหรับ findOne(id)
   const defaultReceiving = makeReceiving();
@@ -196,6 +199,12 @@ function setup() {
     makeQueryBuilder({ one: defaultReceiving }),
   );
   packageRepo.find.mockResolvedValue([]);
+  // confirm()/cancel() both build a locked query over packages via
+  // createQueryBuilder().setLock(...).getMany() — default to an empty list,
+  // individual tests override via packageRepo.createQueryBuilder.mockReturnValue(...)
+  packageRepo.createQueryBuilder.mockReturnValue(
+    makeQueryBuilder({ many: [] }),
+  );
 
   const repoMap: Record<string, RepoMock> = {
     [MaterialReceiving.name]: receivingRepo,
@@ -208,6 +217,7 @@ function setup() {
     [Unit.name]: unitRepo,
     [SupplierMaterial.name]: supplierMaterialRepo,
     [Organization.name]: organizationRepo,
+    [AuditLog.name]: auditLogRepo,
   };
 
   // transaction(callback) — เรียก callback ด้วย manager ที่มี repo map เดียวกัน
@@ -245,7 +255,6 @@ function setup() {
     receivingRepo as never,
     packageRepo as never,
     stockBalanceRepo as never,
-    stockTransactionRepo as never,
     lotCounterRepo as never,
     supplierRepo as never,
     materialRepo as never,
@@ -257,6 +266,7 @@ function setup() {
     service,
     moduleRef,
     dataSource,
+    repoMap,
     repos: {
       receivingRepo,
       packageRepo,
@@ -268,6 +278,7 @@ function setup() {
       unitRepo,
       supplierMaterialRepo,
       organizationRepo,
+      auditLogRepo,
     },
   };
 }
@@ -407,7 +418,7 @@ describe('MaterialsReceivingService', () => {
     });
 
     it('builds 5 packages of 200 each when receiveQuantity=1000 and packing=200', async () => {
-      const { service, dataSource, repos } = setup();
+      const { service, dataSource, repos, repoMap } = setup();
       const savedPackages: unknown[] = [];
       repos.packageRepo.save.mockImplementation((rows: unknown) => {
         savedPackages.push(...((rows as unknown[]) ?? []));
@@ -420,19 +431,7 @@ describe('MaterialsReceivingService', () => {
         return Promise.resolve(e);
       });
       dataSource.transaction.mockImplementationOnce(
-        async (cb: (m: unknown) => unknown) =>
-          cb(
-            makeManager({
-              [MaterialReceiving.name]: repos.receivingRepo,
-              [MaterialReceivingPackage.name]: repos.packageRepo,
-              [MaterialReceivingLotCounter.name]: repos.lotCounterRepo,
-              [Material.name]: repos.materialRepo,
-              [Supplier.name]: repos.supplierRepo,
-              [SupplierMaterial.name]: repos.supplierMaterialRepo,
-              [Unit.name]: repos.unitRepo,
-              [Organization.name]: repos.organizationRepo,
-            }),
-          ),
+        async (cb: (m: unknown) => unknown) => cb(makeManager(repoMap)),
       );
       repos.materialRepo.findOne.mockResolvedValue(makeMaterial());
       repos.supplierRepo.findOne.mockResolvedValue(makeSupplier());
@@ -467,7 +466,7 @@ describe('MaterialsReceivingService', () => {
     });
 
     it('produces a final package with remainder when quantity is not divisible', async () => {
-      const { service, dataSource, repos } = setup();
+      const { service, repos } = setup();
       const savedPackages: unknown[] = [];
       repos.packageRepo.save.mockImplementation((rows: unknown) => {
         savedPackages.push(...((rows as unknown[]) ?? []));
@@ -478,20 +477,6 @@ describe('MaterialsReceivingService', () => {
         if (!e.id) e.id = '11';
         return Promise.resolve(e);
       });
-      dataSource.transaction.mockImplementationOnce(
-        async (cb: (m: unknown) => unknown) =>
-          cb(
-            makeManager({
-              [MaterialReceiving.name]: repos.receivingRepo,
-              [MaterialReceivingPackage.name]: repos.packageRepo,
-              [MaterialReceivingLotCounter.name]: repos.lotCounterRepo,
-              [Material.name]: repos.materialRepo,
-              [Supplier.name]: repos.supplierRepo,
-              [SupplierMaterial.name]: repos.supplierMaterialRepo,
-              [Organization.name]: repos.organizationRepo,
-            }),
-          ),
-      );
       repos.materialRepo.findOne.mockResolvedValue(makeMaterial());
       repos.supplierRepo.findOne.mockResolvedValue(makeSupplier());
       repos.supplierMaterialRepo.findOne.mockResolvedValue({
@@ -660,6 +645,27 @@ describe('MaterialsReceivingService', () => {
         Promise.resolve(createdReceiving),
       );
       repos.stockBalanceRepo.findOne.mockResolvedValue(null);
+      // confirmWithManager (called inside receive()) re-reads the just-created
+      // packages via a locked query builder — wire it to reflect whatever
+      // createDraft's bulk save() produced, with ids assigned as if by the DB.
+      let currentPackages: Array<Record<string, unknown>> = [];
+      repos.packageRepo.save.mockImplementation((rows: unknown) => {
+        if (Array.isArray(rows)) {
+          currentPackages = rows.map((row, idx) => ({
+            ...(row as Record<string, unknown>),
+            id: (row as { id?: string }).id ?? `pkg-${idx + 1}`,
+          }));
+          return Promise.resolve(currentPackages);
+        }
+        const single = rows as { id: string };
+        currentPackages = currentPackages.map((pkg) =>
+          pkg.id === single.id ? { ...pkg, ...single } : pkg,
+        );
+        return Promise.resolve(rows);
+      });
+      repos.packageRepo.createQueryBuilder.mockImplementation(() =>
+        makeQueryBuilder({ many: currentPackages }),
+      );
 
       await service.receive(dto, '9');
 
@@ -678,9 +684,15 @@ describe('MaterialsReceivingService', () => {
       expect(repos.stockBalanceRepo.save.mock.calls[0][0].quantity).toBe(
         '40.0000',
       );
-      expect(repos.stockTransactionRepo.save.mock.calls[0][0].quantityIn).toBe(
-        '40.0000',
+      // One RECEIVE movement per SUB QR (2 packages), summing to the
+      // converted stock quantity — not one aggregate movement.
+      expect(repos.stockTransactionRepo.save).toHaveBeenCalledTimes(2);
+      const movementTotal = repos.stockTransactionRepo.save.mock.calls.reduce(
+        (sum: number, call: unknown[]) =>
+          sum + Number((call[0] as { quantityIn: string }).quantityIn),
+        0,
       );
+      expect(movementTotal).toBe(40);
     });
 
     it('does not update stock when SUB QR creation fails', async () => {
@@ -726,13 +738,12 @@ describe('MaterialsReceivingService', () => {
     });
 
     it('deletes a draft receiving', async () => {
-      const { service, dataSource, repos } = setup();
+      const { service, dataSource, repos, repoMap } = setup();
       repos.receivingRepo.findOne.mockResolvedValue(
         makeReceiving({ status: 'draft' }),
       );
       dataSource.transaction.mockImplementationOnce(
-        async (cb: (m: unknown) => unknown) =>
-          cb(makeManager({ [MaterialReceiving.name]: repos.receivingRepo })),
+        async (cb: (m: unknown) => unknown) => cb(makeManager(repoMap)),
       );
       await expect(service.remove('10')).resolves.toBeUndefined();
     });
@@ -756,6 +767,21 @@ describe('MaterialsReceivingService', () => {
         lastMovementAt: null,
       };
       repos.stockBalanceRepo.findOne.mockResolvedValue(balance);
+      repos.packageRepo.createQueryBuilder.mockReturnValue(
+        makeQueryBuilder({
+          many: [
+            {
+              id: 'pkg-1',
+              materialReceivingId: '10',
+              packageNo: 1,
+              lotDetailNo: 'CCI-20260809-001-001',
+              quantity: '1000.0000',
+              remainingQuantity: '1000.0000',
+              status: 'pending',
+            },
+          ],
+        }),
+      );
       dataSource.transaction.mockImplementationOnce(
         async (cb: (m: unknown) => unknown) =>
           cb(
@@ -764,6 +790,7 @@ describe('MaterialsReceivingService', () => {
               [MaterialReceivingPackage.name]: repos.packageRepo,
               [StockBalance.name]: repos.stockBalanceRepo,
               [StockTransaction.name]: repos.stockTransactionRepo,
+              [AuditLog.name]: repos.auditLogRepo,
             }),
           ),
       );
@@ -780,6 +807,7 @@ describe('MaterialsReceivingService', () => {
       expect(txn.quantityBefore).toBe('500.0000');
       expect(txn.quantityAfter).toBe('1500.0000');
       expect(txn.referenceLotNo).toBe('CCI-20260809-001');
+      expect(txn.subQrId).toBe('pkg-1');
 
       const savedReceiving = repos.receivingRepo.save.mock.calls[0][0];
       expect(savedReceiving.status).toBe('confirmed');
@@ -807,6 +835,21 @@ describe('MaterialsReceivingService', () => {
           receiveQuantity: '2',
           ratio: 20,
           piecesQuantity: '40.0000',
+        }),
+      );
+      repos.packageRepo.createQueryBuilder.mockReturnValue(
+        makeQueryBuilder({
+          many: [
+            {
+              id: 'pkg-2',
+              materialReceivingId: '10',
+              packageNo: 1,
+              lotDetailNo: 'CCI-20260809-001-001',
+              quantity: '40.0000',
+              remainingQuantity: '40.0000',
+              status: 'pending',
+            },
+          ],
         }),
       );
       repos.stockBalanceRepo.findOne.mockResolvedValue({
@@ -858,13 +901,30 @@ describe('MaterialsReceivingService', () => {
         lastMovementAt: null,
       };
       repos.stockBalanceRepo.findOne.mockResolvedValue(balance);
+      repos.packageRepo.createQueryBuilder.mockReturnValue(
+        makeQueryBuilder({
+          many: [
+            {
+              id: 'pkg-1',
+              materialReceivingId: '10',
+              packageNo: 1,
+              lotDetailNo: 'CCI-20260809-001-001',
+              quantity: '1000.0000',
+              remainingQuantity: '1000.0000',
+              status: 'in_stock',
+            },
+          ],
+        }),
+      );
       dataSource.transaction.mockImplementationOnce(
         async (cb: (m: unknown) => unknown) =>
           cb(
             makeManager({
               [MaterialReceiving.name]: repos.receivingRepo,
+              [MaterialReceivingPackage.name]: repos.packageRepo,
               [StockBalance.name]: repos.stockBalanceRepo,
               [StockTransaction.name]: repos.stockTransactionRepo,
+              [AuditLog.name]: repos.auditLogRepo,
             }),
           ),
       );
@@ -874,9 +934,10 @@ describe('MaterialsReceivingService', () => {
       expect(savedBalance.quantity).toBe('500.0000');
 
       const txn = repos.stockTransactionRepo.save.mock.calls[0][0];
-      expect(txn.transactionType).toBe('ADJUST');
+      expect(txn.transactionType).toBe('CANCEL');
       expect(txn.quantityOut).toBe('1000.0000');
       expect(txn.quantityAfter).toBe('500.0000');
+      expect(txn.subQrId).toBe('pkg-1');
 
       const savedReceiving = repos.receivingRepo.save.mock.calls[0][0];
       expect(savedReceiving.status).toBe('cancelled');
@@ -884,13 +945,12 @@ describe('MaterialsReceivingService', () => {
     });
 
     it('cancels a draft without touching stock', async () => {
-      const { service, dataSource, repos } = setup();
+      const { service, dataSource, repos, repoMap } = setup();
       repos.receivingRepo.findOne.mockResolvedValue(
         makeReceiving({ status: 'draft' }),
       );
       dataSource.transaction.mockImplementationOnce(
-        async (cb: (m: unknown) => unknown) =>
-          cb(makeManager({ [MaterialReceiving.name]: repos.receivingRepo })),
+        async (cb: (m: unknown) => unknown) => cb(makeManager(repoMap)),
       );
       await service.cancel('10', { cancelReason: 'duplicate entry' }, '9');
       expect(repos.stockBalanceRepo.save).not.toHaveBeenCalled();
@@ -1016,7 +1076,7 @@ describe('MaterialsReceivingService', () => {
       // Use the public service to exercise the private method indirectly via create
       // 100 / 3 = 33.33 -> 34
       // We assert via service path: receiving.packingQuantity = 3, receiveQuantity = 100
-      const { service, dataSource, repos } = setup();
+      const { service, dataSource, repos, repoMap } = setup();
       let savedPackages: unknown[] = [];
       repos.packageRepo.save.mockImplementation((rows: unknown) => {
         savedPackages = [...savedPackages, ...((rows as unknown[]) ?? [])];
@@ -1028,18 +1088,7 @@ describe('MaterialsReceivingService', () => {
         return Promise.resolve(e);
       });
       dataSource.transaction.mockImplementationOnce(
-        async (cb: (m: unknown) => unknown) =>
-          cb(
-            makeManager({
-              [MaterialReceiving.name]: repos.receivingRepo,
-              [MaterialReceivingPackage.name]: repos.packageRepo,
-              [MaterialReceivingLotCounter.name]: repos.lotCounterRepo,
-              [Material.name]: repos.materialRepo,
-              [Supplier.name]: repos.supplierRepo,
-              [SupplierMaterial.name]: repos.supplierMaterialRepo,
-              [Organization.name]: repos.organizationRepo,
-            }),
-          ),
+        async (cb: (m: unknown) => unknown) => cb(makeManager(repoMap)),
       );
       repos.materialRepo.findOne.mockResolvedValue(
         makeMaterial({ packingQuantity: 3 }),

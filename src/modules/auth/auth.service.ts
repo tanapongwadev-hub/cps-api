@@ -241,8 +241,10 @@ export class AuthService {
       return payload;
     } catch (error) {
       throw new UnauthorizedException({
-        code: error instanceof Error && error.name === 'TokenExpiredError'
-          ? 'REFRESH_TOKEN_EXPIRED' : 'REFRESH_TOKEN_INVALID',
+        code:
+          error instanceof Error && error.name === 'TokenExpiredError'
+            ? 'REFRESH_TOKEN_EXPIRED'
+            : 'REFRESH_TOKEN_INVALID',
         message: 'Refresh token rejected',
       });
     }
@@ -252,88 +254,145 @@ export class AuthService {
     const payload = this.verifyRefreshToken(refreshToken);
     // The database lock serializes rotation across API workers and browser tabs.
     // Return terminal errors from the transaction so revocation is committed.
-    const result = await this.authSessionRepository.manager.transaction(async (manager) => {
-      const sessions = manager.getRepository(AuthSession);
-      const session = await sessions.findOne({
-        where: { id: payload.sessionId, userId: payload.sub },
-        lock: { mode: 'pessimistic_write' },
-      });
-      const failure = (code: string) => ({ error: code } as const);
-      if (!session) return failure('REFRESH_TOKEN_INVALID');
-      if (session.revokedAt) return failure('REFRESH_TOKEN_REVOKED');
-      const now = Date.now();
-      if (new Date(session.expiresAt).getTime() <= now) return failure('SESSION_EXPIRED');
-      const current = await this.tokenService.compareRefreshToken(refreshToken, session.refreshTokenHash);
-      const previous = !current && session.previousRefreshTokenHash &&
-        await this.tokenService.compareRefreshToken(refreshToken, session.previousRefreshTokenHash);
-      if (!current && !(previous && session.refreshGraceUntil && new Date(session.refreshGraceUntil).getTime() > now)) {
-        session.revokedAt = new Date(now);
-        await sessions.save(session);
-        return failure('REFRESH_TOKEN_REVOKED');
-      }
-      const user = await manager.getRepository(User).findOne({ where: { id: payload.sub } });
-      if (!user || !user.isActive || user.isLocked || user.permissionVersion !== payload.permissionVersion) {
-        session.revokedAt = new Date(now);
-        await sessions.save(session);
-        return failure(!user || !user.isActive || user.isLocked ? 'ACCOUNT_DISABLED' : 'SESSION_REVOKED');
-      }
-      const assignment = session.activeUserDepartmentRoleId
-        ? await manager.getRepository(UserDepartmentRole).findOne({
-            where: { id: session.activeUserDepartmentRoleId, userId: user.id },
-            relations: ['role', 'department'],
-          })
-        : null;
-      if (session.activeUserDepartmentRoleId && (!assignment || !assignment.isActive ||
-          (assignment.expiredAt && new Date(assignment.expiredAt).getTime() <= now) ||
-          !assignment.role?.isActive || (assignment.department && !assignment.department.isActive))) {
-        session.revokedAt = new Date(now);
-        await sessions.save(session);
-        return failure('SESSION_REVOKED');
-      }
-      const claims: JwtPayload = {
-        sub: user.id, sessionId: session.id,
-        userDepartmentRoleId: assignment?.id ?? null,
-        departmentId: assignment?.departmentId ?? null,
-        roleCode: (assignment?.role?.code as RoleCode) ?? null,
-        permissionVersion: user.permissionVersion,
-      };
-      if (current) {
-        session.previousRefreshTokenHash = session.refreshTokenHash;
-        session.refreshGraceUntil = new Date(now + 30_000);
-        session.refreshClaims = {
-          ...claims, jti: randomUUID(), iat: Math.floor(now / 1000),
-          exp: Math.floor(new Date(session.expiresAt).getTime() / 1000),
+    const result = await this.authSessionRepository.manager.transaction(
+      async (manager) => {
+        const sessions = manager.getRepository(AuthSession);
+        const session = await sessions.findOne({
+          where: { id: payload.sessionId, userId: payload.sub },
+          lock: { mode: 'pessimistic_write' },
+        });
+        const failure = (code: string) => ({ error: code }) as const;
+        if (!session) return failure('REFRESH_TOKEN_INVALID');
+        if (session.revokedAt) return failure('REFRESH_TOKEN_REVOKED');
+        const now = Date.now();
+        if (new Date(session.expiresAt).getTime() <= now)
+          return failure('SESSION_EXPIRED');
+        const current = await this.tokenService.compareRefreshToken(
+          refreshToken,
+          session.refreshTokenHash,
+        );
+        const previous =
+          !current &&
+          session.previousRefreshTokenHash &&
+          (await this.tokenService.compareRefreshToken(
+            refreshToken,
+            session.previousRefreshTokenHash,
+          ));
+        if (
+          !current &&
+          !(
+            previous &&
+            session.refreshGraceUntil &&
+            new Date(session.refreshGraceUntil).getTime() > now
+          )
+        ) {
+          session.revokedAt = new Date(now);
+          await sessions.save(session);
+          return failure('REFRESH_TOKEN_REVOKED');
+        }
+        const user = await manager
+          .getRepository(User)
+          .findOne({ where: { id: payload.sub } });
+        if (
+          !user ||
+          !user.isActive ||
+          user.isLocked ||
+          user.permissionVersion !== payload.permissionVersion
+        ) {
+          session.revokedAt = new Date(now);
+          await sessions.save(session);
+          return failure(
+            !user || !user.isActive || user.isLocked
+              ? 'ACCOUNT_DISABLED'
+              : 'SESSION_REVOKED',
+          );
+        }
+        const assignment = session.activeUserDepartmentRoleId
+          ? await manager.getRepository(UserDepartmentRole).findOne({
+              where: {
+                id: session.activeUserDepartmentRoleId,
+                userId: user.id,
+              },
+              relations: ['role', 'department'],
+            })
+          : null;
+        if (
+          session.activeUserDepartmentRoleId &&
+          (!assignment ||
+            !assignment.isActive ||
+            (assignment.expiredAt &&
+              new Date(assignment.expiredAt).getTime() <= now) ||
+            !assignment.role?.isActive ||
+            (assignment.department && !assignment.department.isActive))
+        ) {
+          session.revokedAt = new Date(now);
+          await sessions.save(session);
+          return failure('SESSION_REVOKED');
+        }
+        const claims: JwtPayload = {
+          sub: user.id,
+          sessionId: session.id,
+          userDepartmentRoleId: assignment?.id ?? null,
+          departmentId: assignment?.departmentId ?? null,
+          roleCode: (assignment?.role?.code as RoleCode) ?? null,
+          permissionVersion: user.permissionVersion,
         };
-      }
-      if (!session.refreshClaims) return failure('REFRESH_TOKEN_INVALID');
-      // Only non-secret signed claims are stored. Concurrent retries reconstruct
-      // the identical successor token instead of creating another generation.
-      const stored = session.refreshClaims;
-      // jsonb does not preserve object key order. Canonicalize before signing
-      // so every worker reconstructs byte-for-byte identical JWTs.
-      const refreshClaims = Object.fromEntries(
-        Object.keys(stored).filter((key) => key !== 'exp').sort().map((key) => [key, stored[key]]),
-      );
-      const successor = this.jwtService.sign(refreshClaims, {
-        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
-        algorithm: 'HS256',
-        expiresIn: Number(stored.exp) - Number(refreshClaims.iat),
-      });
-      if (current) session.refreshTokenHash = await this.tokenService.hashRefreshToken(successor);
-      session.lastUsedAt = new Date(now);
-      await sessions.save(session);
-      const accessToken = this.tokenService.signAccess({ ...claims });
-      return { user, assignment, authentication: {
-        accessToken, refreshToken: successor, tokenType: 'Bearer',
-        expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
-      } };
-    });
+        if (current) {
+          session.previousRefreshTokenHash = session.refreshTokenHash;
+          session.refreshGraceUntil = new Date(now + 30_000);
+          session.refreshClaims = {
+            ...claims,
+            jti: randomUUID(),
+            iat: Math.floor(now / 1000),
+            exp: Math.floor(new Date(session.expiresAt).getTime() / 1000),
+          };
+        }
+        if (!session.refreshClaims) return failure('REFRESH_TOKEN_INVALID');
+        // Only non-secret signed claims are stored. Concurrent retries reconstruct
+        // the identical successor token instead of creating another generation.
+        const stored = session.refreshClaims;
+        // jsonb does not preserve object key order. Canonicalize before signing
+        // so every worker reconstructs byte-for-byte identical JWTs.
+        const refreshClaims = Object.fromEntries(
+          Object.keys(stored)
+            .filter((key) => key !== 'exp')
+            .sort()
+            .map((key) => [key, stored[key]]),
+        );
+        const successor = this.jwtService.sign(refreshClaims, {
+          secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+          algorithm: 'HS256',
+          expiresIn: Number(stored.exp) - Number(refreshClaims.iat),
+        });
+        if (current)
+          session.refreshTokenHash =
+            await this.tokenService.hashRefreshToken(successor);
+        session.lastUsedAt = new Date(now);
+        await sessions.save(session);
+        const accessToken = this.tokenService.signAccess({ ...claims });
+        return {
+          user,
+          assignment,
+          authentication: {
+            accessToken,
+            refreshToken: successor,
+            tokenType: 'Bearer',
+            expiresIn: this.configService.get('JWT_ACCESS_EXPIRES_IN', '15m'),
+          },
+        };
+      },
+    );
     if ('error' in result) {
-      throw new UnauthorizedException({ code: result.error, message: 'Authentication session cannot be refreshed' });
+      throw new UnauthorizedException({
+        code: result.error,
+        message: 'Authentication session cannot be refreshed',
+      });
     }
     return this.buildAuthenticationResponse(
-      result.user, result.assignment,
-      result.authentication.accessToken, result.authentication.refreshToken,
+      result.user,
+      result.assignment,
+      result.authentication.accessToken,
+      result.authentication.refreshToken,
     );
   }
 
@@ -393,7 +452,7 @@ export class AuthService {
     const refreshTokenHash =
       await this.tokenService.hashRefreshToken(refreshToken);
     savedSession.refreshTokenHash = refreshTokenHash;
-    const refreshClaims = this.jwtService.decode(refreshToken) as { exp: number };
+    const refreshClaims = this.jwtService.decode(refreshToken);
     savedSession.expiresAt = new Date(refreshClaims.exp * 1000);
     await this.authSessionRepository.save(savedSession);
 

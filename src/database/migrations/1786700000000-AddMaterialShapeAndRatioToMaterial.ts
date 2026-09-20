@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddMaterialShapeAndRatioToMaterial1786700000000
-  implements MigrationInterface
-{
+export class AddMaterialShapeAndRatioToMaterial1786700000000 implements MigrationInterface {
   name = 'AddMaterialShapeAndRatioToMaterial1786700000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -40,10 +38,14 @@ export class AddMaterialShapeAndRatioToMaterial1786700000000
     await queryRunner.query(`
       ALTER TABLE "master"."materials" DROP COLUMN "ratio"
     `);
-    await queryRunner.query(`DROP INDEX "master"."idx_materials_material_type"`);
+    await queryRunner.query(
+      `DROP INDEX "master"."idx_materials_material_type"`,
+    );
     await queryRunner.query(`
       ALTER TABLE "master"."materials" DROP COLUMN "material_type"
     `);
-    await queryRunner.query(`DROP TYPE "master"."materials_material_type_enum"`);
+    await queryRunner.query(
+      `DROP TYPE "master"."materials_material_type_enum"`,
+    );
   }
 }

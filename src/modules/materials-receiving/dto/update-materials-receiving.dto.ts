@@ -59,7 +59,8 @@ export class UpdateMaterialsReceivingDto {
   @IsString()
   @MaxLength(30)
   @Matches(PO_NO_PATTERN, {
-    message: 'poNo must be 1-30 chars of letters, numbers, dash, underscore, slash or space',
+    message:
+      'poNo must be 1-30 chars of letters, numbers, dash, underscore, slash or space',
   })
   poNo?: string | null;
 

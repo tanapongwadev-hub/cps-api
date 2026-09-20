@@ -5,17 +5,29 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  In,
+  IsNull,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { MaterialReceivingPackage } from '../../entities/inventory/material-receiving-package.entity';
 import { MaterialReceiving } from '../../entities/inventory/material-receiving.entity';
 import { MaterialsDisbursementCounter } from '../../entities/inventory/materials-disbursement-counter.entity';
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
-import { StockTransaction } from '../../entities/inventory/stock-transaction.entity';
 import { Material } from '../../entities/master/material.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import {
+  createTraceId,
+  recordAuditEvent,
+  recordStockMovement,
+} from '../../common/stock-ledger';
+import { CreateMaterialsDisbursementDto } from './dto/create-materials-disbursement.dto';
+import { UpdateMaterialsDisbursementDto } from './dto/update-materials-disbursement.dto';
+import {
   ListMaterialsDisbursementQueryDto,
-  DISBURSEMENT_SORT_COLUMNS,
   DisbursementSortBy,
 } from './dto/list-materials-disbursement-query.dto';
 import { ReportMaterialsDisbursementQueryDto } from './dto/report-materials-disbursement.dto';
@@ -48,8 +60,6 @@ export class MaterialsDisbursementService {
     private readonly receivingRepository: Repository<MaterialReceiving>,
     @InjectRepository(StockBalance)
     private readonly stockBalanceRepository: Repository<StockBalance>,
-    @InjectRepository(StockTransaction)
-    private readonly stockTransactionRepository: Repository<StockTransaction>,
     @InjectRepository(Material)
     private readonly materialRepository: Repository<Material>,
     @InjectRepository(Unit)
@@ -60,27 +70,38 @@ export class MaterialsDisbursementService {
 
   // ---------------------------------------------------------------- commands
 
-  async create(dto: any, userId: string): Promise<MaterialsDisbursement> {
+  async create(
+    dto: CreateMaterialsDisbursementDto,
+    userId: string,
+  ): Promise<MaterialsDisbursement> {
     // Validate items
     if (!dto.items || dto.items.length === 0) {
-      throw new BadRequestException('At least one disbursement item is required');
+      throw new BadRequestException(
+        'At least one disbursement item is required',
+      );
     }
 
     // Validate stock_cut requires reason
     if (dto.disbursementType === 'stock_cut' && !dto.reason?.trim()) {
-      throw new BadRequestException('Reason is required for stock_cut disbursement');
+      throw new BadRequestException(
+        'Reason is required for stock_cut disbursement',
+      );
     }
 
     // Validate disbursement date not in future
     const today = new Date().toISOString().slice(0, 10);
     if (dto.disbursementDate > today) {
-      throw new BadRequestException('Disbursement date cannot be in the future');
+      throw new BadRequestException(
+        'Disbursement date cannot be in the future',
+      );
     }
 
     // Validate positive quantities
     for (const item of dto.items) {
       if (this.toScaled(item.requestedQuantity) <= 0n) {
-        throw new BadRequestException('Requested quantity must be greater than 0');
+        throw new BadRequestException(
+          'Requested quantity must be greater than 0',
+        );
       }
     }
 
@@ -99,11 +120,17 @@ export class MaterialsDisbursementService {
       // 3) Save disbursement header
       const disbursementRepo = manager.getRepository(MaterialsDisbursement);
       const disbursement = disbursementRepo.create({
+        traceId: createTraceId('ISS'),
         disbursementNo,
         disbursementType: dto.disbursementType,
         disbursementDate: dto.disbursementDate,
         status: 'draft',
         reason: dto.reason?.trim() ?? null,
+        departmentId: dto.departmentId ?? null,
+        productionOrder: dto.productionOrder?.trim() || null,
+        referenceNo: dto.referenceNo?.trim() || null,
+        requestedBy: dto.requestedBy?.trim() || null,
+        approvedBy: null,
         attachmentUrl: dto.attachmentUrl ?? null,
         attachmentName: dto.attachmentName ?? null,
         remark: dto.remark?.trim() ?? null,
@@ -124,6 +151,20 @@ export class MaterialsDisbursementService {
         await itemRepo.save(item);
       }
 
+      await recordAuditEvent(manager, {
+        traceId: savedDisbursement.traceId,
+        action: 'CREATE',
+        targetType: 'MATERIALS_DISBURSEMENT',
+        targetId: savedDisbursement.id,
+        performedBy: userId,
+        departmentId: savedDisbursement.departmentId,
+        after: {
+          disbursementNo: savedDisbursement.disbursementNo,
+          status: savedDisbursement.status,
+          items: dto.items,
+        },
+      });
+
       return savedDisbursement.id;
     });
 
@@ -132,7 +173,7 @@ export class MaterialsDisbursementService {
 
   async update(
     id: string,
-    dto: any,
+    dto: UpdateMaterialsDisbursementDto,
     userId: string,
   ): Promise<MaterialsDisbursement> {
     await this.dataSource.transaction(async (manager) => {
@@ -148,22 +189,39 @@ export class MaterialsDisbursementService {
       if (disbursement.status !== 'draft') {
         throw new ConflictException('Only a draft disbursement can be edited');
       }
+      const before = {
+        disbursementType: disbursement.disbursementType,
+        disbursementDate: disbursement.disbursementDate,
+        reason: disbursement.reason,
+        departmentId: disbursement.departmentId,
+        productionOrder: disbursement.productionOrder,
+        referenceNo: disbursement.referenceNo,
+        requestedBy: disbursement.requestedBy,
+        remark: disbursement.remark,
+      };
 
       // Validate stock_cut requires reason
-      const disbursementType = dto.disbursementType ?? disbursement.disbursementType;
+      const disbursementType =
+        dto.disbursementType ?? disbursement.disbursementType;
       const reason = dto.reason ?? disbursement.reason;
       if (disbursementType === 'stock_cut' && !reason?.trim()) {
-        throw new BadRequestException('Reason is required for stock_cut disbursement');
+        throw new BadRequestException(
+          'Reason is required for stock_cut disbursement',
+        );
       }
 
       // Validate quantities if updating items
       if (dto.items) {
         if (dto.items.length === 0) {
-          throw new BadRequestException('At least one disbursement item is required');
+          throw new BadRequestException(
+            'At least one disbursement item is required',
+          );
         }
         for (const item of dto.items) {
           if (this.toScaled(item.requestedQuantity) <= 0n) {
-            throw new BadRequestException('Requested quantity must be greater than 0');
+            throw new BadRequestException(
+              'Requested quantity must be greater than 0',
+            );
           }
           await this.assertActiveMaterial(manager, item.materialId);
         }
@@ -178,7 +236,9 @@ export class MaterialsDisbursementService {
             disbursementItemId: In(existingItemIds),
           });
         }
-        await manager.getRepository(MaterialDisbursementItem).delete({ disbursementId: id });
+        await manager
+          .getRepository(MaterialDisbursementItem)
+          .delete({ disbursementId: id });
 
         // Create new items
         const itemRepo = manager.getRepository(MaterialDisbursementItem);
@@ -204,6 +264,18 @@ export class MaterialsDisbursementService {
       if (dto.reason !== undefined) {
         disbursement.reason = dto.reason?.trim() ?? null;
       }
+      if (dto.departmentId !== undefined) {
+        disbursement.departmentId = dto.departmentId || null;
+      }
+      if (dto.productionOrder !== undefined) {
+        disbursement.productionOrder = dto.productionOrder?.trim() || null;
+      }
+      if (dto.referenceNo !== undefined) {
+        disbursement.referenceNo = dto.referenceNo?.trim() || null;
+      }
+      if (dto.requestedBy !== undefined) {
+        disbursement.requestedBy = dto.requestedBy?.trim() || null;
+      }
       if (dto.attachmentUrl !== undefined) {
         disbursement.attachmentUrl = dto.attachmentUrl ?? null;
       }
@@ -215,12 +287,31 @@ export class MaterialsDisbursementService {
       }
 
       await disbursementRepo.save(disbursement);
+      await recordAuditEvent(manager, {
+        traceId: disbursement.traceId,
+        action: 'UPDATE',
+        targetType: 'MATERIALS_DISBURSEMENT',
+        targetId: disbursement.id,
+        performedBy: userId,
+        departmentId: disbursement.departmentId,
+        before,
+        after: {
+          disbursementType: disbursement.disbursementType,
+          disbursementDate: disbursement.disbursementDate,
+          reason: disbursement.reason,
+          departmentId: disbursement.departmentId,
+          productionOrder: disbursement.productionOrder,
+          referenceNo: disbursement.referenceNo,
+          requestedBy: disbursement.requestedBy,
+          remark: disbursement.remark,
+        },
+      });
     });
 
     return this.findOne(id);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, userId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const disbursementRepo = manager.getRepository(MaterialsDisbursement);
       const disbursement = await disbursementRepo.findOne({
@@ -235,7 +326,22 @@ export class MaterialsDisbursementService {
         throw new ConflictException('Only a draft disbursement can be deleted');
       }
 
-      await disbursementRepo.delete({ id });
+      disbursement.status = 'cancelled';
+      disbursement.cancelledBy = userId;
+      disbursement.cancelledAt = new Date();
+      disbursement.cancelReason = 'Draft voided';
+      await disbursementRepo.save(disbursement);
+      await recordAuditEvent(manager, {
+        traceId: disbursement.traceId,
+        action: 'DELETE',
+        targetType: 'MATERIALS_DISBURSEMENT',
+        targetId: disbursement.id,
+        performedBy: userId,
+        departmentId: disbursement.departmentId,
+        before: { status: 'draft' },
+        after: { status: 'cancelled' },
+        reason: 'Draft voided',
+      });
     });
   }
 
@@ -263,10 +369,16 @@ export class MaterialsDisbursementService {
         throw new NotFoundException('Materials disbursement not found');
       }
       if (disbursement.status !== 'draft') {
-        throw new ConflictException('Only a draft disbursement can be confirmed');
+        throw new ConflictException(
+          'Only a draft disbursement can be confirmed',
+        );
       }
-      if (disbursement.disbursementDate > new Date().toISOString().slice(0, 10)) {
-        throw new BadRequestException('Disbursement date cannot be in the future');
+      if (
+        disbursement.disbursementDate > new Date().toISOString().slice(0, 10)
+      ) {
+        throw new BadRequestException(
+          'Disbursement date cannot be in the future',
+        );
       }
 
       const itemRepo = manager.getRepository(MaterialDisbursementItem);
@@ -278,14 +390,25 @@ export class MaterialsDisbursementService {
 
       // Process each item with FIFO
       for (const item of items) {
-        await this.processFifoForItem(manager, item, disbursement.disbursementNo, userId);
+        await this.processFifoForItem(manager, item, disbursement, userId);
       }
 
       // Update disbursement status
       disbursement.status = 'confirmed';
       disbursement.confirmedBy = userId;
       disbursement.confirmedAt = new Date();
+      disbursement.approvedBy = userId;
       await disbursementRepo.save(disbursement);
+      await recordAuditEvent(manager, {
+        traceId: disbursement.traceId,
+        action: 'APPROVE',
+        targetType: 'MATERIALS_DISBURSEMENT',
+        targetId: disbursement.id,
+        performedBy: userId,
+        departmentId: disbursement.departmentId,
+        before: { status: 'draft' },
+        after: { status: 'confirmed' },
+      });
     });
 
     return this.findOne(id);
@@ -313,13 +436,18 @@ export class MaterialsDisbursementService {
         throw new ConflictException('Materials disbursement already cancelled');
       }
 
+      // Capture BEFORE any mutation — otherwise the audit event's `before`
+      // state always reports the post-mutation value (a real bug fixed here;
+      // see the material-traceability handoff's "Known bug to fix immediately").
+      const previousStatus = disbursement.status;
+
       // If confirmed, revert stock and restore packages
       if (disbursement.status === 'confirmed') {
         const itemRepo = manager.getRepository(MaterialDisbursementItem);
         const items = await itemRepo.find({ where: { disbursementId: id } });
 
         for (const item of items) {
-          await this.revertFifoForItem(manager, item, disbursement.disbursementNo, userId);
+          await this.revertFifoForItem(manager, item, disbursement, userId);
         }
       }
 
@@ -328,6 +456,17 @@ export class MaterialsDisbursementService {
       disbursement.cancelledAt = new Date();
       disbursement.cancelReason = dto.cancelReason?.trim() ?? null;
       await disbursementRepo.save(disbursement);
+      await recordAuditEvent(manager, {
+        traceId: disbursement.traceId,
+        action: 'CANCEL',
+        targetType: 'MATERIALS_DISBURSEMENT',
+        targetId: disbursement.id,
+        performedBy: userId,
+        departmentId: disbursement.departmentId,
+        before: { status: previousStatus },
+        after: { status: 'cancelled' },
+        reason: disbursement.cancelReason,
+      });
     });
 
     return this.findOne(id);
@@ -451,7 +590,8 @@ export class MaterialsDisbursementService {
             disbursementDate: d.disbursementDate,
             disbursementType: d.disbursementType,
             disbursementTypeLabel:
-              DISBURSEMENT_TYPE_LABELS[d.disbursementType] ?? d.disbursementType,
+              DISBURSEMENT_TYPE_LABELS[d.disbursementType] ??
+              d.disbursementType,
             reason: d.reason,
             materialCode: item.material?.code ?? '',
             materialName: item.material?.name ?? '',
@@ -461,8 +601,7 @@ export class MaterialsDisbursementService {
             unitSymbol: (item.material as any)?.unit?.symbol ?? '',
             status: d.status,
             statusLabel: STATUS_LABELS[d.status] ?? d.status,
-            sourceLotNo:
-              sourceLots.length > 0 ? sourceLots.join(', ') : null,
+            sourceLotNo: sourceLots.length > 0 ? sourceLots.join(', ') : null,
             confirmedAt: d.confirmedAt?.toISOString() ?? null,
             cancelledAt: d.cancelledAt?.toISOString() ?? null,
             cancelReason: d.cancelReason,
@@ -521,12 +660,17 @@ export class MaterialsDisbursementService {
         .where('material.isActive = TRUE')
         .orderBy('material.code', 'ASC')
         .getMany(),
-      this.unitRepository.find({ where: { isActive: true }, order: { code: 'ASC' } }),
+      this.unitRepository.find({
+        where: { isActive: true },
+        order: { code: 'ASC' },
+      }),
     ]);
 
     // Get available stock per material (from StockBalance)
     const balances = await this.stockBalanceRepository.find();
-    const stockByMaterial = new Map(balances.map((b) => [b.materialId, b.quantity]));
+    const stockByMaterial = new Map(
+      balances.map((b) => [b.materialId, b.quantity]),
+    );
 
     return {
       disbursementTypes: [
@@ -549,7 +693,7 @@ export class MaterialsDisbursementService {
   private async processFifoForItem(
     manager: EntityManager,
     item: MaterialDisbursementItem,
-    disbursementNo: string,
+    disbursement: MaterialsDisbursement,
     userId: string,
   ): Promise<void> {
     const requestedQty = this.toScaled(item.requestedQuantity);
@@ -560,11 +704,16 @@ export class MaterialsDisbursementService {
       .getRepository(MaterialReceivingPackage)
       .createQueryBuilder('pkg')
       .leftJoin('pkg.materialReceiving', 'receiving')
-      .where(`pkg.materialReceivingId IN (
+      .where(
+        `pkg.materialReceivingId IN (
         SELECT mr.id FROM inventory.material_receivings mr
         WHERE mr.material_id = :materialId
-      )`, { materialId: item.materialId })
-      .andWhere('pkg.status IN (:...statuses)', { statuses: ['in_stock', 'partial'] })
+      )`,
+        { materialId: item.materialId },
+      )
+      .andWhere('pkg.status IN (:...statuses)', {
+        statuses: ['in_stock', 'partial'],
+      })
       .orderBy('receiving.receiveDate', 'ASC')
       .addOrderBy('pkg.id', 'ASC')
       .getMany();
@@ -577,14 +726,18 @@ export class MaterialsDisbursementService {
     if (totalAvailable < requestedQty) {
       throw new BadRequestException(
         `Insufficient stock for material ${item.materialId}. ` +
-        `Requested: ${item.requestedQuantity}, Available: ${this.fromScaled(totalAvailable)}`,
+          `Requested: ${item.requestedQuantity}, Available: ${this.fromScaled(totalAvailable)}`,
       );
     }
 
-    const packageRecordRepo = manager.getRepository(MaterialDisbursementPackage);
+    const packageRecordRepo = manager.getRepository(
+      MaterialDisbursementPackage,
+    );
     const packageRepo = manager.getRepository(MaterialReceivingPackage);
     const stockBalanceRepo = manager.getRepository(StockBalance);
-    const stockTxRepo = manager.getRepository(StockTransaction);
+    const material = await manager.getRepository(Material).findOne({
+      where: { id: item.materialId },
+    });
 
     // Lock and update stock balance
     let balance = await stockBalanceRepo.findOne({
@@ -594,12 +747,14 @@ export class MaterialsDisbursementService {
     const quantityBefore = balance ? balance.quantity : '0';
 
     let totalDisbursed = 0n;
+    let fifoOrder = 0;
 
     for (const pkg of packages) {
       if (remainingQty <= 0n) break;
 
       const pkgQty = this.toScaled(pkg.remainingQuantity);
       const qtyToDeduct = pkgQty < remainingQty ? pkgQty : remainingQty;
+      fifoOrder += 1;
 
       // Update package — decrement remainingQuantity (the live/current amount
       // in the box). `quantity` is the immutable original box size recorded
@@ -618,6 +773,9 @@ export class MaterialsDisbursementService {
           disbursementItemId: item.id,
           packageId: pkg.id,
           disbursedQuantity: this.fromScaled(qtyToDeduct),
+          fifoOrder,
+          reversedAt: null,
+          reversedBy: null,
           createdBy: userId,
         }),
       );
@@ -627,30 +785,39 @@ export class MaterialsDisbursementService {
         where: { id: pkg.materialReceivingId },
       });
 
-      // Create stock transaction record
-      await stockTxRepo.save(
-        stockTxRepo.create({
-          materialId: item.materialId,
-          transactionType: 'ISSUE',
-          referenceType: 'MATERIALS_DISBURSEMENT',
-          referenceId: item.disbursementId,
-          referenceLotNo: receiving?.internalLotNo ?? null,
-          quantityBefore: this.fromScaled(this.toScaled(quantityBefore) - totalDisbursed),
-          quantityIn: this.fromScaled(0n),
-          quantityOut: this.fromScaled(qtyToDeduct),
-          quantityAfter: this.fromScaled(this.toScaled(quantityBefore) - totalDisbursed - qtyToDeduct),
-          transactionDate: new Date(),
-          remark: `Disbursed from ${disbursementNo}`,
-          createdBy: userId,
-        }),
-      );
+      await recordStockMovement(manager, {
+        traceId: disbursement.traceId,
+        transactionType: 'ISSUE',
+        materialId: item.materialId,
+        referenceType: 'MATERIALS_DISBURSEMENT',
+        referenceId: item.disbursementId,
+        referenceLotNo: receiving?.internalLotNo ?? null,
+        mainQrId: receiving?.id ?? null,
+        subQrId: pkg.id,
+        unitId: material?.unitId ?? null,
+        departmentId: disbursement.departmentId,
+        productionOrder: disbursement.productionOrder,
+        referenceNo: disbursement.referenceNo,
+        quantityBefore: this.fromScaled(
+          this.toScaled(quantityBefore) - totalDisbursed,
+        ),
+        quantityIn: this.fromScaled(0n),
+        quantityOut: this.fromScaled(qtyToDeduct),
+        quantityAfter: this.fromScaled(
+          this.toScaled(quantityBefore) - totalDisbursed - qtyToDeduct,
+        ),
+        remark: `FIFO #${fifoOrder} from ${disbursement.disbursementNo}`,
+        performedBy: userId,
+      });
 
       remainingQty -= qtyToDeduct;
       totalDisbursed += qtyToDeduct;
     }
 
     // Update stock balance (decrement)
-    const newBalanceQty = this.fromScaled(this.toScaled(quantityBefore) - totalDisbursed);
+    const newBalanceQty = this.fromScaled(
+      this.toScaled(quantityBefore) - totalDisbursed,
+    );
     if (!balance) {
       balance = stockBalanceRepo.create({
         materialId: item.materialId,
@@ -672,22 +839,29 @@ export class MaterialsDisbursementService {
   private async revertFifoForItem(
     manager: EntityManager,
     item: MaterialDisbursementItem,
-    disbursementNo: string,
+    disbursement: MaterialsDisbursement,
     userId: string,
   ): Promise<void> {
     // Get all package records for this item
     const packageRecords = await manager
       .getRepository(MaterialDisbursementPackage)
-      .find({ where: { disbursementItemId: item.id } });
+      .find({
+        where: { disbursementItemId: item.id, reversedAt: IsNull() },
+        order: { fifoOrder: 'ASC', id: 'ASC' },
+      });
 
     const packageRepo = manager.getRepository(MaterialReceivingPackage);
     const stockBalanceRepo = manager.getRepository(StockBalance);
-    const stockTxRepo = manager.getRepository(StockTransaction);
+    const material = await manager.getRepository(Material).findOne({
+      where: { id: item.materialId },
+    });
 
     let totalRestored = 0n;
 
     for (const record of packageRecords) {
-      const pkg = await packageRepo.findOne({ where: { id: record.packageId } });
+      const pkg = await packageRepo.findOne({
+        where: { id: record.packageId },
+      });
       if (!pkg) continue;
 
       const restoredQty = this.toScaled(record.disbursedQuantity);
@@ -716,25 +890,31 @@ export class MaterialsDisbursementService {
         lock: { mode: 'pessimistic_write' },
       });
       const quantityBefore = balance ? balance.quantity : '0';
-      const quantityAfter = this.fromScaled(this.toScaled(quantityBefore) + restoredQty);
-
-      // Create adjustment transaction
-      await stockTxRepo.save(
-        stockTxRepo.create({
-          materialId: item.materialId,
-          transactionType: 'ADJUST',
-          referenceType: 'MATERIALS_DISBURSEMENT',
-          referenceId: item.disbursementId,
-          referenceLotNo: receiving?.internalLotNo ?? null,
-          quantityBefore,
-          quantityIn: this.fromScaled(restoredQty),
-          quantityOut: this.fromScaled(0n),
-          quantityAfter,
-          transactionDate: new Date(),
-          remark: `Cancelled ${disbursementNo}: restored ${this.fromScaled(restoredQty)}`,
-          createdBy: userId,
-        }),
+      const quantityAfter = this.fromScaled(
+        this.toScaled(quantityBefore) + restoredQty,
       );
+
+      await recordStockMovement(manager, {
+        traceId: disbursement.traceId,
+        transactionType: 'CANCEL',
+        materialId: item.materialId,
+        referenceType: 'MATERIALS_DISBURSEMENT',
+        referenceId: item.disbursementId,
+        referenceLotNo: receiving?.internalLotNo ?? null,
+        mainQrId: receiving?.id ?? null,
+        subQrId: pkg.id,
+        unitId: material?.unitId ?? null,
+        departmentId: disbursement.departmentId,
+        productionOrder: disbursement.productionOrder,
+        referenceNo: disbursement.referenceNo,
+        quantityBefore,
+        quantityIn: this.fromScaled(restoredQty),
+        quantityOut: this.fromScaled(0n),
+        quantityAfter,
+        reason: disbursement.cancelReason,
+        remark: `Cancelled ${disbursement.disbursementNo}: restored ${this.fromScaled(restoredQty)}`,
+        performedBy: userId,
+      });
 
       // Update balance
       if (balance) {
@@ -743,14 +923,22 @@ export class MaterialsDisbursementService {
         await stockBalanceRepo.save(balance);
       }
 
-      // Delete the package record
-      await manager.getRepository(MaterialDisbursementPackage).delete({ id: record.id });
+      record.reversedAt = new Date();
+      record.reversedBy = userId;
+      await manager.getRepository(MaterialDisbursementPackage).save(record);
     }
 
-    // Reset item disbursed quantity
-    const itemRepo = manager.getRepository(MaterialDisbursementItem);
-    item.disbursedQuantity = '0.0000';
-    await itemRepo.save(item);
+    // Reflect the reversal on the item's own disbursed-quantity figure too —
+    // otherwise a cancelled disbursement's item still reports its original
+    // (now-reversed) quantity, which would make the traceability report show
+    // stock as "still issued" for a document that was actually cancelled.
+    if (totalRestored > 0n) {
+      const itemRepo = manager.getRepository(MaterialDisbursementItem);
+      item.disbursedQuantity = this.fromScaled(
+        this.toScaled(item.disbursedQuantity) - totalRestored,
+      );
+      await itemRepo.save(item);
+    }
   }
 
   private createListQuery(
@@ -762,28 +950,38 @@ export class MaterialsDisbursementService {
       .leftJoinAndSelect('items.material', 'material');
 
     if (query.search) {
-      queryBuilder.andWhere(
-        'disbursement.disbursement_no ILIKE :search',
-        { search: `%${query.search}%` },
-      );
+      queryBuilder.andWhere('disbursement.disbursement_no ILIKE :search', {
+        search: `%${query.search}%`,
+      });
     }
     if (query.status) {
-      queryBuilder.andWhere('disbursement.status = :status', { status: query.status });
+      queryBuilder.andWhere('disbursement.status = :status', {
+        status: query.status,
+      });
     }
     if (query.disbursementType) {
-      queryBuilder.andWhere('disbursement.disbursement_type = :disbursementType', {
-        disbursementType: query.disbursementType,
-      });
+      queryBuilder.andWhere(
+        'disbursement.disbursement_type = :disbursementType',
+        {
+          disbursementType: query.disbursementType,
+        },
+      );
     }
     if (query.disbursementDateFrom) {
-      queryBuilder.andWhere('disbursement.disbursement_date >= :disbursementDateFrom', {
-        disbursementDateFrom: query.disbursementDateFrom,
-      });
+      queryBuilder.andWhere(
+        'disbursement.disbursement_date >= :disbursementDateFrom',
+        {
+          disbursementDateFrom: query.disbursementDateFrom,
+        },
+      );
     }
     if (query.disbursementDateTo) {
-      queryBuilder.andWhere('disbursement.disbursement_date <= :disbursementDateTo', {
-        disbursementDateTo: query.disbursementDateTo,
-      });
+      queryBuilder.andWhere(
+        'disbursement.disbursement_date <= :disbursementDateTo',
+        {
+          disbursementDateTo: query.disbursementDateTo,
+        },
+      );
     }
     if (query.materialId) {
       // `items`/`material` are already left-joined above, so this narrows
@@ -874,11 +1072,17 @@ export class MaterialsDisbursementService {
   private toListResponse(disbursement: MaterialsDisbursement) {
     return {
       id: disbursement.id,
+      traceId: disbursement.traceId,
       disbursementNo: disbursement.disbursementNo,
       disbursementType: disbursement.disbursementType,
       disbursementDate: disbursement.disbursementDate,
       status: disbursement.status,
       reason: disbursement.reason,
+      departmentId: disbursement.departmentId,
+      productionOrder: disbursement.productionOrder,
+      referenceNo: disbursement.referenceNo,
+      requestedBy: disbursement.requestedBy,
+      approvedBy: disbursement.approvedBy,
       attachmentUrl: disbursement.attachmentUrl,
       attachmentName: disbursement.attachmentName,
       remark: disbursement.remark,
@@ -915,11 +1119,17 @@ export class MaterialsDisbursementService {
   ) {
     return {
       id: disbursement.id,
+      traceId: disbursement.traceId,
       disbursementNo: disbursement.disbursementNo,
       disbursementType: disbursement.disbursementType,
       disbursementDate: disbursement.disbursementDate,
       status: disbursement.status,
       reason: disbursement.reason,
+      departmentId: disbursement.departmentId,
+      productionOrder: disbursement.productionOrder,
+      referenceNo: disbursement.referenceNo,
+      requestedBy: disbursement.requestedBy,
+      approvedBy: disbursement.approvedBy,
       attachmentUrl: disbursement.attachmentUrl,
       attachmentName: disbursement.attachmentName,
       remark: disbursement.remark,
@@ -948,6 +1158,9 @@ export class MaterialsDisbursementService {
           id: pkg.id,
           packageId: pkg.packageId,
           disbursedQuantity: pkg.disbursedQuantity,
+          fifoOrder: pkg.fifoOrder,
+          reversedAt: pkg.reversedAt,
+          reversedBy: pkg.reversedBy,
           package: pkg.package
             ? {
                 id: pkg.package.id,

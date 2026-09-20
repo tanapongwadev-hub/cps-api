@@ -31,7 +31,12 @@ export class AuthSession {
   @Column({ name: 'refresh_token_hash', type: 'varchar', length: 255 })
   refreshTokenHash: string;
 
-  @Column({ name: 'previous_refresh_token_hash', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'previous_refresh_token_hash',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   previousRefreshTokenHash: string | null;
 
   @Column({ name: 'refresh_grace_until', type: 'timestamp', nullable: true })

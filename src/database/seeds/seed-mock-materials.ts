@@ -29,7 +29,10 @@ async function seedMockMaterials() {
     console.log('\nResolving units...');
     const unitIdMap: Record<string, string> = {};
     for (const code of ['KG', 'PIPE']) {
-      const rows = await qr.query(`SELECT id FROM master.units WHERE code = $1`, [code]);
+      const rows = await qr.query(
+        `SELECT id FROM master.units WHERE code = $1`,
+        [code],
+      );
       if (rows.length > 0) {
         unitIdMap[code] = rows[0].id;
         console.log(`  - unit ${code} -> id=${rows[0].id}`);
@@ -49,7 +52,10 @@ async function seedMockMaterials() {
       { code: 'PICKUP', nameTh: 'รับเองที่หน้าโรงงาน', nameEn: 'Self Pickup' },
     ];
     for (const d of deliverySeed) {
-      const existing = await qr.query(`SELECT id FROM master.delivery_types WHERE code = $1`, [d.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.delivery_types WHERE code = $1`,
+        [d.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.delivery_types (code, name_th, name_en, is_active, created_at, updated_at)
@@ -74,7 +80,10 @@ async function seedMockMaterials() {
       { code: 'LP-RYG', nameTh: 'โรงงานระยอง', nameEn: 'Rayong Plant' },
     ];
     for (const lp of loadingPointSeed) {
-      const existing = await qr.query(`SELECT id FROM master.loading_points WHERE code = $1`, [lp.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.loading_points WHERE code = $1`,
+        [lp.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.loading_points (code, name_th, name_en, is_active, created_at, updated_at)
@@ -94,9 +103,18 @@ async function seedMockMaterials() {
     // ============================================================
     console.log('\nSeeding material_models...');
     const materialModelIdMap: Record<string, string> = {};
-    const modelSeed = [{ code: 'CIVIC-24', nameTh: 'Honda Civic 2024', nameEn: 'Honda Civic 2024' }];
+    const modelSeed = [
+      {
+        code: 'CIVIC-24',
+        nameTh: 'Honda Civic 2024',
+        nameEn: 'Honda Civic 2024',
+      },
+    ];
     for (const m of modelSeed) {
-      const existing = await qr.query(`SELECT id FROM master.material_models WHERE code = $1`, [m.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.material_models WHERE code = $1`,
+        [m.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.material_models (code, name_th, name_en, is_active, created_at, updated_at)
@@ -123,7 +141,10 @@ async function seedMockMaterials() {
       { code: 'OF_MAT', nameTh: 'วัสดุสิ้นเปลือง', nameEn: 'OF-MAT' },
     ];
     for (const mt of materialTypeSeed) {
-      const existing = await qr.query(`SELECT id FROM master.material_types WHERE code = $1`, [mt.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.material_types WHERE code = $1`,
+        [mt.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.material_types (code, name_th, name_en, is_active, created_at, updated_at)
@@ -144,12 +165,27 @@ async function seedMockMaterials() {
     console.log('\nSeeding suppliers...');
     const supplierIdMap: Record<string, string> = {};
     const supplierSeed = [
-      { code: 'SUP-001', nameTh: 'ซีพีเอส สตีล', nameEn: 'CPS Steel Co., Ltd.' },
-      { code: 'SUP-007', nameTh: 'ไทยสตีล พาย', nameEn: 'Thai Steel Pipe Co., Ltd.' },
-      { code: 'SUP-021', nameTh: 'เวลด์โปร ซัพพลาย', nameEn: 'WeldPro Supply Co., Ltd.' },
+      {
+        code: 'SUP-001',
+        nameTh: 'ซีพีเอส สตีล',
+        nameEn: 'CPS Steel Co., Ltd.',
+      },
+      {
+        code: 'SUP-007',
+        nameTh: 'ไทยสตีล พาย',
+        nameEn: 'Thai Steel Pipe Co., Ltd.',
+      },
+      {
+        code: 'SUP-021',
+        nameTh: 'เวลด์โปร ซัพพลาย',
+        nameEn: 'WeldPro Supply Co., Ltd.',
+      },
     ];
     for (const s of supplierSeed) {
-      const existing = await qr.query(`SELECT id FROM master.suppliers WHERE code = $1`, [s.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.suppliers WHERE code = $1`,
+        [s.code],
+      );
       if (existing.length === 0) {
         const r = await qr.query(
           `INSERT INTO master.suppliers (code, name_th, name_en, is_active, created_at, updated_at)
@@ -182,7 +218,8 @@ async function seedMockMaterials() {
         loadingPointCode: 'LP-BPI',
         processLineName: 'สาย PC-01',
         scale: '1:1' as string | null,
-        specification: 'อลูมิเนียมแผ่นเกรด AC5C-T5 หนา 3.0 มม. ขนาด 1200x2400 มม.',
+        specification:
+          'อลูมิเนียมแผ่นเกรด AC5C-T5 หนา 3.0 มม. ขนาด 1200x2400 มม.',
         description: 'ใช้สำหรับขึ้นรูปชิ้นส่วนโครงสร้างหลักของผลิตภัณฑ์ PC',
         packingQuantity: 50,
         minimumStock: 100,
@@ -202,7 +239,8 @@ async function seedMockMaterials() {
         loadingPointCode: 'LP-RYG',
         processLineName: 'สาย OF-02',
         scale: null,
-        specification: 'ท่อเหล็กกล้า SGP Schedule 40 ขนาดเส้นผ่านศูนย์กลาง 2 นิ้ว ยาว 6 ม./ท่อน',
+        specification:
+          'ท่อเหล็กกล้า SGP Schedule 40 ขนาดเส้นผ่านศูนย์กลาง 2 นิ้ว ยาว 6 ม./ท่อน',
         description: 'ใช้สำหรับงานโครงสร้างและระบบท่อในกระบวนการผลิตทั่วไป',
         packingQuantity: 20,
         minimumStock: 300,
@@ -232,7 +270,10 @@ async function seedMockMaterials() {
     ];
 
     for (const m of materialSeed) {
-      const existing = await qr.query(`SELECT id FROM master.materials WHERE code = $1`, [m.code]);
+      const existing = await qr.query(
+        `SELECT id FROM master.materials WHERE code = $1`,
+        [m.code],
+      );
       let materialId: string;
       if (existing.length === 0) {
         const r = await qr.query(

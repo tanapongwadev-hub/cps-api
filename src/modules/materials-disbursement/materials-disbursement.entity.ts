@@ -9,7 +9,11 @@ import {
 } from 'typeorm';
 import { MaterialDisbursementItem } from './material-disbursement-item.entity';
 
-export const DISBURSEMENT_STATUSES = ['draft', 'confirmed', 'cancelled'] as const;
+export const DISBURSEMENT_STATUSES = [
+  'draft',
+  'confirmed',
+  'cancelled',
+] as const;
 export type DisbursementStatus = (typeof DISBURSEMENT_STATUSES)[number];
 
 export const DISBURSEMENT_TYPES = ['stock_cut', 'production'] as const;
@@ -19,6 +23,10 @@ export type DisbursementType = (typeof DISBURSEMENT_TYPES)[number];
 export class MaterialsDisbursement {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id: string;
+
+  @Index({ unique: true })
+  @Column({ name: 'trace_id', type: 'varchar', length: 40 })
+  traceId: string;
 
   @Index({ unique: true })
   @Column({ name: 'disbursement_no', type: 'varchar', length: 30 })
@@ -40,10 +48,41 @@ export class MaterialsDisbursement {
   @Column({ type: 'varchar', length: 500, nullable: true })
   reason: string | null;
 
+  @Index()
+  @Column({ name: 'department_id', type: 'bigint', nullable: true })
+  departmentId: string | null;
+
+  @Column({
+    name: 'production_order',
+    type: 'varchar',
+    length: 80,
+    nullable: true,
+  })
+  productionOrder: string | null;
+
+  @Column({ name: 'reference_no', type: 'varchar', length: 80, nullable: true })
+  referenceNo: string | null;
+
+  @Column({
+    name: 'requested_by',
+    type: 'varchar',
+    length: 150,
+    nullable: true,
+  })
+  requestedBy: string | null;
+
+  @Column({ name: 'approved_by', type: 'bigint', nullable: true })
+  approvedBy: string | null;
+
   @Column({ name: 'attachment_url', type: 'text', nullable: true })
   attachmentUrl: string | null;
 
-  @Column({ name: 'attachment_name', type: 'varchar', length: 255, nullable: true })
+  @Column({
+    name: 'attachment_name',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
   attachmentName: string | null;
 
   @Column({ type: 'text', nullable: true })
@@ -61,7 +100,12 @@ export class MaterialsDisbursement {
   @Column({ name: 'cancelled_at', type: 'timestamp', nullable: true })
   cancelledAt: Date | null;
 
-  @Column({ name: 'cancel_reason', type: 'varchar', length: 500, nullable: true })
+  @Column({
+    name: 'cancel_reason',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   cancelReason: string | null;
 
   @Column({ name: 'created_by', type: 'bigint', nullable: true })

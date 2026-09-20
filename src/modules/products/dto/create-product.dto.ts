@@ -82,13 +82,17 @@ export class CreateProductDto {
 
   // --- Production parameters ---
 
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(1)
   packing?: number;
 
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -100,7 +104,9 @@ export class CreateProductDto {
    * Safety stock override. If omitted, server computes from lotSize.
    *   safety_stock = lotSize
    */
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -110,7 +116,9 @@ export class CreateProductDto {
    * Min stock override. If omitted, server computes from packing.
    *   min_stock = packing
    */
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(0)

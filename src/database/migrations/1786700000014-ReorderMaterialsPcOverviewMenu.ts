@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class ReorderMaterialsPcOverviewMenu1786700000014
-  implements MigrationInterface
-{
+export class ReorderMaterialsPcOverviewMenu1786700000014 implements MigrationInterface {
   name = 'ReorderMaterialsPcOverviewMenu1786700000014';
 
   // Follow-up to 1786700000013-AddMaterialsPcOverviewMenu.ts. That migration

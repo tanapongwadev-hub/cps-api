@@ -122,8 +122,8 @@ export class MaterialsReceivingController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermissions(MATERIALS_RECEIVING_PERMISSIONS.DELETE)
-  remove(@Param('id') id: string) {
-    return this.materialsReceivingService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.materialsReceivingService.remove(id, userId);
   }
 
   @Post(':id/confirm')

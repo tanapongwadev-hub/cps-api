@@ -171,7 +171,7 @@ describe('JwtStrategy current session validation', () => {
       ...payload,
       userDepartmentRoleId: null,
       departmentId: null,
-      roleCode: null as unknown as RoleCode,
+      roleCode: null,
     };
 
     await expect(strategy.validate(payload)).resolves.toEqual({

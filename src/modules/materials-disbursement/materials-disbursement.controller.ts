@@ -78,8 +78,8 @@ export class MaterialsDisbursementController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermissions(MATERIALS_DISBURSEMENT_PERMISSIONS.DELETE)
-  remove(@Param('id') id: string) {
-    return this.disbursementService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser('id') userId: string) {
+    return this.disbursementService.remove(id, userId);
   }
 
   @Post(':id/confirm')

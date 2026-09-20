@@ -15,6 +15,11 @@ import {
   SelectQueryBuilder,
 } from 'typeorm';
 import { getAppConfig } from '../../config/app.config';
+import {
+  createTraceId,
+  recordAuditEvent,
+  recordStockMovement,
+} from '../../common/stock-ledger';
 import { MaterialReceivingLotCounter } from '../../entities/inventory/material-receiving-lot-counter.entity';
 import { MaterialReceivingPackage } from '../../entities/inventory/material-receiving-package.entity';
 import {
@@ -25,7 +30,6 @@ import { buildLotDatePart } from './lot-code.util';
 
 /** Package QR Payload — encoded as pipe-delimited string for scan reliability */
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
-import { StockTransaction } from '../../entities/inventory/stock-transaction.entity';
 import { Material } from '../../entities/master/material.entity';
 import { MaterialShape } from '../../entities/master/material.entity';
 import { Organization } from '../../entities/master/organization.entity';
@@ -79,8 +83,6 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     private readonly packageRepository: Repository<MaterialReceivingPackage>,
     @InjectRepository(StockBalance)
     private readonly stockBalanceRepository: Repository<StockBalance>,
-    @InjectRepository(StockTransaction)
-    private readonly stockTransactionRepository: Repository<StockTransaction>,
     @InjectRepository(MaterialReceivingLotCounter)
     private readonly lotCounterRepository: Repository<MaterialReceivingLotCounter>,
     @InjectRepository(Supplier)
@@ -252,6 +254,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     // 11) Save receiving
     const receivingRepository = manager.getRepository(MaterialReceiving);
     const receiving = receivingRepository.create({
+      traceId: createTraceId('RCV'),
       runNo,
       internalLotNo,
       organizationId,
@@ -297,6 +300,22 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     });
     await packageRepository.save(packageRows);
 
+    await recordAuditEvent(manager, {
+      traceId: saved.traceId,
+      action: 'CREATE',
+      targetType: 'MATERIAL_RECEIVING',
+      targetId: saved.id,
+      performedBy: userId,
+      after: {
+        internalLotNo: saved.internalLotNo,
+        receiveQuantity: saved.receiveQuantity,
+        convertedQuantity: saved.piecesQuantity ?? saved.receiveQuantity,
+        ratio: saved.ratio,
+        packageCount: saved.packageCount,
+        status: saved.status,
+      },
+    });
+
     return saved;
   }
 
@@ -328,6 +347,18 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       ) {
         throw new ConflictException('Material receiving has been updated');
       }
+      const before = {
+        supplierId: receiving.supplierId,
+        receiveQuantity: receiving.receiveQuantity,
+        packingQuantity: receiving.packingQuantity,
+        packageCount: receiving.packageCount,
+        supplierLotNo: receiving.supplierLotNo,
+        receiveDate: receiving.receiveDate,
+        ratio: receiving.ratio,
+        piecesQuantity: receiving.piecesQuantity,
+        poNo: receiving.poNo,
+        remark: receiving.remark,
+      };
 
       const material = await this.assertActiveMaterial(
         manager,
@@ -394,6 +425,20 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         const packageRepository = manager.getRepository(
           MaterialReceivingPackage,
         );
+        // Deliberate domain exception to the "never hard-delete QR/package
+        // history" rule (see docs/material-traceability.md): this branch is
+        // only reachable while `receiving.status === 'draft'` (enforced by
+        // the status guard above), and a draft's packages are always
+        // `status: 'pending'` — no `stock_transactions` row can reference
+        // their `sub_qr_id` yet, because `recordStockMovement` only ever
+        // assigns a package's id to a movement inside `confirmWithManager`,
+        // which requires `status === 'draft'` too and therefore hasn't run.
+        // A still-draft package is a working proposal, not yet real
+        // traceability history, so replacing it wholesale on edit does not
+        // violate §10 of the traceability spec. If this constraint ever
+        // changes (e.g. QR labels being pre-printed and physically applied
+        // to boxes before confirm), this delete+recreate must become a
+        // stable update/cancel-obsolete-then-append strategy instead.
         await packageRepository.delete({ materialReceivingId: id });
         const packageQrCodes = await this.generatePackageQrCodes(
           packages,
@@ -480,11 +525,31 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       receiving.updatedBy = userId;
 
       await this.saveReceiving(receivingRepository, receiving);
+      await recordAuditEvent(manager, {
+        traceId: receiving.traceId,
+        action: 'UPDATE',
+        targetType: 'MATERIAL_RECEIVING',
+        targetId: receiving.id,
+        performedBy: userId,
+        before,
+        after: {
+          supplierId: receiving.supplierId,
+          receiveQuantity: receiving.receiveQuantity,
+          packingQuantity: receiving.packingQuantity,
+          packageCount: receiving.packageCount,
+          supplierLotNo: receiving.supplierLotNo,
+          receiveDate: receiving.receiveDate,
+          ratio: receiving.ratio,
+          piecesQuantity: receiving.piecesQuantity,
+          poNo: receiving.poNo,
+          remark: receiving.remark,
+        },
+      });
     });
     return this.findOne(id);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, userId: string): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const receiving = await manager
         .getRepository(MaterialReceiving)
@@ -497,7 +562,25 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
           'Only a draft material receiving can be deleted',
         );
       }
-      await manager.getRepository(MaterialReceiving).delete({ id });
+      receiving.status = 'cancelled';
+      receiving.cancelledBy = userId;
+      receiving.cancelledAt = new Date();
+      receiving.cancelReason = 'Draft voided';
+      receiving.updatedBy = userId;
+      await manager.getRepository(MaterialReceiving).save(receiving);
+      await manager
+        .getRepository(MaterialReceivingPackage)
+        .update({ materialReceivingId: id }, { status: 'cancelled' });
+      await recordAuditEvent(manager, {
+        traceId: receiving.traceId,
+        action: 'DELETE',
+        targetType: 'MATERIAL_RECEIVING',
+        targetId: receiving.id,
+        performedBy: userId,
+        before: { status: 'draft' },
+        after: { status: 'cancelled' },
+        reason: 'Draft voided',
+      });
     });
   }
 
@@ -535,7 +618,28 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       lock: { mode: 'pessimistic_write' },
     });
     const quantityBefore = balance ? balance.quantity : '0';
+    const packages = await manager
+      .getRepository(MaterialReceivingPackage)
+      .createQueryBuilder('package')
+      .setLock('pessimistic_write')
+      .where('package.materialReceivingId = :id', { id })
+      .andWhere('package.status = :status', { status: 'pending' })
+      .orderBy('package.packageNo', 'ASC')
+      .getMany();
+    if (packages.length === 0) {
+      throw new ConflictException('Receiving has no pending QR packages');
+    }
+
     const stockQuantity = receiving.piecesQuantity ?? receiving.receiveQuantity;
+    const packageTotal = packages.reduce(
+      (sum, pkg) => sum + this.toScaled(pkg.quantity),
+      0n,
+    );
+    if (packageTotal !== this.toScaled(stockQuantity)) {
+      throw new ConflictException(
+        'Package quantities do not reconcile with receiving stock quantity',
+      );
+    }
     const quantityAfter = this.addDecimals(quantityBefore, stockQuantity);
 
     if (!balance) {
@@ -550,36 +654,50 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     }
     await stockBalanceRepository.save(balance);
 
-    // บันทึก stock transaction
-    const stockTransactionRepository = manager.getRepository(StockTransaction);
-    const transaction = stockTransactionRepository.create({
-      materialId: receiving.materialId,
-      transactionType: 'RECEIVE',
-      referenceType: 'MATERIAL_RECEIVING',
-      referenceId: receiving.id,
-      referenceLotNo: receiving.internalLotNo,
-      quantityBefore: this.fromScaled(this.toScaled(quantityBefore)),
-      quantityIn: this.fromScaled(this.toScaled(stockQuantity)),
-      quantityOut: this.fromScaled(0n),
-      quantityAfter,
-      transactionDate: new Date(),
-      remark: `Confirmed from receiving ${receiving.internalLotNo}`,
-      createdBy: userId,
-    });
-    await stockTransactionRepository.save(transaction);
-
-    // Update all package status to in_stock
+    // Record one movement per SUB QR. This preserves exact box-level running
+    // balances while the material balance still changes by the same total.
+    let runningBalance = this.toScaled(quantityBefore);
     const packageRepository = manager.getRepository(MaterialReceivingPackage);
-    await packageRepository.update(
-      { materialReceivingId: id },
-      { status: 'in_stock' },
-    );
+    for (const pkg of packages) {
+      const packageQuantity = this.toScaled(pkg.quantity);
+      const before = runningBalance;
+      runningBalance += packageQuantity;
+      await recordStockMovement(manager, {
+        traceId: receiving.traceId,
+        transactionType: 'RECEIVE',
+        materialId: receiving.materialId,
+        referenceType: 'MATERIAL_RECEIVING',
+        referenceId: receiving.id,
+        referenceLotNo: receiving.internalLotNo,
+        mainQrId: receiving.id,
+        subQrId: pkg.id,
+        unitId: receiving.unitId,
+        referenceNo: receiving.poNo,
+        quantityBefore: this.fromScaled(before),
+        quantityIn: this.fromScaled(packageQuantity),
+        quantityOut: this.fromScaled(0n),
+        quantityAfter: this.fromScaled(runningBalance),
+        remark: `Received SUB QR ${pkg.lotDetailNo ?? pkg.id}`,
+        performedBy: userId,
+      });
+      pkg.status = 'in_stock';
+      await packageRepository.save(pkg);
+    }
 
     receiving.status = 'confirmed';
     receiving.confirmedBy = userId;
     receiving.confirmedAt = new Date();
     receiving.updatedBy = userId;
     await this.saveReceiving(receivingRepository, receiving);
+    await recordAuditEvent(manager, {
+      traceId: receiving.traceId,
+      action: 'APPROVE',
+      targetType: 'MATERIAL_RECEIVING',
+      targetId: receiving.id,
+      performedBy: userId,
+      before: { status: 'draft' },
+      after: { status: 'confirmed', stockQuantity, quantityAfter },
+    });
   }
 
   async cancel(
@@ -599,9 +717,27 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       if (receiving.status === 'cancelled') {
         throw new ConflictException('Material receiving already cancelled');
       }
+      const previousStatus = receiving.status;
+      const packageRepository = manager.getRepository(MaterialReceivingPackage);
+      const packages = await packageRepository
+        .createQueryBuilder('package')
+        .setLock('pessimistic_write')
+        .where('package.materialReceivingId = :id', { id })
+        .orderBy('package.packageNo', 'ASC')
+        .getMany();
 
       // ถ้า confirmed แล้ว ต้อง revert stock ก่อน
       if (receiving.status === 'confirmed') {
+        const consumedPackage = packages.find(
+          (pkg) =>
+            this.toScaled(pkg.remainingQuantity) !==
+            this.toScaled(pkg.quantity),
+        );
+        if (consumedPackage) {
+          throw new ConflictException(
+            `Cannot cancel receiving after SUB QR ${consumedPackage.lotDetailNo ?? consumedPackage.id} has been issued`,
+          );
+        }
         const stockBalanceRepository = manager.getRepository(StockBalance);
         const balance = await stockBalanceRepository.findOne({
           where: { materialId: receiving.materialId },
@@ -610,6 +746,11 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         const quantityBefore = balance ? balance.quantity : '0';
         const stockQuantity =
           receiving.piecesQuantity ?? receiving.receiveQuantity;
+        if (this.toScaled(quantityBefore) < this.toScaled(stockQuantity)) {
+          throw new ConflictException(
+            'Current stock is lower than this receiving; reconciliation required before cancellation',
+          );
+        }
         const quantityAfter = this.subtractDecimals(
           quantityBefore,
           stockQuantity,
@@ -620,24 +761,36 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
           await stockBalanceRepository.save(balance);
         }
 
-        const stockTransactionRepository =
-          manager.getRepository(StockTransaction);
-        await stockTransactionRepository.save(
-          stockTransactionRepository.create({
+        let runningBalance = this.toScaled(quantityBefore);
+        for (const pkg of packages) {
+          const packageQuantity = this.toScaled(pkg.quantity);
+          const before = runningBalance;
+          runningBalance -= packageQuantity;
+          await recordStockMovement(manager, {
+            traceId: receiving.traceId,
+            transactionType: 'CANCEL',
             materialId: receiving.materialId,
-            transactionType: 'ADJUST',
             referenceType: 'MATERIAL_RECEIVING',
             referenceId: receiving.id,
             referenceLotNo: receiving.internalLotNo,
-            quantityBefore: this.fromScaled(this.toScaled(quantityBefore)),
+            mainQrId: receiving.id,
+            subQrId: pkg.id,
+            unitId: receiving.unitId,
+            referenceNo: receiving.poNo,
+            quantityBefore: this.fromScaled(before),
             quantityIn: this.fromScaled(0n),
-            quantityOut: this.fromScaled(this.toScaled(stockQuantity)),
-            quantityAfter,
-            transactionDate: new Date(),
-            remark: `Cancelled receiving ${receiving.internalLotNo}: ${dto.cancelReason.trim()}`,
-            createdBy: userId,
-          }),
-        );
+            quantityOut: this.fromScaled(packageQuantity),
+            quantityAfter: this.fromScaled(runningBalance),
+            reason: dto.cancelReason.trim(),
+            remark: `Cancelled receiving ${receiving.internalLotNo}`,
+            performedBy: userId,
+          });
+        }
+      }
+
+      for (const pkg of packages) {
+        pkg.status = 'cancelled';
+        await packageRepository.save(pkg);
       }
 
       receiving.status = 'cancelled';
@@ -646,6 +799,16 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       receiving.cancelReason = dto.cancelReason.trim();
       receiving.updatedBy = userId;
       await this.saveReceiving(receivingRepository, receiving);
+      await recordAuditEvent(manager, {
+        traceId: receiving.traceId,
+        action: 'CANCEL',
+        targetType: 'MATERIAL_RECEIVING',
+        targetId: receiving.id,
+        performedBy: userId,
+        before: { status: previousStatus },
+        after: { status: 'cancelled' },
+        reason: receiving.cancelReason,
+      });
     });
     return this.findOne(id);
   }
@@ -1601,6 +1764,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   private toListResponse(receiving: MaterialReceiving) {
     return {
       id: receiving.id,
+      traceId: receiving.traceId,
       runNo: receiving.runNo,
       internalLotNo: receiving.internalLotNo,
       organizationId: receiving.organizationId,

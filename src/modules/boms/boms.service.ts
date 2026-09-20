@@ -8,7 +8,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Material } from '../../entities/master/material.entity';
-import { ProductBom, ProductBomItem, BomStatus } from '../../entities/master/product-bom.entity';
+import {
+  ProductBom,
+  ProductBomItem,
+  BomStatus,
+} from '../../entities/master/product-bom.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { CreateBomDto } from './dto/create-bom.dto';
 import { UpdateBomDto } from './dto/update-bom.dto';
@@ -101,7 +105,11 @@ export class BomsService {
       updatedBy: bom.updatedBy,
       createdAt: bom.createdAt,
       updatedAt: bom.updatedAt,
-      product: ( bom as any).product ?? { id: bom.productId, code: '', nameTh: '' },
+      product: (bom as any).product ?? {
+        id: bom.productId,
+        code: '',
+        nameTh: '',
+      },
       items,
     };
   }
@@ -122,7 +130,8 @@ export class BomsService {
       where: { id },
       relations: ['items', 'items.material', 'items.unit'],
     });
-    if (!bom) throw new NotFoundException(`BOM with id ${id} not found after write`);
+    if (!bom)
+      throw new NotFoundException(`BOM with id ${id} not found after write`);
     return this.buildBomResponse(bom);
   }
 
@@ -198,9 +207,8 @@ export class BomsService {
       });
 
       // Calculate next version
-      const latestVersion = existingForProduct.length > 0
-        ? existingForProduct[0].version
-        : 'v0';
+      const latestVersion =
+        existingForProduct.length > 0 ? existingForProduct[0].version : 'v0';
       const nextVersionNum = parseInt(latestVersion.replace(/^v/, ''), 10) + 1;
       const version = `v${nextVersionNum}`;
 
@@ -253,13 +261,18 @@ export class BomsService {
       const bom = await bomRepo.findOne({ where: { id } });
       if (!bom) throw new NotFoundException(`BOM with id ${id} not found`);
       if (bom.status === BomStatus.ACTIVE) {
-        throw new BadRequestException('Cannot update an ACTIVE BOM. Deactivate it first.');
+        throw new BadRequestException(
+          'Cannot update an ACTIVE BOM. Deactivate it first.',
+        );
       }
 
-      if (dto.specification !== undefined) bom.specification = dto.specification;
+      if (dto.specification !== undefined)
+        bom.specification = dto.specification;
       if (dto.remark !== undefined) bom.remark = dto.remark;
       if (dto.effectiveFrom !== undefined) {
-        bom.effectiveFrom = dto.effectiveFrom ? new Date(dto.effectiveFrom) : null;
+        bom.effectiveFrom = dto.effectiveFrom
+          ? new Date(dto.effectiveFrom)
+          : null;
       }
       if (dto.effectiveTo !== undefined) {
         bom.effectiveTo = dto.effectiveTo ? new Date(dto.effectiveTo) : null;
@@ -323,7 +336,8 @@ export class BomsService {
       }
 
       const item = await itemRepo.findOne({ where: { id: itemId, bomId } });
-      if (!item) throw new NotFoundException(`Item ${itemId} not found in BOM ${bomId}`);
+      if (!item)
+        throw new NotFoundException(`Item ${itemId} not found in BOM ${bomId}`);
 
       await itemRepo.remove(item);
       return this.reloadInsideTransaction(manager, bomId);
@@ -369,7 +383,9 @@ export class BomsService {
     const bom = await this.bomRepository.findOne({ where: { id } });
     if (!bom) throw new NotFoundException(`BOM with id ${id} not found`);
     if (bom.status === BomStatus.ACTIVE) {
-      throw new BadRequestException('Cannot delete an ACTIVE BOM. Deactivate it first.');
+      throw new BadRequestException(
+        'Cannot delete an ACTIVE BOM. Deactivate it first.',
+      );
     }
     await this.bomRepository.remove(bom);
   }

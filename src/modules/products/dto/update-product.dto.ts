@@ -87,25 +87,33 @@ export class UpdateProductDto {
   processLineId?: string;
 
   // Production parameters
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(1)
   packing?: number;
 
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(1)
   lotSize?: number;
 
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(0)
   safetyStock?: number;
 
-  @Transform(({ value }) => (value === '' || value === null || value === undefined ? null : value))
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? null : value,
+  )
   @IsOptional()
   @IsInt()
   @Min(0)

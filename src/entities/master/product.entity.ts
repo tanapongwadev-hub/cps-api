@@ -103,7 +103,12 @@ export class Product {
   processLineId: string;
 
   /** path รูปสินค้า */
-  @Column({ name: 'product_image_path', type: 'varchar', length: 500, nullable: true })
+  @Column({
+    name: 'product_image_path',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   productImagePath: string | null;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })

@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddMaterialsPcOverviewMenu1786700000013
-  implements MigrationInterface
-{
+export class AddMaterialsPcOverviewMenu1786700000013 implements MigrationInterface {
   name = 'AddMaterialsPcOverviewMenu1786700000013';
 
   async up(queryRunner: QueryRunner): Promise<void> {

@@ -32,6 +32,7 @@ import { ProductsModule } from './modules/products/products.module';
 import { BomsModule } from './modules/boms/boms.module';
 import { ProductWorkflowsModule } from './modules/product-workflows/product-workflows.module';
 import { ProcessStepsModule } from './modules/process-steps/process-steps.module';
+import { MaterialTraceabilityModule } from './modules/material-traceability/material-traceability.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { ProcessStepsModule } from './modules/process-steps/process-steps.module
     BomsModule,
     ProductWorkflowsModule,
     ProcessStepsModule,
+    MaterialTraceabilityModule,
   ],
   controllers: [AppController],
   providers: [AppService],
