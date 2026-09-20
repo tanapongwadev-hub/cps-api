@@ -19,8 +19,11 @@
 const path = require('path');
 const { Client } = require('pg');
 
+// Follow the same env file the app and the TypeORM CLI use (ConfigModule has no
+// envFilePath, and data-source.ts uses `dotenv/config`), so this never points at
+// a different database than the one being migrated.
 require('dotenv').config({
-  path: path.resolve(__dirname, '..', '.env.local'),
+  path: path.resolve(__dirname, '..', '.env'),
   quiet: true,
 });
 

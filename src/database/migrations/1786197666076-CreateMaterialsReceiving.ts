@@ -25,6 +25,13 @@ export class CreateMaterialsReceiving1786197666076 implements MigrationInterface
   name = 'CreateMaterialsReceiving1786197666076';
 
   async up(queryRunner: QueryRunner): Promise<void> {
+    // Schema `inventory` เดิมถูกสร้างโดย CreateGoodsReceipt1700000000008
+    // ซึ่งไฟล์ถูกลบออกจาก repo ไปแล้ว ทำให้ฐานข้อมูลใหม่ไม่มีใครสร้าง schema นี้
+    // และ migration ตัวนี้ (ตัวแรกที่ใช้ inventory) จะพังด้วย
+    // "schema inventory does not exist" — จึงสร้างแบบ idempotent ที่นี่
+    // เหมือนที่ CreateMaterialMaster1700000000005 ทำกับ schema `master`
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS inventory`);
+
     // -----------------------------------------------------------------
     // 1) Lot counter — running number รายวัน
     // -----------------------------------------------------------------
