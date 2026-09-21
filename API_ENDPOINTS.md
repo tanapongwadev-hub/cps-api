@@ -266,8 +266,11 @@ The following modules expose the same six route shapes:
 | `/organizations`   | `ORGANIZATION`    | `code`, `nameTh`, `nameEn?`, contact fields, `parentId?`, `type`, `logoUrl?`, `isActive?`                                             |
 | `/status-items`    | `STATUS_ITEM`     | `code`, `nameTh`, `nameEn?`, `color`, `module`, `isDefault?`, `sortOrder?`, `description?`, `isActive?`                               |
 | `/reject-reasons`  | `REJECT_REASON`   | `code`, `nameTh`, `nameEn?`, `description?`, `isActive?`                                                                              |
+| `/product-types`   | `PRODUCT_TYPE`    | `code(20)`, `nameTh(100)`, `nameEn?`, `description?`, `sortOrder?`, `isActive?`                                                      |
+| `/product-models`  | `PRODUCT_MODEL`   | `code(50)`, `nameTh(255)`, `nameEn?`, `brand?(100)`, `description?`, `isActive?`                                                     |
+| `/customers`       | `CUSTOMER`        | `code(50)`, `nameTh(255)`, `nameEn?`, `taxId?`, `contactName?`, `telephone?`, `email?`, `address?`, `isActive?`                     |
 
-Common list query is `page` (default 1), `limit` (default 20, maximum 100), `search?`, `isActive?`, `sortBy`, `sortOrder=asc|desc`. Categories default to `sortOrder`; other simple masters typically default to `code`. Organization adds `type?`.
+Common list query is `page` (default 1), `limit` (default 20, maximum 100), `search?`, `isActive?`, `sortBy`, `sortOrder=asc|desc`. Categories and product-types default to `sortOrder`; other simple masters typically default to `code`. Organization adds `type?`.
 
 Organization `type` must be `headquarters`, `branch`, `subsidiary`, or `department`. Status-item colors are constrained by its DTO enum. Empty optional strings are normally transformed to `null`.
 
@@ -275,13 +278,10 @@ Organization `type` must be `headquarters`, `branch`, `subsidiary`, or `departme
 
 There are currently no controllers for these tables:
 
-- `master.product_models`
-- `master.customers`
 - `master.locations`
-- `master.product_types`
 - `master.process_lines`
 
-They are returned by `GET /products/lookups` and populated through migrations/seeds. Paths such as `/product-models` or `/customers` are not implemented.
+They are returned by `GET /products/lookups` and populated through migrations/seeds. `/product-types`, `/product-models`, and `/customers` now have full CRUD (added 2026-09-20, see § 5.1 above).
 
 ## 6. Materials — `/materials`
 

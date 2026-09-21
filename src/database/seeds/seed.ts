@@ -433,6 +433,30 @@ export async function seed(dataSource: DataSource) {
         icon: 'tag',
         sort_order: 99,
       },
+      {
+        code: 'PRODUCT_TYPE_MANAGEMENT',
+        name_th: 'จัดการประเภทสินค้า',
+        name_en: 'Product Type Management',
+        path: '/master-data/product-types',
+        icon: 'tag',
+        sort_order: 10,
+      },
+      {
+        code: 'PRODUCT_MODEL_MANAGEMENT',
+        name_th: 'จัดการรุ่นสินค้า',
+        name_en: 'Product Model Management',
+        path: '/master-data/product-models',
+        icon: 'car',
+        sort_order: 11,
+      },
+      {
+        code: 'CUSTOMER_MANAGEMENT',
+        name_th: 'จัดการลูกค้า',
+        name_en: 'Customer Management',
+        path: '/master-data/customers',
+        icon: 'users',
+        sort_order: 12,
+      },
     ];
 
     const menuIdMap: Record<string, string> = {};

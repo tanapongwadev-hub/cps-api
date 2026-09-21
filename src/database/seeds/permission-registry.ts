@@ -1,5 +1,6 @@
 import { BOMS_PERMISSIONS } from '../../modules/boms/boms-permissions';
 import { CATEGORY_PERMISSIONS } from '../../modules/categories/category-permissions';
+import { CUSTOMER_PERMISSIONS } from '../../modules/customers/customer-permissions';
 import { DELIVERY_TYPE_PERMISSIONS } from '../../modules/delivery-types/delivery-type-permissions';
 import { LOADING_POINT_PERMISSIONS } from '../../modules/loading-points/loading-point-permissions';
 import { MATERIAL_MODEL_PERMISSIONS } from '../../modules/material-models/material-model-permissions';
@@ -8,6 +9,8 @@ import { MATERIAL_PERMISSIONS } from '../../modules/materials/material-permissio
 import { MATERIALS_DISBURSEMENT_PERMISSIONS } from '../../modules/materials-disbursement/materials-disbursement-permissions';
 import { MATERIALS_RECEIVING_PERMISSIONS } from '../../modules/materials-receiving/materials-receiving-permissions';
 import { ORGANIZATION_PERMISSIONS } from '../../modules/organizations/organization-permissions';
+import { PRODUCT_MODEL_PERMISSIONS } from '../../modules/product-models/product-model-permissions';
+import { PRODUCT_TYPE_PERMISSIONS } from '../../modules/product-types/product-type-permissions';
 import { PRODUCTS_PERMISSIONS } from '../../modules/products/products-permissions';
 import { REJECT_REASON_PERMISSIONS } from '../../modules/reject-reasons/reject-reason-permissions';
 import { STATUS_ITEM_PERMISSIONS } from '../../modules/status-items/status-item-permissions';
@@ -96,6 +99,9 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   STATUS_ITEM_MANAGEMENT: fromCrud(STATUS_ITEM_PERMISSIONS),
   ORGANIZATION_MANAGEMENT: fromCrud(ORGANIZATION_PERMISSIONS),
   REJECT_REASON_MANAGEMENT: fromCrud(REJECT_REASON_PERMISSIONS),
+  PRODUCT_TYPE_MANAGEMENT: fromCrud(PRODUCT_TYPE_PERMISSIONS),
+  PRODUCT_MODEL_MANAGEMENT: fromCrud(PRODUCT_MODEL_PERMISSIONS),
+  CUSTOMER_MANAGEMENT: fromCrud(CUSTOMER_PERMISSIONS),
   MATERIALS_RECEIVING: {
     ...fromCrud(MATERIALS_RECEIVING_PERMISSIONS),
     POST: MATERIALS_RECEIVING_PERMISSIONS.CONFIRM,

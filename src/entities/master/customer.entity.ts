@@ -49,6 +49,12 @@ export class Customer {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ name: 'created_by', type: 'bigint', nullable: true })
+  createdBy: string | null;
+
+  @Column({ name: 'updated_by', type: 'bigint', nullable: true })
+  updatedBy: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

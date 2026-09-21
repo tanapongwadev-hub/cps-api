@@ -33,6 +33,9 @@ import { BomsModule } from './modules/boms/boms.module';
 import { ProductWorkflowsModule } from './modules/product-workflows/product-workflows.module';
 import { ProcessStepsModule } from './modules/process-steps/process-steps.module';
 import { MaterialTraceabilityModule } from './modules/material-traceability/material-traceability.module';
+import { ProductTypesModule } from './modules/product-types/product-types.module';
+import { ProductModelsModule } from './modules/product-models/product-models.module';
+import { CustomersModule } from './modules/customers/customers.module';
 
 @Module({
   imports: [
@@ -76,6 +79,9 @@ import { MaterialTraceabilityModule } from './modules/material-traceability/mate
     ProductWorkflowsModule,
     ProcessStepsModule,
     MaterialTraceabilityModule,
+    ProductTypesModule,
+    ProductModelsModule,
+    CustomersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
