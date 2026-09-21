@@ -36,6 +36,8 @@ import { MaterialTraceabilityModule } from './modules/material-traceability/mate
 import { ProductTypesModule } from './modules/product-types/product-types.module';
 import { ProductModelsModule } from './modules/product-models/product-models.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { LocationsModule } from './modules/locations/locations.module';
+import { ProcessLinesModule } from './modules/process-lines/process-lines.module';
 
 @Module({
   imports: [
@@ -82,6 +84,8 @@ import { CustomersModule } from './modules/customers/customers.module';
     ProductTypesModule,
     ProductModelsModule,
     CustomersModule,
+    LocationsModule,
+    ProcessLinesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
