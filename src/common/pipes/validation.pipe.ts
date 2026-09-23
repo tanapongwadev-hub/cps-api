@@ -1,5 +1,6 @@
 import { ValidationPipe, BadRequestException } from '@nestjs/common';
 import { ValidationError } from 'class-validator';
+import { toThaiValidationMessage } from '../errors/thai-error-message';
 
 export class CustomValidationPipe extends ValidationPipe {
   constructor() {
@@ -11,16 +12,28 @@ export class CustomValidationPipe extends ValidationPipe {
         enableImplicitConversion: true,
       },
       exceptionFactory: (errors: ValidationError[]) => {
-        const messages = errors.map((error) => {
-          return Object.values(error.constraints || {}).join(', ');
-        });
+        const messages = flattenValidationErrors(errors);
         return new BadRequestException({
           statusCode: 400,
-          error: 'Bad Request',
+          error: 'คำขอไม่ถูกต้อง',
           code: 'VALIDATION_ERROR',
-          message: messages.join('; '),
+          message: messages,
         });
       },
     });
   }
+}
+
+function flattenValidationErrors(
+  errors: ValidationError[],
+  parent = '',
+): string[] {
+  return errors.flatMap((error) => {
+    const property = parent ? `${parent}.${error.property}` : error.property;
+    const own = Object.entries(error.constraints ?? {}).map(
+      ([constraint, message]) =>
+        toThaiValidationMessage(property, constraint, message),
+    );
+    return [...own, ...flattenValidationErrors(error.children ?? [], property)];
+  });
 }

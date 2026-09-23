@@ -31,11 +31,13 @@ Global validation removes no unknown fields silently: `whitelist: true` and `for
 ```json
 {
   "statusCode": 400,
-  "error": "Bad Request",
+  "error": "คำขอไม่ถูกต้อง",
   "code": "VALIDATION_ERROR",
-  "message": "one or more validation messages"
+  "message": ["ข้อความตรวจสอบข้อมูลภาษาไทยอย่างน้อยหนึ่งรายการ"]
 }
 ```
+
+All error responses are normalized by the global Thai exception filter. User-facing `message` and `error` values are Thai; HTTP status, stable custom `code`, and structured fields such as Production Plan `shortfalls` are preserved. Unexpected internal exceptions return a generic Thai 500 message and do not expose technical exception text.
 
 List responses normally use:
 
@@ -617,7 +619,7 @@ Inventory query supports `page`, `limit` (max 100), `search`, `isActive`, `type`
 | `404`  | Resource/reference/QR not found                                                                                                         |
 | `409`  | Duplicate code, optimistic concurrency conflict, invalid lifecycle transition represented as Conflict                                   |
 
-Not every module uses the same exception class for an equivalent semantic condition. Clients should branch primarily on HTTP status and stable custom `code` when present, not on exact English message text.
+Not every module uses the same exception class for an equivalent semantic condition. Clients should branch primarily on HTTP status and stable custom `code` when present, not on exact Thai message text.
 
 ## 14. Removed and non-existent endpoints
 

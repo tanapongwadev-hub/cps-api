@@ -69,6 +69,19 @@ function makePlan(overrides: Partial<ProductionPlan> = {}): ProductionPlan {
   };
 }
 
+function makeJobOrders() {
+  return {
+    createForPlan: jest
+      .fn()
+      .mockResolvedValue({ id: 'jo-1', code: 'JO-20260922-0001' }),
+    cancelForPlan: jest.fn().mockResolvedValue(undefined),
+    assertCancellable: jest.fn().mockResolvedValue(undefined),
+    isExpirable: jest.fn().mockResolvedValue(true),
+    findSummaryByPlanId: jest.fn().mockResolvedValue(null),
+    findSummaryByPlanIds: jest.fn().mockResolvedValue(new Map()),
+  };
+}
+
 function setup() {
   const entities = [
     ProductionPlan,
@@ -99,12 +112,14 @@ function setup() {
       callback(manager),
     ),
   };
+  const jobOrders = makeJobOrders();
   const service = new ProductionPlansService(
     repos[ProductionPlan.name] as never,
     repos[Product.name] as never,
     dataSource as never,
+    jobOrders as never,
   );
-  return { service, repos, manager, dataSource };
+  return { service, repos, manager, dataSource, jobOrders };
 }
 
 describe('ProductionPlansService', () => {
@@ -143,7 +158,7 @@ describe('ProductionPlansService', () => {
   });
 
   it('approves atomically with FIFO package locks, excluding scrap and wastage', async () => {
-    const { service, repos, manager } = setup();
+    const { service, repos, manager, jobOrders } = setup();
     const plan = makePlan();
     repos[ProductionPlan.name].findOne
       .mockResolvedValueOnce(plan)
@@ -207,6 +222,13 @@ describe('ProductionPlansService', () => {
     expect(reservation.reservedQuantity).toBe('6.0000');
     expect(repos[ProductionPlanReservation.name].save).toHaveBeenCalledTimes(1);
     expect(plan.status).toBe('APPROVED');
+    // A Plan is never left APPROVED without its Job Order — created in the
+    // same transaction (see docs/plans/2026-09-23-production-job-order-...).
+    expect(jobOrders.createForPlan).toHaveBeenCalledWith(
+      manager,
+      plan,
+      'approver-1',
+    );
   });
 
   it('returns per-material shortfalls and creates no partial Reservation', async () => {
@@ -254,8 +276,8 @@ describe('ProductionPlansService', () => {
     expect(repos[ProductionPlanReservation.name].save).not.toHaveBeenCalled();
   });
 
-  it('releases every active Reservation when an APPROVED plan is cancelled', async () => {
-    const { service, repos } = setup();
+  it('releases every active Reservation when an APPROVED plan is cancelled, and cancels its Job Order', async () => {
+    const { service, repos, manager, jobOrders } = setup();
     const plan = makePlan({ status: 'APPROVED' });
     const reservation = {
       id: 'reservation-1',
@@ -276,10 +298,34 @@ describe('ProductionPlansService', () => {
     expect(reservation.releaseType).toBe('CANCELLED');
     expect(reservation.releasedBy).toBe('user-1');
     expect(plan.status).toBe('CANCELLED');
+    // assertCancellable must run BEFORE the reservations are released.
+    expect(jobOrders.assertCancellable).toHaveBeenCalledWith(manager, plan.id);
+    expect(jobOrders.cancelForPlan).toHaveBeenCalledWith(
+      manager,
+      plan.id,
+      'เปลี่ยนแผน',
+      'user-1',
+    );
   });
 
-  it('auto-expires a manually backdated APPROVED plan after three days', async () => {
-    const { service, repos } = setup();
+  it('blocks cancelling an APPROVED plan whose Job Order already issued something', async () => {
+    const { service, repos, jobOrders } = setup();
+    const plan = makePlan({ status: 'APPROVED' });
+    repos[ProductionPlan.name].findOne.mockResolvedValueOnce(plan);
+    jobOrders.assertCancellable.mockRejectedValueOnce(
+      new ConflictException('จ่ายออกไปแล้วบางส่วน'),
+    );
+
+    await expect(
+      service.cancel(plan.id, { reason: 'เปลี่ยนแผน' }, 'user-1'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(jobOrders.cancelForPlan).not.toHaveBeenCalled();
+    // Reservations must not have been touched either.
+    expect(repos[ProductionPlanReservation.name].save).not.toHaveBeenCalled();
+  });
+
+  it('auto-expires a manually backdated APPROVED plan after three days (Job Order still WAITING_PICKING)', async () => {
+    const { service, repos, jobOrders } = setup();
     const plan = makePlan({
       status: 'APPROVED',
       approvedAt: new Date('2026-09-01T00:00:00Z'),
@@ -305,81 +351,37 @@ describe('ProductionPlansService', () => {
     expect(plan.cancelReason).toContain('3 วัน');
     expect(reservation.releaseType).toBe('EXPIRED');
     expect(reservation.releasedBy).toBeNull();
+    expect(jobOrders.cancelForPlan).toHaveBeenCalled();
   });
 
-  it('issues the exact reserved lot into a linked confirmed Disbursement', async () => {
+  it('does not auto-expire once picking has started on the Job Order', async () => {
+    const { service, repos, jobOrders } = setup();
+    const plan = makePlan({
+      status: 'APPROVED',
+      approvedAt: new Date('2026-09-01T00:00:00Z'),
+    });
+    repos[ProductionPlan.name].find.mockResolvedValue([{ id: plan.id }]);
+    repos[ProductionPlan.name].findOne.mockResolvedValue(plan);
+    jobOrders.isExpirable.mockResolvedValue(false);
+
+    const count = await service.expireApprovedPlans(
+      new Date('2026-09-05T00:00:01Z'),
+    );
+
+    expect(count).toBe(0);
+    expect(plan.status).toBe('APPROVED');
+    expect(jobOrders.cancelForPlan).not.toHaveBeenCalled();
+  });
+
+  it('POST /production-plans/:id/issue is disabled and points to the Job Order', async () => {
     const { service, repos } = setup();
-    const plan = makePlan({ status: 'APPROVED' });
-    const pkg = {
-      id: 'pkg-1',
-      materialReceivingId: 'receiving-1',
-      remainingQuantity: '10.0000',
-      quantity: '10.0000',
-      status: 'in_stock',
-      materialReceiving: {
-        id: 'receiving-1',
-        materialId: 'material-1',
-        internalLotNo: 'LOT-001',
-        receiveDate: '2026-09-01',
-      },
-    };
-    const reservation = {
-      id: 'reservation-1',
-      productionPlanLineId: 'line-1',
-      materialReceivingPackageId: pkg.id,
-      reservedQuantity: '6.0000',
-      releasedAt: null,
-      releaseType: null,
-      releasedBy: null,
-      materialReceivingPackage: pkg,
-    };
-    repos[ProductionPlan.name].findOne
-      .mockResolvedValueOnce(plan)
-      .mockResolvedValueOnce({ ...plan, lines: [] });
-    repos[ProductionPlanReservation.name].createQueryBuilder.mockReturnValue(
-      makeQueryBuilder([reservation]),
+    repos[ProductionPlan.name].findOne.mockResolvedValue(
+      makePlan({ status: 'APPROVED' }),
     );
-    const packageQuery = makeQueryBuilder([pkg]);
-    repos[MaterialReceivingPackage.name].createQueryBuilder.mockReturnValue(
-      packageQuery,
-    );
-    repos[MaterialsDisbursementCounter.name].findOne.mockResolvedValue({
-      id: 'counter-1',
-      disbursementDate: '2026-09-22',
-      lastNumber: 0,
-    });
-    repos[MaterialsDisbursement.name].save.mockImplementation((value) =>
-      Promise.resolve({
-        ...value,
-        id: 'disbursement-1',
-      }),
-    );
-    repos[MaterialDisbursementItem.name].save.mockImplementation((value) =>
-      Promise.resolve({ ...value, id: 'disbursement-item-1' }),
-    );
-    repos[StockBalance.name].findOne.mockResolvedValue({
-      id: 'balance-1',
-      materialId: 'material-1',
-      quantity: '10.0000',
-    });
-    repos[Material.name].find.mockResolvedValue([
-      { id: 'material-1', unitId: 'unit-1' },
-    ]);
 
-    await service.issue(plan.id, 'issuer-1');
-
-    const disbursement =
-      repos[MaterialsDisbursement.name].save.mock.calls[0][0];
-    expect(disbursement.productionPlanId).toBe(plan.id);
-    expect(disbursement.status).toBe('confirmed');
-    expect(pkg.remainingQuantity).toBe('4.0000');
-    expect(reservation.releaseType).toBe('ISSUED');
-    expect(reservation.releasedBy).toBe('issuer-1');
-    expect(
-      repos[MaterialDisbursementPackage.name].save.mock.calls[0][0].packageId,
-    ).toBe('pkg-1');
-    expect(repos[StockTransaction.name].save).toHaveBeenCalledTimes(1);
-    expect(plan.status).toBe('ISSUED');
+    await expect(service.issue('plan-1', 'user-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('imports one Excel file as one plan with one line per data row', async () => {

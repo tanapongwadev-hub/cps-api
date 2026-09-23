@@ -7,14 +7,9 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Workbook } from 'exceljs';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
-import {
-  recordAuditEvent,
-  recordStockMovement,
-  createTraceId,
-} from '../../common/stock-ledger';
+import { recordAuditEvent } from '../../common/stock-ledger';
+import { fromScaled, toScaled } from '../../common/decimal';
 import { MaterialReceivingPackage } from '../../entities/inventory/material-receiving-package.entity';
-import { MaterialsDisbursementCounter } from '../../entities/inventory/materials-disbursement-counter.entity';
-import { StockBalance } from '../../entities/inventory/stock-balance.entity';
 import { Material } from '../../entities/master/material.entity';
 import {
   BomStatus,
@@ -22,9 +17,7 @@ import {
   ProductBomItem,
 } from '../../entities/master/product-bom.entity';
 import { Product } from '../../entities/master/product.entity';
-import { MaterialDisbursementItem } from '../materials-disbursement/material-disbursement-item.entity';
-import { MaterialDisbursementPackage } from '../materials-disbursement/material-disbursement-package.entity';
-import { MaterialsDisbursement } from '../materials-disbursement/materials-disbursement.entity';
+import { MaterialJobOrdersService } from '../material-job-orders/material-job-orders.service';
 import { CancelProductionPlanDto } from './dto/cancel-production-plan.dto';
 import {
   CreateProductionPlanDto,
@@ -40,7 +33,6 @@ import {
 } from './production-plan-reservation.entity';
 import { ProductionPlan } from './production-plan.entity';
 
-const DECIMAL_SCALE = 4;
 const AUTO_EXPIRY_REASON = 'หมดอายุอัตโนมัติ (เกิน 3 วันหลังอนุมัติ)';
 
 export interface ProductionPlanImportFile {
@@ -69,6 +61,7 @@ export class ProductionPlansService {
     private readonly productRepository: Repository<Product>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly jobOrders: MaterialJobOrdersService,
   ) {}
 
   async create(
@@ -307,7 +300,7 @@ export class ProductionPlansService {
             reservationRepo.create({
               productionPlanLineId: demand.lineId,
               materialReceivingPackageId: entry.pkg.id,
-              reservedQuantity: this.fromScaled(reserved),
+              reservedQuantity: fromScaled(reserved),
               releasedAt: null,
               releaseType: null,
               releasedBy: null,
@@ -331,205 +324,47 @@ export class ProductionPlansService {
         before: { status: 'DRAFT' },
         after: { status: 'APPROVED' },
       });
+      await recordAuditEvent(manager, {
+        traceId: plan.code,
+        action: 'RESERVE',
+        targetType: 'PRODUCTION_PLAN',
+        targetId: plan.id,
+        performedBy: userId,
+        after: { materialCount: materialIds.length },
+      });
+
+      // A Plan is never left APPROVED without its warehouse pick document —
+      // create the Job Order in this SAME transaction, so a failure here
+      // rolls back the reservations too (see docs/plans/2026-09-23-...).
+      await this.jobOrders.createForPlan(manager, plan, userId);
     });
     return this.findOne(id);
   }
 
+  /**
+   * Superseded — the stock cut ("จ่ายออก") now happens on the linked
+   * Material Job Order (created automatically when the Plan is approved),
+   * not here. See MaterialJobOrdersService#issue and
+   * docs/plans/2026-09-23-production-job-order-material-issue-plan.md § 17
+   * open question Q6. This endpoint is kept only to fail with a clear
+   * pointer for any stale client still calling it.
+   */
   async issue(id: string, userId: string): Promise<ProductionPlan> {
+    const plan = await this.planRepository.findOne({ where: { id } });
+    if (!plan) throw new NotFoundException('Production Plan not found');
     await this.dataSource.transaction(async (manager) => {
-      const plan = await this.lockPlan(manager, id);
-      if (plan.status !== 'APPROVED') {
-        throw new ConflictException(
-          'Only an APPROVED Production Plan can be issued',
-        );
-      }
-
-      const reservations = await manager
-        .getRepository(ProductionPlanReservation)
-        .createQueryBuilder('reservation')
-        .innerJoinAndSelect('reservation.productionPlanLine', 'line')
-        .innerJoinAndSelect('reservation.materialReceivingPackage', 'pkg')
-        .innerJoinAndSelect('pkg.materialReceiving', 'receiving')
-        .where('line.productionPlanId = :id', { id })
-        .andWhere('reservation.releasedAt IS NULL')
-        .orderBy('receiving.materialId', 'ASC')
-        .addOrderBy('receiving.receiveDate', 'ASC')
-        .addOrderBy('pkg.id', 'ASC')
-        .getMany();
-      if (reservations.length === 0) {
-        throw new ConflictException(
-          'Production Plan has no active Reservation to issue',
-        );
-      }
-
-      const packageIds = [
-        ...new Set(reservations.map((r) => r.materialReceivingPackageId)),
-      ];
-      const lockedPackages = await manager
-        .getRepository(MaterialReceivingPackage)
-        .createQueryBuilder('pkg')
-        .innerJoinAndSelect('pkg.materialReceiving', 'receiving')
-        .where('pkg.id IN (:...packageIds)', { packageIds })
-        .orderBy('pkg.id', 'ASC')
-        .setLock('pessimistic_write', undefined, ['pkg'])
-        .getMany();
-      const packageById = new Map(lockedPackages.map((pkg) => [pkg.id, pkg]));
-
-      const today = new Date().toISOString().slice(0, 10);
-      const disbursementNo = await this.allocateDisbursementNo(manager, today);
-      const disbursementRepo = manager.getRepository(MaterialsDisbursement);
-      const disbursement = await disbursementRepo.save(
-        disbursementRepo.create({
-          traceId: createTraceId('ISS'),
-          disbursementNo,
-          disbursementType: 'production',
-          disbursementDate: today,
-          status: 'confirmed',
-          reason: `Production Plan ${plan.code}`,
-          departmentId: null,
-          productionOrder: plan.code,
-          referenceNo: plan.code,
-          requestedBy: null,
-          approvedBy: userId,
-          attachmentUrl: null,
-          attachmentName: null,
-          remark: plan.remark,
-          productionPlanId: plan.id,
-          confirmedBy: userId,
-          confirmedAt: new Date(),
-          cancelledBy: null,
-          cancelledAt: null,
-          cancelReason: null,
-          createdBy: userId,
-        }),
-      );
-
-      const reservationsByMaterial = new Map<
-        string,
-        ProductionPlanReservation[]
-      >();
-      for (const reservation of reservations) {
-        const pkg = packageById.get(reservation.materialReceivingPackageId);
-        if (!pkg)
-          throw new ConflictException('A reserved package no longer exists');
-        const materialId = pkg.materialReceiving.materialId;
-        const rows = reservationsByMaterial.get(materialId) ?? [];
-        rows.push(reservation);
-        reservationsByMaterial.set(materialId, rows);
-      }
-
-      const itemRepo = manager.getRepository(MaterialDisbursementItem);
-      const allocationRepo = manager.getRepository(MaterialDisbursementPackage);
-      const packageRepo = manager.getRepository(MaterialReceivingPackage);
-      const balanceRepo = manager.getRepository(StockBalance);
-      const reservationRepo = manager.getRepository(ProductionPlanReservation);
-      const materials = await manager.getRepository(Material).find({
-        where: { id: In([...reservationsByMaterial.keys()]) },
-      });
-      const materialById = new Map(
-        materials.map((material) => [material.id, material]),
-      );
-
-      for (const [materialId, materialReservations] of reservationsByMaterial) {
-        const total = materialReservations.reduce(
-          (sum, reservation) =>
-            sum + this.toScaled(reservation.reservedQuantity),
-          0n,
-        );
-        const item = await itemRepo.save(
-          itemRepo.create({
-            disbursementId: disbursement.id,
-            materialId,
-            requestedQuantity: this.fromScaled(total),
-            disbursedQuantity: this.fromScaled(total),
-            createdBy: userId,
-          }),
-        );
-        const balance = await balanceRepo.findOne({
-          where: { materialId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!balance || this.toScaled(balance.quantity) < total) {
-          throw new ConflictException(
-            `Stock balance is insufficient for material ${materialId}`,
-          );
-        }
-
-        let runningBalance = this.toScaled(balance.quantity);
-        let fifoOrder = 0;
-        for (const reservation of materialReservations) {
-          const pkg = packageById.get(reservation.materialReceivingPackageId)!;
-          const quantity = this.toScaled(reservation.reservedQuantity);
-          const pkgRemaining = this.toScaled(pkg.remainingQuantity);
-          if (pkgRemaining < quantity) {
-            throw new ConflictException(
-              `Reserved package ${pkg.id} no longer contains enough stock`,
-            );
-          }
-          fifoOrder += 1;
-          pkg.remainingQuantity = this.fromScaled(pkgRemaining - quantity);
-          pkg.status =
-            pkg.remainingQuantity === '0.0000' ? 'issued' : 'partial';
-          await packageRepo.save(pkg);
-          await allocationRepo.save(
-            allocationRepo.create({
-              disbursementItemId: item.id,
-              packageId: pkg.id,
-              disbursedQuantity: this.fromScaled(quantity),
-              fifoOrder,
-              reversedAt: null,
-              reversedBy: null,
-              createdBy: userId,
-            }),
-          );
-
-          const before = runningBalance;
-          runningBalance -= quantity;
-          await recordStockMovement(manager, {
-            traceId: disbursement.traceId,
-            transactionType: 'ISSUE',
-            materialId,
-            referenceType: 'MATERIALS_DISBURSEMENT',
-            referenceId: disbursement.id,
-            referenceLotNo: pkg.materialReceiving.internalLotNo,
-            mainQrId: pkg.materialReceiving.id,
-            subQrId: pkg.id,
-            unitId: materialById.get(materialId)?.unitId ?? null,
-            productionOrder: plan.code,
-            referenceNo: plan.code,
-            quantityBefore: this.fromScaled(before),
-            quantityIn: this.fromScaled(0n),
-            quantityOut: this.fromScaled(quantity),
-            quantityAfter: this.fromScaled(runningBalance),
-            remark: `Issued from Production Plan ${plan.code}`,
-            performedBy: userId,
-          });
-
-          reservation.releasedAt = new Date();
-          reservation.releaseType = 'ISSUED';
-          reservation.releasedBy = userId;
-          await reservationRepo.save(reservation);
-        }
-        balance.quantity = this.fromScaled(runningBalance);
-        balance.lastMovementAt = new Date();
-        await balanceRepo.save(balance);
-      }
-
-      plan.status = 'ISSUED';
-      plan.issuedBy = userId;
-      plan.issuedAt = new Date();
-      await manager.getRepository(ProductionPlan).save(plan);
       await recordAuditEvent(manager, {
         traceId: plan.code,
         action: 'STATUS_CHANGE',
         targetType: 'PRODUCTION_PLAN',
         targetId: plan.id,
         performedBy: userId,
-        before: { status: 'APPROVED' },
-        after: { status: 'ISSUED', disbursementId: disbursement.id },
+        reason: 'Attempted call to the deprecated /issue endpoint',
       });
     });
-    return this.findOne(id);
+    throw new ConflictException(
+      'การจ่ายออกย้ายไปที่ใบจัดงานแล้ว กรุณาไปที่ จัดการวัสดุ > ใบจัดงาน เพื่อจ่ายออก',
+    );
   }
 
   async cancel(
@@ -549,7 +384,19 @@ export class ProductionPlansService {
       }
       const previousStatus = plan.status;
       if (plan.status === 'APPROVED') {
+        // Blocks (409) if the linked Job Order already issued something —
+        // must run before releaseReservations, not after.
+        await this.jobOrders.assertCancellable(manager, plan.id);
         await this.releaseReservations(manager, plan.id, 'CANCELLED', userId);
+        await recordAuditEvent(manager, {
+          traceId: plan.code,
+          action: 'RELEASE',
+          targetType: 'PRODUCTION_PLAN',
+          targetId: plan.id,
+          performedBy: userId,
+          reason,
+        });
+        await this.jobOrders.cancelForPlan(manager, plan.id, reason, userId);
       }
       plan.status = 'CANCELLED';
       plan.cancelledBy = userId;
@@ -607,12 +454,31 @@ export class ProductionPlansService {
         ) {
           return false;
         }
+        if (!(await this.jobOrders.isExpirable(manager, plan.id))) {
+          // Picking has already started (or the Job Order has moved past
+          // WAITING_PICKING) — stop the 3-day clock, per plan § 17 Q2.
+          return false;
+        }
         await this.releaseReservations(manager, plan.id, 'EXPIRED', null);
         plan.status = 'EXPIRED';
         plan.cancelledBy = null;
         plan.cancelledAt = now;
         plan.cancelReason = AUTO_EXPIRY_REASON;
         await manager.getRepository(ProductionPlan).save(plan);
+        await recordAuditEvent(manager, {
+          traceId: plan.code,
+          action: 'RELEASE',
+          targetType: 'PRODUCTION_PLAN',
+          targetId: plan.id,
+          performedBy: null,
+          reason: AUTO_EXPIRY_REASON,
+        });
+        await this.jobOrders.cancelForPlan(
+          manager,
+          plan.id,
+          AUTO_EXPIRY_REASON,
+          null,
+        );
         return true;
       });
       if (changed) expired += 1;
@@ -651,8 +517,16 @@ export class ProductionPlansService {
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
+
+    const jobOrderByPlanId = await this.jobOrders.findSummaryByPlanIds(
+      items.map((plan) => plan.id),
+    );
+
     return {
-      items,
+      items: items.map((plan) => ({
+        ...plan,
+        jobOrder: jobOrderByPlanId.get(plan.id) ?? null,
+      })),
       meta: {
         page,
         limit,
@@ -662,7 +536,7 @@ export class ProductionPlansService {
     };
   }
 
-  async findOne(id: string): Promise<ProductionPlan> {
+  async findOne(id: string) {
     const plan = await this.planRepository.findOne({
       where: { id },
       relations: [
@@ -678,7 +552,8 @@ export class ProductionPlansService {
       order: { lines: { id: 'ASC', reservations: { id: 'ASC' } } },
     });
     if (!plan) throw new NotFoundException('Production Plan not found');
-    return plan;
+    const jobOrder = await this.jobOrders.findSummaryByPlanId(plan.id);
+    return { ...plan, jobOrder };
   }
 
   async getLookups() {
@@ -764,7 +639,7 @@ export class ProductionPlansService {
         // Deliberately excludes both isScrap=true rows (query above) and
         // wastagePercent. Required Quantity is exact by domain decision.
         const required =
-          this.toScaled(String(item.quantity)) * BigInt(line.quantity);
+          toScaled(String(item.quantity)) * BigInt(line.quantity);
         byMaterial.set(
           item.materialId,
           (byMaterial.get(item.materialId) ?? 0n) + required,
@@ -798,7 +673,7 @@ export class ProductionPlansService {
     const reservedRows = packageIds.length
       ? ((await manager.query(
           `SELECT material_receiving_package_id AS package_id,
-                  SUM(reserved_quantity)::text AS reserved_quantity
+                  SUM(reserved_quantity - issued_quantity)::text AS reserved_quantity
            FROM inventory.production_plan_reservations
            WHERE released_at IS NULL
              AND material_receiving_package_id = ANY($1::bigint[])
@@ -812,11 +687,11 @@ export class ProductionPlansService {
     const reservedByPackage = new Map(
       reservedRows.map((row) => [
         String(row.package_id),
-        this.toScaled(row.reserved_quantity),
+        toScaled(row.reserved_quantity),
       ]),
     );
     return packages.map((pkg) => {
-      const remaining = this.toScaled(pkg.remainingQuantity);
+      const remaining = toScaled(pkg.remainingQuantity);
       const reserved = reservedByPackage.get(pkg.id) ?? 0n;
       return {
         pkg,
@@ -862,9 +737,9 @@ export class ProductionPlansService {
           materialId,
           materialCode: material?.code ?? materialId,
           materialName: material?.name ?? '',
-          required: this.fromScaled(required),
-          available: this.fromScaled(available),
-          shortage: this.fromScaled(required - available),
+          required: fromScaled(required),
+          available: fromScaled(available),
+          shortage: fromScaled(required - available),
         },
       ];
     });
@@ -932,35 +807,6 @@ export class ProductionPlansService {
     return `${prefix}${String(next).padStart(4, '0')}`;
   }
 
-  private async allocateDisbursementNo(
-    manager: EntityManager,
-    date: string,
-  ): Promise<string> {
-    const repo = manager.getRepository(MaterialsDisbursementCounter);
-    let counter = await repo.findOne({
-      where: { disbursementDate: date },
-      lock: { mode: 'pessimistic_write' },
-    });
-    if (!counter) {
-      await manager.query(
-        `INSERT INTO inventory.materials_disbursement_counters
-           (disbursement_date, last_number)
-         VALUES ($1, 0)
-         ON CONFLICT (disbursement_date) DO NOTHING`,
-        [date],
-      );
-      counter = await repo.findOne({
-        where: { disbursementDate: date },
-        lock: { mode: 'pessimistic_write' },
-      });
-    }
-    if (!counter)
-      throw new ConflictException('Unable to allocate Disbursement number');
-    counter.lastNumber += 1;
-    await repo.save(counter);
-    return `DIS-${date.replaceAll('-', '')}-${String(counter.lastNumber).padStart(4, '0')}`;
-  }
-
   private cellText(value: unknown): string {
     if (value == null) return '';
     if (typeof value === 'object') {
@@ -1003,25 +849,5 @@ export class ProductionPlansService {
       );
     }
     return date.toISOString().slice(0, 10);
-  }
-
-  private toScaled(value: string | number): bigint {
-    const text = String(value).trim();
-    const sign = text.startsWith('-') ? -1n : 1n;
-    const [wholeRaw, fractionRaw = ''] = text.replace(/^[+-]/, '').split('.');
-    const whole = BigInt(wholeRaw || '0');
-    const fraction = BigInt(
-      (fractionRaw + '0'.repeat(DECIMAL_SCALE)).slice(0, DECIMAL_SCALE),
-    );
-    return sign * (whole * 10n ** BigInt(DECIMAL_SCALE) + fraction);
-  }
-
-  private fromScaled(value: bigint): string {
-    const negative = value < 0n;
-    const absolute = negative ? -value : value;
-    const divisor = 10n ** BigInt(DECIMAL_SCALE);
-    const whole = absolute / divisor;
-    const fraction = String(absolute % divisor).padStart(DECIMAL_SCALE, '0');
-    return `${negative ? '-' : ''}${whole}.${fraction}`;
   }
 }

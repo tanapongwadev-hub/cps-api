@@ -24,6 +24,8 @@ import {
   recordAuditEvent,
   recordStockMovement,
 } from '../../common/stock-ledger';
+import { allocateDisbursementNo } from '../../common/disbursement-number';
+import { fromScaled, toScaled } from '../../common/decimal';
 import { CreateMaterialsDisbursementDto } from './dto/create-materials-disbursement.dto';
 import { UpdateMaterialsDisbursementDto } from './dto/update-materials-disbursement.dto';
 import {
@@ -34,8 +36,6 @@ import { ReportMaterialsDisbursementQueryDto } from './dto/report-materials-disb
 import { MaterialsDisbursement } from './materials-disbursement.entity';
 import { MaterialDisbursementItem } from './material-disbursement-item.entity';
 import { MaterialDisbursementPackage } from './material-disbursement-package.entity';
-
-const DECIMAL_SCALE = 4;
 
 const SORT_COLUMNS: Record<DisbursementSortBy, string> = {
   disbursementNo: 'disbursement.disbursementNo',
@@ -98,7 +98,7 @@ export class MaterialsDisbursementService {
 
     // Validate positive quantities
     for (const item of dto.items) {
-      if (this.toScaled(item.requestedQuantity) <= 0n) {
+      if (toScaled(item.requestedQuantity) <= 0n) {
         throw new BadRequestException(
           'Requested quantity must be greater than 0',
         );
@@ -112,7 +112,7 @@ export class MaterialsDisbursementService {
       }
 
       // 2) Generate disbursement number
-      const disbursementNo = await this.allocateDisbursementNo(
+      const disbursementNo = await allocateDisbursementNo(
         manager,
         dto.disbursementDate,
       );
@@ -218,7 +218,7 @@ export class MaterialsDisbursementService {
           );
         }
         for (const item of dto.items) {
-          if (this.toScaled(item.requestedQuantity) <= 0n) {
+          if (toScaled(item.requestedQuantity) <= 0n) {
             throw new BadRequestException(
               'Requested quantity must be greater than 0',
             );
@@ -434,6 +434,17 @@ export class MaterialsDisbursementService {
       }
       if (disbursement.status === 'cancelled') {
         throw new ConflictException('Materials disbursement already cancelled');
+      }
+      if (disbursement.materialJobOrderId) {
+        // This disbursement was issued from a Material Job Order (a
+        // Production Plan's warehouse pick document) — its reservation
+        // bookkeeping (issued_quantity, release state) is owned by
+        // MaterialJobOrdersService, not this page. Cancelling here would
+        // leave that ledger out of sync. See ADR "Job Order disbursements
+        // cannot be cancelled from the Disbursement page".
+        throw new ConflictException(
+          'เอกสารนี้ออกจากใบจัดงาน กรุณายกเลิกที่หน้าใบจัดงานแทน',
+        );
       }
 
       // Capture BEFORE any mutation — otherwise the audit event's `before`
@@ -696,7 +707,7 @@ export class MaterialsDisbursementService {
     disbursement: MaterialsDisbursement,
     userId: string,
   ): Promise<void> {
-    const requestedQty = this.toScaled(item.requestedQuantity);
+    const requestedQty = toScaled(item.requestedQuantity);
     let remainingQty = requestedQty;
 
     // Query packages with FIFO (oldest first by receiveDate)
@@ -724,11 +735,14 @@ export class MaterialsDisbursementService {
 
     const reservedByPackage = new Map<string, bigint>();
     if (packages.length > 0) {
+      // Outstanding = reserved − already-issued (a Job Order can partially
+      // consume a reservation via multiple issues without releasing it —
+      // see Material Job Orders / Production Plan Reservation §10).
       const reservationRows = (await manager.query(
         `
           SELECT
             material_receiving_package_id AS package_id,
-            SUM(reserved_quantity)::text AS reserved_quantity
+            SUM(reserved_quantity - issued_quantity)::text AS reserved_quantity
           FROM inventory.production_plan_reservations
           WHERE released_at IS NULL
             AND material_receiving_package_id = ANY($1::bigint[])
@@ -743,13 +757,13 @@ export class MaterialsDisbursementService {
       for (const row of reservationRows) {
         reservedByPackage.set(
           String(row.package_id),
-          this.toScaled(row.reserved_quantity),
+          toScaled(row.reserved_quantity),
         );
       }
     }
 
     const totalAvailable = packages.reduce((sum, pkg) => {
-      const remaining = this.toScaled(pkg.remainingQuantity);
+      const remaining = toScaled(pkg.remainingQuantity);
       const reserved = reservedByPackage.get(String(pkg.id)) ?? 0n;
       const available = remaining - reserved;
       return sum + (available > 0n ? available : 0n);
@@ -758,7 +772,7 @@ export class MaterialsDisbursementService {
     if (totalAvailable < requestedQty) {
       throw new BadRequestException(
         `Insufficient stock for material ${item.materialId}. ` +
-          `Requested: ${item.requestedQuantity}, Available: ${this.fromScaled(totalAvailable)}`,
+          `Requested: ${item.requestedQuantity}, Available: ${fromScaled(totalAvailable)}`,
       );
     }
 
@@ -784,7 +798,7 @@ export class MaterialsDisbursementService {
     for (const pkg of packages) {
       if (remainingQty <= 0n) break;
 
-      const pkgQty = this.toScaled(pkg.remainingQuantity);
+      const pkgQty = toScaled(pkg.remainingQuantity);
       const reservedQty = reservedByPackage.get(String(pkg.id)) ?? 0n;
       const availableQty = pkgQty - reservedQty;
       if (availableQty <= 0n) continue;
@@ -799,7 +813,7 @@ export class MaterialsDisbursementService {
       // destroys that record and trips the DB's `qty > 0` check constraint
       // the moment a box is fully consumed (remainingQuantity is allowed to
       // reach 0; `quantity` never should).
-      const newRemainingQty = this.fromScaled(pkgQty - qtyToDeduct);
+      const newRemainingQty = fromScaled(pkgQty - qtyToDeduct);
       pkg.remainingQuantity = newRemainingQty;
       pkg.status = newRemainingQty === '0.0000' ? 'issued' : 'partial';
       await packageRepo.save(pkg);
@@ -809,7 +823,7 @@ export class MaterialsDisbursementService {
         packageRecordRepo.create({
           disbursementItemId: item.id,
           packageId: pkg.id,
-          disbursedQuantity: this.fromScaled(qtyToDeduct),
+          disbursedQuantity: fromScaled(qtyToDeduct),
           fifoOrder,
           reversedAt: null,
           reversedBy: null,
@@ -835,13 +849,11 @@ export class MaterialsDisbursementService {
         departmentId: disbursement.departmentId,
         productionOrder: disbursement.productionOrder,
         referenceNo: disbursement.referenceNo,
-        quantityBefore: this.fromScaled(
-          this.toScaled(quantityBefore) - totalDisbursed,
-        ),
-        quantityIn: this.fromScaled(0n),
-        quantityOut: this.fromScaled(qtyToDeduct),
-        quantityAfter: this.fromScaled(
-          this.toScaled(quantityBefore) - totalDisbursed - qtyToDeduct,
+        quantityBefore: fromScaled(toScaled(quantityBefore) - totalDisbursed),
+        quantityIn: fromScaled(0n),
+        quantityOut: fromScaled(qtyToDeduct),
+        quantityAfter: fromScaled(
+          toScaled(quantityBefore) - totalDisbursed - qtyToDeduct,
         ),
         remark: `FIFO #${fifoOrder} from ${disbursement.disbursementNo}`,
         performedBy: userId,
@@ -852,9 +864,7 @@ export class MaterialsDisbursementService {
     }
 
     // Update stock balance (decrement)
-    const newBalanceQty = this.fromScaled(
-      this.toScaled(quantityBefore) - totalDisbursed,
-    );
+    const newBalanceQty = fromScaled(toScaled(quantityBefore) - totalDisbursed);
     if (!balance) {
       balance = stockBalanceRepo.create({
         materialId: item.materialId,
@@ -869,7 +879,7 @@ export class MaterialsDisbursementService {
 
     // Update item's disbursed quantity
     const itemRepo = manager.getRepository(MaterialDisbursementItem);
-    item.disbursedQuantity = this.fromScaled(totalDisbursed);
+    item.disbursedQuantity = fromScaled(totalDisbursed);
     await itemRepo.save(item);
   }
 
@@ -901,16 +911,16 @@ export class MaterialsDisbursementService {
       });
       if (!pkg) continue;
 
-      const restoredQty = this.toScaled(record.disbursedQuantity);
-      const currentRemaining = this.toScaled(pkg.remainingQuantity);
-      const originalQty = this.toScaled(pkg.quantity);
+      const restoredQty = toScaled(record.disbursedQuantity);
+      const currentRemaining = toScaled(pkg.remainingQuantity);
+      const originalQty = toScaled(pkg.quantity);
 
       // Restore remainingQuantity (never `quantity`, the immutable original
       // box size — see processFifoForItem's comment above), clamped to the
       // original amount as a defensive guard against ever exceeding it.
       let newRemaining = currentRemaining + restoredQty;
       if (newRemaining > originalQty) newRemaining = originalQty;
-      pkg.remainingQuantity = this.fromScaled(newRemaining);
+      pkg.remainingQuantity = fromScaled(newRemaining);
       pkg.status = newRemaining >= originalQty ? 'in_stock' : 'partial';
       await packageRepo.save(pkg);
 
@@ -927,9 +937,7 @@ export class MaterialsDisbursementService {
         lock: { mode: 'pessimistic_write' },
       });
       const quantityBefore = balance ? balance.quantity : '0';
-      const quantityAfter = this.fromScaled(
-        this.toScaled(quantityBefore) + restoredQty,
-      );
+      const quantityAfter = fromScaled(toScaled(quantityBefore) + restoredQty);
 
       await recordStockMovement(manager, {
         traceId: disbursement.traceId,
@@ -945,11 +953,11 @@ export class MaterialsDisbursementService {
         productionOrder: disbursement.productionOrder,
         referenceNo: disbursement.referenceNo,
         quantityBefore,
-        quantityIn: this.fromScaled(restoredQty),
-        quantityOut: this.fromScaled(0n),
+        quantityIn: fromScaled(restoredQty),
+        quantityOut: fromScaled(0n),
         quantityAfter,
         reason: disbursement.cancelReason,
-        remark: `Cancelled ${disbursement.disbursementNo}: restored ${this.fromScaled(restoredQty)}`,
+        remark: `Cancelled ${disbursement.disbursementNo}: restored ${fromScaled(restoredQty)}`,
         performedBy: userId,
       });
 
@@ -971,8 +979,8 @@ export class MaterialsDisbursementService {
     // stock as "still issued" for a document that was actually cancelled.
     if (totalRestored > 0n) {
       const itemRepo = manager.getRepository(MaterialDisbursementItem);
-      item.disbursedQuantity = this.fromScaled(
-        this.toScaled(item.disbursedQuantity) - totalRestored,
+      item.disbursedQuantity = fromScaled(
+        toScaled(item.disbursedQuantity) - totalRestored,
       );
       await itemRepo.save(item);
     }
@@ -1034,45 +1042,6 @@ export class MaterialsDisbursementService {
     return queryBuilder;
   }
 
-  /**
-   * Generate disbursement number: DIS-YYYYMMDD-XXXX
-   */
-  private async allocateDisbursementNo(
-    manager: EntityManager,
-    disbursementDate: string,
-  ): Promise<string> {
-    const counterRepo = manager.getRepository(MaterialsDisbursementCounter);
-    const where = { disbursementDate };
-    let counter = await counterRepo.findOne({
-      where,
-      lock: { mode: 'pessimistic_write' },
-    });
-
-    if (!counter) {
-      await manager.query(
-        `INSERT INTO inventory.materials_disbursement_counters
-           (disbursement_date, last_number)
-         VALUES ($1, 0)
-         ON CONFLICT (disbursement_date) DO NOTHING`,
-        [disbursementDate],
-      );
-      counter = await counterRepo.findOne({
-        where,
-        lock: { mode: 'pessimistic_write' },
-      });
-    }
-
-    if (!counter) {
-      throw new ConflictException('Failed to allocate disbursement number');
-    }
-
-    counter.lastNumber += 1;
-    await counterRepo.save(counter);
-
-    const datePart = disbursementDate.replace(/-/g, '');
-    return `DIS-${datePart}-${String(counter.lastNumber).padStart(4, '0')}`;
-  }
-
   private async assertActiveMaterial(
     manager: EntityManager,
     materialId: string,
@@ -1087,23 +1056,6 @@ export class MaterialsDisbursementService {
       throw new BadRequestException(`Material ${materialId} is inactive`);
     }
     return material;
-  }
-
-  // Decimal helpers (matching materials-receiving pattern)
-  private toScaled(value: string): bigint {
-    const [integerPart, fractionPart = ''] = value.split('.');
-    const fraction = `${fractionPart}0000`.slice(0, DECIMAL_SCALE);
-    return BigInt(`${integerPart}${fraction}`);
-  }
-
-  private fromScaled(scaled: bigint): string {
-    const isNegative = scaled < 0n;
-    const abs = isNegative ? -scaled : scaled;
-    const str = abs.toString().padStart(DECIMAL_SCALE + 1, '0');
-    const integerPart = str.slice(0, str.length - DECIMAL_SCALE) || '0';
-    const fractionPart = str.slice(str.length - DECIMAL_SCALE);
-    const result = `${integerPart}.${fractionPart}`;
-    return isNegative ? `-${result}` : result;
   }
 
   private toListResponse(disbursement: MaterialsDisbursement) {
@@ -1128,6 +1080,8 @@ export class MaterialsDisbursementService {
       cancelledBy: disbursement.cancelledBy,
       cancelledAt: disbursement.cancelledAt,
       cancelReason: disbursement.cancelReason,
+      productionPlanId: disbursement.productionPlanId,
+      materialJobOrderId: disbursement.materialJobOrderId,
       createdBy: disbursement.createdBy,
       createdAt: disbursement.createdAt,
       updatedAt: disbursement.updatedAt,
@@ -1175,6 +1129,8 @@ export class MaterialsDisbursementService {
       cancelledBy: disbursement.cancelledBy,
       cancelledAt: disbursement.cancelledAt,
       cancelReason: disbursement.cancelReason,
+      productionPlanId: disbursement.productionPlanId,
+      materialJobOrderId: disbursement.materialJobOrderId,
       createdBy: disbursement.createdBy,
       createdAt: disbursement.createdAt,
       updatedAt: disbursement.updatedAt,

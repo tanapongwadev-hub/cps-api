@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { MaterialReceivingPackage } from '../../entities/inventory/material-receiving-package.entity';
 import { MaterialDisbursementItem } from './material-disbursement-item.entity';
+import { ProductionPlanReservation } from '../production-plans/production-plan-reservation.entity';
 
 @Entity('material_disbursement_packages', { schema: 'inventory' })
 export class MaterialDisbursementPackage {
@@ -42,6 +43,20 @@ export class MaterialDisbursementPackage {
   @Column({ name: 'reversed_by', type: 'bigint', nullable: true })
   reversedBy: string | null;
 
+  /**
+   * Set only when this allocation came from a Material Job Order issuing
+   * against a Production Plan reservation — the direct link from "which
+   * package did this disbursement line take" back to "which reservation
+   * authorized it", without joining through the package + plan tables.
+   */
+  @Index()
+  @Column({
+    name: 'production_plan_reservation_id',
+    type: 'bigint',
+    nullable: true,
+  })
+  productionPlanReservationId: string | null;
+
   @Column({ name: 'created_by', type: 'bigint', nullable: true })
   createdBy: string | null;
 
@@ -60,4 +75,11 @@ export class MaterialDisbursementPackage {
   @ManyToOne(() => MaterialReceivingPackage, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'package_id' })
   package: MaterialReceivingPackage;
+
+  @ManyToOne(() => ProductionPlanReservation, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({ name: 'production_plan_reservation_id' })
+  productionPlanReservation: ProductionPlanReservation | null;
 }

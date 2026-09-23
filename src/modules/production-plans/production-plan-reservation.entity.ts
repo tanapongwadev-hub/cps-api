@@ -42,6 +42,30 @@ export class ProductionPlanReservation {
   })
   reservedQuantity: string;
 
+  /**
+   * How much of `reservedQuantity` has already been cut via a Material Job
+   * Order issue. `reservedQuantity - issuedQuantity` is the outstanding
+   * amount still to pick/issue, and is also what the FIFO availability
+   * check for *other* consumers (ordinary Disbursement, other Plans)
+   * subtracts — see materials-disbursement.service.ts#processFifoForItem
+   * and production-plans.service.ts#lockPackageAvailability.
+   */
+  @Column({
+    name: 'issued_quantity',
+    type: 'decimal',
+    precision: 18,
+    scale: 4,
+    default: 0,
+  })
+  issuedQuantity: string;
+
+  /** Set once a warehouse worker has scanned/verified this pick line. */
+  @Column({ name: 'picked_at', type: 'timestamp', nullable: true })
+  pickedAt: Date | null;
+
+  @Column({ name: 'picked_by', type: 'bigint', nullable: true })
+  pickedBy: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

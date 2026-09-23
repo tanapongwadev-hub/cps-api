@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { ErrorCode } from '../enums/error-code.enum';
+import { toThaiErrorMessage } from '../errors/thai-error-message';
 
 export class CustomHttpException extends HttpException {
   constructor(
@@ -26,7 +27,7 @@ export class InvalidCredentialsException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.INVALID_CREDENTIALS,
-      'Invalid username or password',
+      'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
       HttpStatus.UNAUTHORIZED,
       path,
     );
@@ -37,7 +38,7 @@ export class UserInactiveException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.USER_INACTIVE,
-      'User account is inactive',
+      'บัญชีผู้ใช้ถูกระงับการใช้งาน',
       HttpStatus.FORBIDDEN,
       path,
     );
@@ -48,7 +49,7 @@ export class UserLockedException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.USER_LOCKED,
-      'User account is locked',
+      'บัญชีผู้ใช้ถูกล็อก',
       HttpStatus.FORBIDDEN,
       path,
     );
@@ -59,7 +60,7 @@ export class DepartmentSelectionRequiredException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.DEPARTMENT_SELECTION_REQUIRED,
-      'Department selection is required',
+      'กรุณาเลือกแผนกก่อนดำเนินการต่อ',
       HttpStatus.FORBIDDEN,
       path,
     );
@@ -70,7 +71,7 @@ export class PermissionDeniedException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.PERMISSION_DENIED,
-      'You do not have permission to perform this action',
+      'คุณไม่มีสิทธิ์ดำเนินการนี้',
       HttpStatus.FORBIDDEN,
       path,
     );
@@ -81,7 +82,7 @@ export class SessionExpiredException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.SESSION_EXPIRED,
-      'Session has expired',
+      'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง',
       HttpStatus.UNAUTHORIZED,
       path,
     );
@@ -92,7 +93,7 @@ export class SessionRevokedException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.SESSION_REVOKED,
-      'Session has been revoked',
+      'เซสชันถูกยกเลิก กรุณาเข้าสู่ระบบอีกครั้ง',
       HttpStatus.UNAUTHORIZED,
       path,
     );
@@ -103,7 +104,7 @@ export class DuplicateResourceException extends CustomHttpException {
   constructor(resource: string, path?: string) {
     super(
       ErrorCode.DUPLICATE_USERNAME,
-      `${resource} already exists`,
+      toThaiErrorMessage(`${resource} already exists`, HttpStatus.CONFLICT),
       HttpStatus.CONFLICT,
       path,
     );
@@ -114,7 +115,7 @@ export class LastSuperAdminProtectedException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.LAST_SUPER_ADMIN_PROTECTED,
-      'Cannot modify the last super admin account',
+      'ไม่สามารถแก้ไขบัญชีผู้ดูแลระบบสูงสุดบัญชีสุดท้ายได้',
       HttpStatus.FORBIDDEN,
       path,
     );
@@ -125,7 +126,7 @@ export class AssignmentInactiveException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.ASSIGNMENT_INACTIVE,
-      'User department assignment is inactive',
+      'สิทธิ์ประจำแผนกของผู้ใช้ถูกระงับ',
       HttpStatus.FORBIDDEN,
       path,
     );
@@ -136,7 +137,7 @@ export class AssignmentExpiredException extends CustomHttpException {
   constructor(path?: string) {
     super(
       ErrorCode.ASSIGNMENT_EXPIRED,
-      'User department assignment has expired',
+      'สิทธิ์ประจำแผนกของผู้ใช้หมดอายุ',
       HttpStatus.FORBIDDEN,
       path,
     );

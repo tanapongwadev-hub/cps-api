@@ -22,6 +22,7 @@ jest.mock('@nestjs/core', () => ({
         setGlobalPrefix: jest.fn(),
         useStaticAssets: capturedUseStaticAssets,
         useGlobalPipes: jest.fn(),
+        useGlobalFilters: jest.fn(),
         useGlobalInterceptors: jest.fn(),
         enableCors: jest.fn(),
         listen: jest.fn().mockResolvedValue(undefined),

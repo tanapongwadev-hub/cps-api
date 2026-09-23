@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { MaterialDisbursementItem } from './material-disbursement-item.entity';
 import { ProductionPlan } from '../production-plans/production-plan.entity';
+import { MaterialJobOrder } from '../material-job-orders/material-job-order.entity';
 
 export const DISBURSEMENT_STATUSES = [
   'draft',
@@ -95,6 +96,17 @@ export class MaterialsDisbursement {
   @Column({ name: 'production_plan_id', type: 'bigint', nullable: true })
   productionPlanId: string | null;
 
+  /**
+   * Set only when this disbursement was issued from a Material Job Order's
+   * "จ่ายออก" action (§ Material Job Orders) — null for every ordinary,
+   * plan-less disbursement, which remains the majority case. A disbursement
+   * with this set cannot be cancelled from this module's own cancel() —
+   * see the ConflictException there.
+   */
+  @Index()
+  @Column({ name: 'material_job_order_id', type: 'bigint', nullable: true })
+  materialJobOrderId: string | null;
+
   @Column({ name: 'confirmed_by', type: 'bigint', nullable: true })
   confirmedBy: string | null;
 
@@ -132,4 +144,8 @@ export class MaterialsDisbursement {
   @ManyToOne(() => ProductionPlan, { nullable: true, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'production_plan_id' })
   productionPlan: ProductionPlan | null;
+
+  @ManyToOne(() => MaterialJobOrder, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'material_job_order_id' })
+  materialJobOrder: MaterialJobOrder | null;
 }

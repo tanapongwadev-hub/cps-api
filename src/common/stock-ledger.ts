@@ -82,15 +82,23 @@ export interface AuditEventInput {
     | 'CANCEL'
     | 'APPROVE'
     | 'REOPEN'
-    | 'STATUS_CHANGE';
+    | 'STATUS_CHANGE'
+    | 'RESERVE'
+    | 'RELEASE'
+    | 'PRINT'
+    | 'PICK'
+    | 'ISSUE'
+    | 'COMPLETE';
   targetType:
     | 'MATERIAL_RECEIVING'
     | 'MATERIALS_DISBURSEMENT'
     | 'PRODUCTION_PLAN'
+    | 'MATERIAL_JOB_ORDER'
     | 'STOCK_MOVEMENT'
     | 'QR';
   targetId: string;
-  performedBy: string;
+  /** null for a system-initiated event (e.g. the auto-expiry cron). */
+  performedBy: string | null;
   departmentId?: string | null;
   before?: unknown;
   after?: unknown;

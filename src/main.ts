@@ -7,6 +7,7 @@ import { CustomValidationPipe } from './common/pipes/validation.pipe';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { getAppConfig } from './config/app.config';
 import { getEnv } from './config/env.utils';
+import { ThaiExceptionFilter } from './common/filters/thai-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -38,6 +39,10 @@ async function bootstrap() {
 
   // Global validation pipe
   app.useGlobalPipes(new CustomValidationPipe());
+
+  // Keep every user-facing API error in Thai while preserving status, code,
+  // and structured domain details for clients and diagnostics.
+  app.useGlobalFilters(new ThaiExceptionFilter());
 
   // Global logging interceptor
   app.useGlobalInterceptors(new LoggingInterceptor());
