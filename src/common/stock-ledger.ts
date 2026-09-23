@@ -84,7 +84,11 @@ export interface AuditEventInput {
     | 'REOPEN'
     | 'STATUS_CHANGE';
   targetType:
-    'MATERIAL_RECEIVING' | 'MATERIALS_DISBURSEMENT' | 'STOCK_MOVEMENT' | 'QR';
+    | 'MATERIAL_RECEIVING'
+    | 'MATERIALS_DISBURSEMENT'
+    | 'PRODUCTION_PLAN'
+    | 'STOCK_MOVEMENT'
+    | 'QR';
   targetId: string;
   performedBy: string;
   departmentId?: string | null;

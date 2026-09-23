@@ -190,7 +190,7 @@ products ── unit / product_model / customer / location
 
 ตาราง `product_models`, `customers`, `locations`, `product_types` และ `process_lines` มี entity/migration/seed และถูกใช้ผ่าน `/products/lookups` แต่ยังไม่มี controller CRUD ของตัวเอง
 
-### 5.3 Inventory schema (9 tables)
+### 5.3 Inventory schema (12 tables)
 
 | Table                             | หน้าที่                                                           |
 | --------------------------------- | ----------------------------------------------------------------- |
@@ -199,10 +199,13 @@ products ── unit / product_model / customer / location
 | `material_receiving_lot_counters` | Counter ต่อวันที่สำหรับ internal lot                              |
 | `stock_balances`                  | ยอดปัจจุบัน unique ต่อ material                                   |
 | `stock_transactions`              | Ledger RECEIVE/ISSUE/ADJUST พร้อม before/in/out/after             |
-| `materials_disbursements`         | Header จ่ายออกแบบ `stock_cut` หรือ `production`                   |
+| `materials_disbursements`         | Header จ่ายออกแบบ `stock_cut` หรือ `production`; nullable link ไป Production Plan |
 | `material_disbursement_items`     | จำนวนขอเบิกและจำนวนจ่ายจริง                                       |
 | `material_disbursement_packages`  | Allocation จาก receiving package ตาม FIFO                         |
 | `materials_disbursement_counters` | Counter เลขเอกสารจ่ายต่อวัน                                       |
+| `production_plans`                | Header แผนการผลิตและ lifecycle DRAFT/APPROVED/ISSUED/CANCELLED/EXPIRED |
+| `production_plan_lines`           | Product, จำนวนผลิต, need-by date และ ACTIVE BOM ที่ pin ไว้ต่อ Plan Line |
+| `production_plan_reservations`    | Hard Reservation ระดับ receiving package; `released_at` ระบุว่าเลิกกันสต็อกแล้ว |
 
 ## 6. Authentication flow
 

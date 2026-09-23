@@ -716,12 +716,44 @@ export class MaterialsDisbursementService {
       })
       .orderBy('receiving.receiveDate', 'ASC')
       .addOrderBy('pkg.id', 'ASC')
+      // Package rows are the shared concurrency boundary for both ordinary
+      // disbursements and Production Plan approval. Lock them before reading
+      // reservations so neither path can allocate the same lot concurrently.
+      .setLock('pessimistic_write', undefined, ['pkg'])
       .getMany();
 
-    const totalAvailable = packages.reduce(
-      (sum, p) => sum + this.toScaled(p.remainingQuantity),
-      0n,
-    );
+    const reservedByPackage = new Map<string, bigint>();
+    if (packages.length > 0) {
+      const reservationRows = (await manager.query(
+        `
+          SELECT
+            material_receiving_package_id AS package_id,
+            SUM(reserved_quantity)::text AS reserved_quantity
+          FROM inventory.production_plan_reservations
+          WHERE released_at IS NULL
+            AND material_receiving_package_id = ANY($1::bigint[])
+          GROUP BY material_receiving_package_id
+        `,
+        [packages.map((pkg) => pkg.id)],
+      )) as unknown as Array<{
+        package_id: string;
+        reserved_quantity: string;
+      }>;
+
+      for (const row of reservationRows) {
+        reservedByPackage.set(
+          String(row.package_id),
+          this.toScaled(row.reserved_quantity),
+        );
+      }
+    }
+
+    const totalAvailable = packages.reduce((sum, pkg) => {
+      const remaining = this.toScaled(pkg.remainingQuantity);
+      const reserved = reservedByPackage.get(String(pkg.id)) ?? 0n;
+      const available = remaining - reserved;
+      return sum + (available > 0n ? available : 0n);
+    }, 0n);
 
     if (totalAvailable < requestedQty) {
       throw new BadRequestException(
@@ -753,7 +785,12 @@ export class MaterialsDisbursementService {
       if (remainingQty <= 0n) break;
 
       const pkgQty = this.toScaled(pkg.remainingQuantity);
-      const qtyToDeduct = pkgQty < remainingQty ? pkgQty : remainingQty;
+      const reservedQty = reservedByPackage.get(String(pkg.id)) ?? 0n;
+      const availableQty = pkgQty - reservedQty;
+      if (availableQty <= 0n) continue;
+
+      const qtyToDeduct =
+        availableQty < remainingQty ? availableQty : remainingQty;
       fifoOrder += 1;
 
       // Update package — decrement remainingQuantity (the live/current amount

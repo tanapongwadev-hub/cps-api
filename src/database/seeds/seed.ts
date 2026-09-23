@@ -44,6 +44,18 @@ export async function seed(dataSource: DataSource) {
         name_en: 'Cancel',
         sort_order: 6,
       },
+      {
+        code: 'APPROVE',
+        name_th: 'อนุมัติ',
+        name_en: 'Approve',
+        sort_order: 7,
+      },
+      {
+        code: 'ISSUE',
+        name_th: 'ตัดจ่าย',
+        name_en: 'Issue',
+        sort_order: 8,
+      },
     ];
 
     for (const action of actions) {
@@ -142,6 +154,8 @@ export async function seed(dataSource: DataSource) {
       { role_code: 'SUPER_ADMIN', action_code: 'DELETE' },
       { role_code: 'SUPER_ADMIN', action_code: 'POST' },
       { role_code: 'SUPER_ADMIN', action_code: 'CANCEL' },
+      { role_code: 'SUPER_ADMIN', action_code: 'APPROVE' },
+      { role_code: 'SUPER_ADMIN', action_code: 'ISSUE' },
       // ADMIN gets all actions
       { role_code: 'ADMIN', action_code: 'CREATE' },
       { role_code: 'ADMIN', action_code: 'READ' },
@@ -149,6 +163,8 @@ export async function seed(dataSource: DataSource) {
       { role_code: 'ADMIN', action_code: 'DELETE' },
       { role_code: 'ADMIN', action_code: 'POST' },
       { role_code: 'ADMIN', action_code: 'CANCEL' },
+      { role_code: 'ADMIN', action_code: 'APPROVE' },
+      { role_code: 'ADMIN', action_code: 'ISSUE' },
       // USER gets CREATE, READ, UPDATE only
       { role_code: 'USER', action_code: 'CREATE' },
       { role_code: 'USER', action_code: 'READ' },
@@ -289,6 +305,14 @@ export async function seed(dataSource: DataSource) {
         path: '/products',
         icon: 'car',
         sort_order: 95,
+      },
+      {
+        code: 'PRODUCTION_PLANS',
+        name_th: 'แผนการผลิต',
+        name_en: 'Production Plans',
+        path: '/production/plans',
+        icon: 'clipboard-list',
+        sort_order: 97,
       },
       {
         code: 'BOMS',

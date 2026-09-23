@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { appConfig } from './config/app.config';
@@ -38,6 +39,7 @@ import { ProductModelsModule } from './modules/product-models/product-models.mod
 import { CustomersModule } from './modules/customers/customers.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { ProcessLinesModule } from './modules/process-lines/process-lines.module';
+import { ProductionPlansModule } from './modules/production-plans/production-plans.module';
 
 @Module({
   imports: [
@@ -53,6 +55,7 @@ import { ProcessLinesModule } from './modules/process-lines/process-lines.module
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
       }),
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     UsersModule,
     DepartmentsModule,
@@ -86,6 +89,7 @@ import { ProcessLinesModule } from './modules/process-lines/process-lines.module
     CustomersModule,
     LocationsModule,
     ProcessLinesModule,
+    ProductionPlansModule,
   ],
   controllers: [AppController],
   providers: [AppService],

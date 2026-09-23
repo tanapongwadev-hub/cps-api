@@ -12,6 +12,7 @@ import { ORGANIZATION_PERMISSIONS } from '../../modules/organizations/organizati
 import { PRODUCT_MODEL_PERMISSIONS } from '../../modules/product-models/product-model-permissions';
 import { PRODUCT_TYPE_PERMISSIONS } from '../../modules/product-types/product-type-permissions';
 import { PRODUCTS_PERMISSIONS } from '../../modules/products/products-permissions';
+import { PRODUCTION_PLAN_PERMISSIONS } from '../../modules/production-plans/production-plan-permissions';
 import { REJECT_REASON_PERMISSIONS } from '../../modules/reject-reasons/reject-reason-permissions';
 import { STATUS_ITEM_PERMISSIONS } from '../../modules/status-items/status-item-permissions';
 import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissions';
@@ -58,6 +59,16 @@ export const MATERIALS_DISBURSEMENT_ACTION_CODES = [
   'UPDATE',
   'DELETE',
   'POST',
+  'CANCEL',
+] as const;
+
+export const PRODUCTION_PLAN_ACTION_CODES = [
+  'CREATE',
+  'READ',
+  'UPDATE',
+  'DELETE',
+  'APPROVE',
+  'ISSUE',
   'CANCEL',
 ] as const;
 
@@ -146,6 +157,15 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     UPDATE: BOMS_PERMISSIONS.UPDATE,
     DELETE: BOMS_PERMISSIONS.DELETE,
   },
+  PRODUCTION_PLANS: {
+    CREATE: PRODUCTION_PLAN_PERMISSIONS.CREATE,
+    READ: PRODUCTION_PLAN_PERMISSIONS.VIEW,
+    UPDATE: PRODUCTION_PLAN_PERMISSIONS.UPDATE,
+    DELETE: PRODUCTION_PLAN_PERMISSIONS.DELETE,
+    APPROVE: PRODUCTION_PLAN_PERMISSIONS.APPROVE,
+    ISSUE: PRODUCTION_PLAN_PERMISSIONS.ISSUE,
+    CANCEL: PRODUCTION_PLAN_PERMISSIONS.CANCEL,
+  },
 };
 
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
@@ -160,6 +180,7 @@ export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
   // Products/BOMs (standard CRUD)
   PRODUCTS_LIST: DEFAULT_ACTION_CODES,
   BOMS: DEFAULT_ACTION_CODES,
+  PRODUCTION_PLANS: PRODUCTION_PLAN_ACTION_CODES,
 };
 
 export function resolveActionCodes(menuCode: string): readonly string[] {

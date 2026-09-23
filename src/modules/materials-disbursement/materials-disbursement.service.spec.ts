@@ -180,9 +180,10 @@ function setup() {
     return Promise.resolve({ ...counter, lastNumber: counterCalls - 1 });
   });
 
+  const manager = makeManager(repoMap);
   const dataSource: any = {
     transaction: jest.fn(async (cb: (manager: unknown) => unknown) =>
-      cb(makeManager(repoMap)),
+      cb(manager),
     ),
   };
 
@@ -202,6 +203,7 @@ function setup() {
   return {
     service,
     dataSource,
+    manager,
     repoMap,
     repos: {
       disbursementRepo,
@@ -383,6 +385,82 @@ describe('MaterialsDisbursementService', () => {
       );
       expect(repos.stockTransactionRepo.save).not.toHaveBeenCalled();
       expect(repos.stockBalanceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('locks receiving packages and subtracts active reservations per package', async () => {
+      const { service, manager, repos } = setup();
+      repos.disbursementRepo.findOne.mockResolvedValue(
+        makeDisbursement({ status: 'draft' }),
+      );
+      repos.itemRepo.find.mockResolvedValue([
+        makeItem({ requestedQuantity: '10.0000' }),
+      ]);
+      repos.materialRepo.findOne.mockResolvedValue({ id: '3', unitId: '5' });
+      repos.stockBalanceRepo.findOne.mockResolvedValue({
+        id: '1',
+        materialId: '3',
+        quantity: '40.0000',
+      });
+      repos.receivingRepo.findOne.mockResolvedValue({
+        id: '10',
+        internalLotNo: 'CCI-20260901-001',
+      });
+
+      const oldPkg = makePackage({ id: 'pkg-old' });
+      const newPkg = makePackage({ id: 'pkg-new' });
+      const packageQuery = makeQueryBuilder({ many: [oldPkg, newPkg] });
+      repos.receivingPackageRepo.createQueryBuilder.mockReturnValue(
+        packageQuery,
+      );
+      manager.query.mockResolvedValue([
+        { package_id: 'pkg-old', reserved_quantity: '15.0000' },
+      ]);
+
+      await service.confirm('20', '9');
+
+      expect(packageQuery.setLock).toHaveBeenCalledWith(
+        'pessimistic_write',
+        undefined,
+        ['pkg'],
+      );
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('production_plan_reservations'),
+        [['pkg-old', 'pkg-new']],
+      );
+
+      const savedPackages = repos.receivingPackageRepo.save.mock.calls.map(
+        (call: unknown[]) => call[0] as any,
+      );
+      expect(
+        savedPackages.find((pkg) => pkg.id === 'pkg-old').remainingQuantity,
+      ).toBe('15.0000');
+      expect(
+        savedPackages.find((pkg) => pkg.id === 'pkg-new').remainingQuantity,
+      ).toBe('15.0000');
+    });
+
+    it('treats fully reserved package quantity as unavailable', async () => {
+      const { service, manager, repos } = setup();
+      repos.disbursementRepo.findOne.mockResolvedValue(
+        makeDisbursement({ status: 'draft' }),
+      );
+      repos.itemRepo.find.mockResolvedValue([
+        makeItem({ requestedQuantity: '10.0000' }),
+      ]);
+      repos.receivingPackageRepo.createQueryBuilder.mockReturnValue(
+        makeQueryBuilder({
+          many: [makePackage({ id: 'pkg-reserved' })],
+        }),
+      );
+      manager.query.mockResolvedValue([
+        { package_id: 'pkg-reserved', reserved_quantity: '20.0000' },
+      ]);
+
+      await expect(service.confirm('20', '9')).rejects.toThrow(
+        'Requested: 10.0000, Available: 0.0000',
+      );
+      expect(repos.receivingPackageRepo.save).not.toHaveBeenCalled();
+      expect(repos.stockTransactionRepo.save).not.toHaveBeenCalled();
     });
 
     it('rejects confirming a non-draft disbursement', async () => {

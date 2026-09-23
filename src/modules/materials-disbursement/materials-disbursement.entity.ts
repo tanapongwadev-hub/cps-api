@@ -3,11 +3,14 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { MaterialDisbursementItem } from './material-disbursement-item.entity';
+import { ProductionPlan } from '../production-plans/production-plan.entity';
 
 export const DISBURSEMENT_STATUSES = [
   'draft',
@@ -88,6 +91,10 @@ export class MaterialsDisbursement {
   @Column({ type: 'text', nullable: true })
   remark: string | null;
 
+  @Index()
+  @Column({ name: 'production_plan_id', type: 'bigint', nullable: true })
+  productionPlanId: string | null;
+
   @Column({ name: 'confirmed_by', type: 'bigint', nullable: true })
   confirmedBy: string | null;
 
@@ -121,4 +128,8 @@ export class MaterialsDisbursement {
     cascade: true,
   })
   items: MaterialDisbursementItem[];
+
+  @ManyToOne(() => ProductionPlan, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'production_plan_id' })
+  productionPlan: ProductionPlan | null;
 }

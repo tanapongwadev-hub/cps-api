@@ -732,3 +732,83 @@ Read-only reporting module added 2026-09-20 for end-to-end Receiving ↔ Disburs
 - No new tables or duplicate business logic — this module only reads `stock_transactions`/`material_receivings`/`material_receiving_packages`/`materials_disbursements`/`material_disbursement_packages`, all of which already existed (or were extended, see the migration in §9/§10) for the operational write paths.
 - MAIN QR = a `MaterialReceiving` row; SUB QR = a `MaterialReceivingPackage` row. These aren't separate QR entities — this module's "QR trace" is a read-oriented view over the receiving/package hierarchy that already carries the real QR image data.
 - FIFO allocation history (`material_disbursement_packages`) is never deleted on cancel — only `reversedAt`/`reversedBy` are set — so `disbursements/:id`'s `fifoAllocations[]` always shows the original allocation plus, if reversed, who/when reversed it.
+
+## 18. Production Plans — `/production-plans`
+
+Production Plans reserve exact FIFO receiving packages before production. Active Reservations are hard holds: ordinary Materials Disbursement FIFO subtracts every unreleased reservation from each package's `remainingQuantity`, so independently-created disbursements cannot consume planned stock.
+
+| Method   | Path                            | Permission                | Behavior |
+| -------- | ------------------------------- | ------------------------- | -------- |
+| `GET`    | `/production-plans`             | `PRODUCTION_PLAN_VIEW`    | Paginated list; filters: `search`, `status`, `needByDateFrom`, `needByDateTo` |
+| `GET`    | `/production-plans/lookups`     | `PRODUCTION_PLAN_VIEW`    | Active Products that currently have an ACTIVE BOM, including `lotSize` UI hint |
+| `GET`    | `/production-plans/:id`         | `PRODUCTION_PLAN_VIEW`    | Detail with pinned BOM, Plan Lines, reservations, and source packages |
+| `POST`   | `/production-plans`             | `PRODUCTION_PLAN_CREATE`  | Create one DRAFT with inline Plan Lines |
+| `POST`   | `/production-plans/import`      | `PRODUCTION_PLAN_CREATE`  | Multipart Excel import; field name `file`, max 10 MiB; one file creates one DRAFT |
+| `PATCH`  | `/production-plans/:id`         | `PRODUCTION_PLAN_UPDATE`  | Replace DRAFT header/lines; rejected with `409` after approval |
+| `POST`   | `/production-plans/:id/approve` | `PRODUCTION_PLAN_APPROVE` | Whole-plan stock check and FIFO Reservation in one transaction |
+| `POST`   | `/production-plans/:id/issue`   | `PRODUCTION_PLAN_ISSUE`   | Consume the exact reserved packages and create a confirmed Materials Disbursement with `productionPlanId` |
+| `POST`   | `/production-plans/:id/cancel`  | `PRODUCTION_PLAN_CANCEL`  | Cancel DRAFT/APPROVED; body `{ "reason": "..." }`; APPROVED releases all Reservations |
+| `DELETE` | `/production-plans/:id`         | `PRODUCTION_PLAN_DELETE`  | Hard-delete DRAFT only (`204`) |
+
+Manual create/update line body:
+
+```json
+{
+  "title": "September production run",
+  "remark": "optional",
+  "lines": [
+    {
+      "productId": "12",
+      "quantity": 500,
+      "needByDate": "2026-09-30",
+      "remark": "optional"
+    }
+  ]
+}
+```
+
+Excel row columns are exactly `Product Code`, `Quantity`, `Need-by Date`, and `Remark`. Product and ACTIVE BOM resolution always happens server-side; the workbook never supplies a BOM id.
+
+Approval uses `plan quantity × BOM item quantity`, excludes `isScrap=true`, and never applies `wastagePercent`. If any material is short, no Reservation is created and the API returns `409` with `shortfalls[]` containing `materialId`, `materialCode`, `materialName`, `required`, `available`, and `shortage`.
+
+Lifecycle is `DRAFT → APPROVED → ISSUED`, with terminal `CANCELLED` and `EXPIRED`. APPROVED plans are immutable. The hourly scheduler expires plans strictly older than three days after approval and releases every active Reservation. ISSUED plans cannot be cancelled through this API; cancel their linked Materials Disbursement instead.
+
+## 18. Production Plans — `/production-plans`
+
+Production Plans reserve exact FIFO receiving packages before production. Active Reservations are hard holds: ordinary Materials Disbursement FIFO subtracts every unreleased reservation from each package's `remainingQuantity`, so independently-created disbursements cannot consume planned stock.
+
+| Method   | Path                            | Permission                | Behavior |
+| -------- | ------------------------------- | ------------------------- | -------- |
+| `GET`    | `/production-plans`             | `PRODUCTION_PLAN_VIEW`    | Paginated list; filters: `search`, `status`, `needByDateFrom`, `needByDateTo` |
+| `GET`    | `/production-plans/lookups`     | `PRODUCTION_PLAN_VIEW`    | Active Products that currently have an ACTIVE BOM, including `lotSize` UI hint |
+| `GET`    | `/production-plans/:id`         | `PRODUCTION_PLAN_VIEW`    | Detail with pinned BOM, Plan Lines, reservations, and source packages |
+| `POST`   | `/production-plans`             | `PRODUCTION_PLAN_CREATE`  | Create one DRAFT with inline Plan Lines |
+| `POST`   | `/production-plans/import`      | `PRODUCTION_PLAN_CREATE`  | Multipart Excel import; field name `file`, max 10 MiB; one file creates one DRAFT |
+| `PATCH`  | `/production-plans/:id`         | `PRODUCTION_PLAN_UPDATE`  | Replace DRAFT header/lines; rejected with `409` after approval |
+| `POST`   | `/production-plans/:id/approve` | `PRODUCTION_PLAN_APPROVE` | Whole-plan stock check and FIFO Reservation in one transaction |
+| `POST`   | `/production-plans/:id/issue`   | `PRODUCTION_PLAN_ISSUE`   | Consume the exact reserved packages and create a confirmed Materials Disbursement with `productionPlanId` |
+| `POST`   | `/production-plans/:id/cancel`  | `PRODUCTION_PLAN_CANCEL`  | Cancel DRAFT/APPROVED; body `{ "reason": "..." }`; APPROVED releases all Reservations |
+| `DELETE` | `/production-plans/:id`         | `PRODUCTION_PLAN_DELETE`  | Hard-delete DRAFT only (`204`) |
+
+Manual create/update line body:
+
+```json
+{
+  "title": "September production run",
+  "remark": "optional",
+  "lines": [
+    {
+      "productId": "12",
+      "quantity": 500,
+      "needByDate": "2026-09-30",
+      "remark": "optional"
+    }
+  ]
+}
+```
+
+Excel row columns are exactly `Product Code`, `Quantity`, `Need-by Date`, and `Remark`. Product and ACTIVE BOM resolution always happens server-side; the workbook never supplies a BOM id.
+
+Approval uses `plan quantity × BOM item quantity`, excludes `isScrap=true`, and never applies `wastagePercent`. If any material is short, no Reservation is created and the API returns `409` with `shortfalls[]` containing `materialId`, `materialCode`, `materialName`, `required`, `available`, and `shortage`.
+
+Lifecycle is `DRAFT → APPROVED → ISSUED`, with terminal `CANCELLED` and `EXPIRED`. APPROVED plans are immutable. The hourly scheduler expires plans strictly older than three days after approval and releases every active Reservation. ISSUED plans cannot be cancelled through this API; cancel their linked Materials Disbursement instead.
