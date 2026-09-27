@@ -24,8 +24,9 @@ import {
   UserInactiveException,
   UserLockedException,
 } from '../../common/exceptions/custom-exceptions';
+import { recordAuditEvent } from '../../common/stock-ledger';
 import { getEnvNumber } from '../../config/env.utils';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 @Injectable()
 export class AuthService {
@@ -92,17 +93,40 @@ export class AuthService {
       user.passwordHash,
     );
     if (!isPasswordValid) {
-      // Increment failed login attempts
-      user.failedLoginAttempts += 1;
       const maxAttempts = getEnvNumber('MAX_FAILED_LOGIN_ATTEMPTS', 5);
+      await this.userRepository.manager.transaction(async (manager) => {
+        const lockedUser = await manager.getRepository(User).findOne({
+          where: { id: user.id },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedUser) return;
 
-      if (user.failedLoginAttempts >= maxAttempts) {
-        user.isLocked = true;
-        const lockMinutes = getEnvNumber('ACCOUNT_LOCK_MINUTES', 15);
-        user.lockedUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
-      }
+        lockedUser.failedLoginAttempts += 1;
+        if (lockedUser.failedLoginAttempts >= maxAttempts) {
+          lockedUser.isLocked = true;
+          const lockMinutes = getEnvNumber('ACCOUNT_LOCK_MINUTES', 15);
+          lockedUser.lockedUntil = new Date(
+            Date.now() + lockMinutes * 60 * 1000,
+          );
+        }
+        await manager.getRepository(User).save(lockedUser);
 
-      await this.userRepository.save(user);
+        if (lockedUser.isLocked) {
+          await recordAuditEvent(manager, {
+            traceId: `AUTH-${lockedUser.id}`,
+            eventName: 'auth.account.locked',
+            action: 'STATUS_CHANGE',
+            targetType: 'USER',
+            targetId: lockedUser.id,
+            performedBy: null,
+            reason: 'MAX_FAILED_LOGIN_ATTEMPTS',
+            after: {
+              failedLoginAttempts: lockedUser.failedLoginAttempts,
+              lockedUntil: lockedUser.lockedUntil?.toISOString() ?? null,
+            },
+          });
+        }
+      });
       return null;
     }
 
@@ -113,6 +137,80 @@ export class AuthService {
     }
 
     return user;
+  }
+
+  async recordLoginAttempt(username: string) {
+    await this.recordAuthEvent({
+      eventName: 'auth.login.attempted',
+      outcome: 'ATTEMPTED',
+      after: { identifierFingerprint: this.identifierFingerprint(username) },
+    });
+  }
+
+  async recordLoginFailure(username: string, code: string) {
+    await this.recordAuthEvent({
+      eventName: 'auth.login.completed',
+      outcome: 'FAILURE',
+      reason: code,
+      after: { identifierFingerprint: this.identifierFingerprint(username) },
+    });
+  }
+
+  async recordLoginSuccess(
+    userId: string,
+    requiresDepartmentSelection: boolean,
+  ) {
+    await this.recordAuthEvent({
+      eventName: 'auth.login.completed',
+      targetType: 'USER',
+      targetId: userId,
+      performedBy: userId,
+      after: { requiresDepartmentSelection },
+    });
+  }
+
+  async recordDepartmentSelected(userId: string, assignmentId: string) {
+    await this.authSessionRepository.manager.transaction(async (manager) => {
+      await recordAuditEvent(manager, {
+        traceId: `AUTH-${userId}`,
+        eventName: 'auth.department.selected',
+        action: 'SELECT_DEPARTMENT',
+        targetType: 'USER_DEPARTMENT_ROLE',
+        targetId: assignmentId,
+        performedBy: userId,
+        after: { userId },
+      });
+    });
+  }
+
+  private identifierFingerprint(username: string): string {
+    return createHash('sha256')
+      .update(username.trim().toLowerCase())
+      .digest('hex');
+  }
+
+  private async recordAuthEvent(input: {
+    eventName: string;
+    outcome?: 'ATTEMPTED' | 'SUCCESS' | 'FAILURE';
+    targetType?: string;
+    targetId?: string;
+    performedBy?: string | null;
+    reason?: string;
+    after?: Record<string, unknown>;
+  }) {
+    await this.authSessionRepository.manager.transaction(async (manager) => {
+      await recordAuditEvent(manager, {
+        traceId: 'AUTH',
+        action: 'LOGIN',
+        targetType: input.targetType ?? 'AUTH_LOGIN',
+        targetId: input.targetId ?? null,
+        performedBy: input.performedBy ?? null,
+        eventName: input.eventName,
+        outcome: input.outcome ?? 'SUCCESS',
+        reason: input.reason ?? null,
+        after: input.after,
+      });
+    });
   }
 
   async login(user: User) {
@@ -288,6 +386,16 @@ export class AuthService {
         ) {
           session.revokedAt = new Date(now);
           await sessions.save(session);
+          await recordAuditEvent(manager, {
+            traceId: `AUTH-${session.id}`,
+            eventName: 'auth.token.reuse.detected',
+            action: 'REVOKE',
+            targetType: 'AUTH_SESSION',
+            targetId: session.id,
+            performedBy: payload.sub,
+            reason: 'REFRESH_TOKEN_REUSE',
+            after: { revokedAt: session.revokedAt.toISOString() },
+          });
           return failure('REFRESH_TOKEN_REVOKED');
         }
         const user = await manager
@@ -369,6 +477,15 @@ export class AuthService {
             await this.tokenService.hashRefreshToken(successor);
         session.lastUsedAt = new Date(now);
         await sessions.save(session);
+        await recordAuditEvent(manager, {
+          traceId: `AUTH-${session.id}`,
+          eventName: 'auth.session.refreshed',
+          action: 'REFRESH',
+          targetType: 'AUTH_SESSION',
+          targetId: session.id,
+          performedBy: user.id,
+          after: { rotated: current },
+        });
         const accessToken = this.tokenService.signAccess({ ...claims });
         return {
           user,
@@ -400,17 +517,46 @@ export class AuthService {
     const payload = this.verifyRefreshToken(refreshToken);
     // A signed token identifies its session even after rotation. Revoking is
     // deliberately idempotent and does not require a live access token.
-    await this.authSessionRepository.update(
-      { id: payload.sessionId, userId: payload.sub },
-      { revokedAt: new Date() },
-    );
+    await this.revokeSession(payload.sessionId, payload.sub, payload.sub);
   }
 
-  async logout(sessionId: string) {
-    await this.authSessionRepository.update(
-      { id: sessionId },
-      { revokedAt: new Date() },
-    );
+  async logout(sessionId: string, userId: string) {
+    await this.revokeSession(sessionId, userId, userId);
+  }
+
+  private async revokeSession(
+    sessionId: string,
+    userId: string,
+    performedBy: string,
+  ) {
+    await this.authSessionRepository.manager.transaction(async (manager) => {
+      const sessions = manager.getRepository(AuthSession);
+      const session = await sessions.findOne({
+        where: { id: sessionId, userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!session || session.revokedAt) return;
+
+      session.revokedAt = new Date();
+      await sessions.save(session);
+      const auditInput = {
+        traceId: `AUTH-${session.id}`,
+        action: 'REVOKE',
+        targetType: 'AUTH_SESSION',
+        targetId: session.id,
+        performedBy,
+        after: { revokedAt: session.revokedAt.toISOString() },
+      };
+      await recordAuditEvent(manager, {
+        ...auditInput,
+        eventName: 'auth.session.revoked',
+        reason: 'LOGOUT',
+      });
+      await recordAuditEvent(manager, {
+        ...auditInput,
+        eventName: 'auth.logout.completed',
+      });
+    });
   }
 
   private async generateTokens(

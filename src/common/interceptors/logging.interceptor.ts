@@ -7,83 +7,94 @@ import {
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { RequestContextService } from '../request-context.service';
 
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
 
+  constructor(private readonly requestContext: RequestContextService) {}
+
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const method = request.method;
-    const url = request.url;
-    const body = this.sanitizeBody(request.body);
-    const ip = request.ip || request.connection?.remoteAddress;
-    const userAgent = request.get('user-agent') || 'unknown';
-
+    // Operational logging is allowlisted metadata only. Request/response
+    // bodies, query strings, and token-bearing headers are not an audit sink.
+    const path = request.path;
+    const activity = this.requestContext.get();
     const now = Date.now();
 
     this.logger.log(
-      `→ ${method} ${url} | IP: ${ip} | User-Agent: ${userAgent}`,
+      JSON.stringify({
+        eventName: 'http.request.started',
+        method,
+        path,
+        correlationId: activity?.correlationId,
+        requestId: activity?.requestId,
+      }),
     );
-    if (Object.keys(body).length > 0) {
-      this.logger.log(`  Body: ${JSON.stringify(body)}`);
-    }
 
     return next.handle().pipe(
       tap({
-        next: (data) => {
+        next: () => {
           const response = context.switchToHttp().getResponse();
           const statusCode = response.statusCode;
           const responseTime = Date.now() - now;
           this.logger.log(
-            `← ${method} ${url} ${statusCode} - ${responseTime}ms | Response: ${JSON.stringify(this.truncateResponse(data))}`,
+            JSON.stringify({
+              eventName: 'http.request.completed',
+              method,
+              path: request.route?.path ?? path,
+              statusCode,
+              durationMs: responseTime,
+              correlationId: activity?.correlationId,
+              requestId: activity?.requestId,
+            }),
           );
         },
-        error: (error) => {
+        error: (error: unknown) => {
           const responseTime = Date.now() - now;
+          const failure = this.failureMetadata(error);
           this.logger.error(
-            `← ${method} ${url} ${error.status || 500} - ${responseTime}ms | Error: ${error.message}`,
-            error.stack,
+            JSON.stringify({
+              eventName: 'http.request.failed',
+              method,
+              path,
+              statusCode: failure.statusCode,
+              errorCode: failure.code,
+              errorType: failure.type,
+              durationMs: responseTime,
+              correlationId: activity?.correlationId,
+              requestId: activity?.requestId,
+            }),
+            failure.stack,
           );
         },
       }),
     );
   }
 
-  private sanitizeBody(body: any): any {
-    if (!body || typeof body !== 'object') return {};
-    const sanitized = { ...body };
-    const sensitiveFields = [
-      'password',
-      'newPassword',
-      'refreshToken',
-      'token',
-    ];
-    sensitiveFields.forEach((field) => {
-      if (sanitized[field]) {
-        sanitized[field] = '***';
-      }
-    });
-    return sanitized;
-  }
-
-  private truncateResponse(data: any): any {
-    if (!data) return data;
-    // Auth responses contain nested tokens. Redact before truncating so no
-    // prefix of an access/refresh/selection token reaches application logs.
-    const sensitive = new Set([
-      'accessToken',
-      'refreshToken',
-      'departmentSelectionToken',
-      'password',
-      'token',
-    ]);
-    const stringified = JSON.stringify(data, (key, value) =>
-      sensitive.has(key) ? '***' : value,
-    );
-    if (stringified.length > 500) {
-      return stringified.substring(0, 500) + '... (truncated)';
+  private failureMetadata(error: unknown): {
+    statusCode: number;
+    code: string | null;
+    type: string;
+    stack: string | undefined;
+  } {
+    if (!(error instanceof Error)) {
+      return { statusCode: 500, code: null, type: 'UnknownError', stack: undefined };
     }
-    return JSON.parse(stringified);
+    const candidate = error as Error & { status?: unknown; response?: unknown };
+    const response = candidate.response;
+    const code =
+      typeof response === 'object' && response !== null && 'code' in response &&
+      typeof response.code === 'string'
+        ? response.code
+        : null;
+    return {
+      statusCode: typeof candidate.status === 'number' ? candidate.status : 500,
+      code,
+      type: error.constructor.name,
+      stack: error.stack,
+    };
   }
 }

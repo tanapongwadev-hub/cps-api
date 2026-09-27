@@ -14,6 +14,7 @@
 | Decimal quantities          | String where entities use `numeric(18,4)`                              |
 | Date                        | `YYYY-MM-DD`                                                           |
 | Date-time/concurrency token | ISO 8601 string                                                        |
+| Activity correlation         | Requests may send `X-Correlation-Id` / `X-Request-Id`; the API validates or creates both and returns them in response headers |
 
 There is no global authentication guard and no global success envelope. Each controller explicitly attaches guards, and responses are returned directly from its service.
 
@@ -238,8 +239,10 @@ The response version is computed from the merged post-save menu set. A valid no-
 
 | Method | Path              | Input                                            |
 | ------ | ----------------- | ------------------------------------------------ |
-| `GET`  | `/audit-logs`     | Query `page=1`, `limit=20`, `userId?`, `action?` |
+| `GET`  | `/audit-logs`     | Query `page=1`, `limit=20`, `userId?`, `action?`; response actor is an allowlisted summary only |
 | `GET`  | `/audit-logs/:id` | none                                             |
+
+Audit records now include an Activity Event v1 envelope (`eventId`, `eventName`, `schemaVersion`, `stream`, `outcome`, `correlationId`, and `occurredAt`). Existing inventory event producers write the envelope in their current transaction; legacy rows are backfilled by migration `1790500000000`.
 
 ## 5. Permission-protected master data
 

@@ -31,16 +31,36 @@ export class AuthController {
   @Public()
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
-    const user = await this.authService.validateUser(
-      loginDto.username,
-      loginDto.password,
-    );
+    await this.authService.recordLoginAttempt(loginDto.username);
+    let user;
+    try {
+      user = await this.authService.validateUser(
+        loginDto.username,
+        loginDto.password,
+      );
+    } catch (error) {
+      await this.authService.recordLoginFailure(
+        loginDto.username,
+        'AUTH_DENIED',
+      );
+      throw error;
+    }
 
     if (!user) {
+      await this.authService.recordLoginFailure(
+        loginDto.username,
+        'INVALID_CREDENTIALS',
+      );
       throw new InvalidCredentialsException();
     }
 
-    return await this.authService.login(user);
+    const response = await this.authService.login(user);
+    await this.authService.recordLoginSuccess(
+      user.id,
+      'requiresDepartmentSelection' in response &&
+        response.requiresDepartmentSelection === true,
+    );
+    return response;
   }
 
   @Public()
@@ -64,10 +84,15 @@ export class AuthController {
       );
     }
 
-    return await this.authService.selectDepartment(
+    const response = await this.authService.selectDepartment(
       payload.sub,
       selectDepartmentDto.userDepartmentRoleId,
     );
+    await this.authService.recordDepartmentSelected(
+      payload.sub,
+      selectDepartmentDto.userDepartmentRoleId,
+    );
+    return response;
   }
 
   @UseGuards(JwtAuthGuard)
@@ -91,7 +116,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   async logout(@CurrentUser() user: CurrentUserWithAssignment) {
-    await this.authService.logout(user.sessionId);
+    await this.authService.logout(user.sessionId, user.id);
     return { success: true, message: 'Logout successful' };
   }
 

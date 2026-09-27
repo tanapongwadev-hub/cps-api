@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { TokenService } from './services/token.service';
 import { AuthSession } from '../../entities/iam/auth-session.entity';
 import { User } from '../../entities/iam/user.entity';
+import { AuditLog } from '../../entities/iam/audit-log.entity';
 import { RoleCode } from '../../common/enums/role-code.enum';
 
 const hash = (token: string) =>
@@ -64,13 +65,19 @@ function harness() {
       Object.assign(session, values),
     ),
   };
+  const auditLogs = {
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => value),
+  };
   const manager = {
     getRepository: (entity: unknown) =>
       entity === AuthSession
         ? sessions
         : entity === User
           ? { findOne: async () => user }
-          : { findOne: async () => null },
+          : entity === AuditLog
+            ? auditLogs
+            : { findOne: async () => null },
   };
   let tail: Promise<unknown> = Promise.resolve();
   const repository = {
@@ -110,7 +117,7 @@ function harness() {
       ),
     },
   );
-  return { service, session, user, token, jwt, sessions };
+  return { service, session, user, token, jwt, sessions, auditLogs };
 }
 
 describe('Refresh token lifecycle', () => {
@@ -162,6 +169,9 @@ describe('Refresh token lifecycle', () => {
     expect(h.session.revokedAt).toBeInstanceOf(Date);
     expect(h.sessions.save).toHaveBeenLastCalledWith(
       expect.objectContaining({ revokedAt: expect.any(Date) }),
+    );
+    expect(h.auditLogs.save).toHaveBeenCalledWith(
+      expect.objectContaining({ eventName: 'auth.token.reuse.detected' }),
     );
   });
 
@@ -231,6 +241,15 @@ describe('Refresh token lifecycle', () => {
     const h = harness();
     await h.service.logoutWithRefreshToken(h.token);
     expect(h.session.revokedAt).toBeInstanceOf(Date);
+    expect(h.auditLogs.save).toHaveBeenCalledTimes(2);
+    expect(h.auditLogs.save).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ eventName: 'auth.session.revoked' }),
+    );
+    expect(h.auditLogs.save).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ eventName: 'auth.logout.completed' }),
+    );
     await expect(h.service.refreshToken(h.token)).rejects.toMatchObject({
       response: { code: 'REFRESH_TOKEN_REVOKED' },
     });

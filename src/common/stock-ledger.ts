@@ -3,6 +3,26 @@ import { EntityManager } from 'typeorm';
 import { StockTransaction } from '../entities/inventory/stock-transaction.entity';
 import { AuditLog } from '../entities/iam/audit-log.entity';
 
+export interface AuditRequestContext {
+  correlationId: string;
+  requestId: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+let auditRequestContext: (() => AuditRequestContext | undefined) | undefined;
+
+/**
+ * `recordAuditEvent` is the existing transaction-local write seam. Supplying
+ * request context here lets every current caller inherit correlation metadata
+ * without changing its business method signature one module at a time.
+ */
+export function configureAuditRequestContext(
+  provider: () => AuditRequestContext | undefined,
+): void {
+  auditRequestContext = provider;
+}
+
 export function createTraceId(prefix: 'RCV' | 'ISS' | 'ADJ' = 'ADJ'): string {
   const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
   return `TRC-${prefix}-${date}-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -75,28 +95,9 @@ export async function recordStockMovement(
 
 export interface AuditEventInput {
   traceId: string;
-  action:
-    | 'CREATE'
-    | 'UPDATE'
-    | 'DELETE'
-    | 'CANCEL'
-    | 'APPROVE'
-    | 'REOPEN'
-    | 'STATUS_CHANGE'
-    | 'RESERVE'
-    | 'RELEASE'
-    | 'PRINT'
-    | 'PICK'
-    | 'ISSUE'
-    | 'COMPLETE';
-  targetType:
-    | 'MATERIAL_RECEIVING'
-    | 'MATERIALS_DISBURSEMENT'
-    | 'PRODUCTION_PLAN'
-    | 'MATERIAL_JOB_ORDER'
-    | 'STOCK_MOVEMENT'
-    | 'QR';
-  targetId: string;
+  action: string;
+  targetType: string;
+  targetId?: string | null;
   /** null for a system-initiated event (e.g. the auto-expiry cron). */
   performedBy: string | null;
   departmentId?: string | null;
@@ -104,7 +105,38 @@ export interface AuditEventInput {
   after?: unknown;
   reason?: string | null;
   requestId?: string | null;
+  correlationId?: string | null;
+  eventName?: string;
+  outcome?: AuditEventOutcome;
 }
+
+export type AuditEventOutcome =
+  'ATTEMPTED' | 'SUCCESS' | 'FAILURE' | 'DENIED' | 'TIMEOUT';
+
+const TARGET_EVENT_PREFIX: Record<string, string> = {
+  MATERIAL_RECEIVING: 'material_receiving',
+  MATERIALS_DISBURSEMENT: 'material_disbursement',
+  PRODUCTION_PLAN: 'production_plan',
+  MATERIAL_JOB_ORDER: 'material_job_order',
+  STOCK_MOVEMENT: 'inventory.stock',
+  QR: 'inventory.qr',
+};
+
+const ACTION_EVENT_SUFFIX: Record<string, string> = {
+  CREATE: 'created',
+  UPDATE: 'updated',
+  DELETE: 'deleted',
+  CANCEL: 'cancelled',
+  APPROVE: 'approved',
+  REOPEN: 'reopened',
+  STATUS_CHANGE: 'status_changed',
+  RESERVE: 'reservation_created',
+  RELEASE: 'reservation_released',
+  PRINT: 'printed',
+  PICK: 'picked',
+  ISSUE: 'issued',
+  COMPLETE: 'completed',
+};
 
 /** Writes business audit history through the caller's database transaction. */
 export async function recordAuditEvent(
@@ -112,20 +144,32 @@ export async function recordAuditEvent(
   input: AuditEventInput,
 ): Promise<AuditLog> {
   const repository = manager.getRepository(AuditLog);
-  return repository.save(
+  const context = auditRequestContext?.();
+  const audit = await repository.save(
     repository.create({
+      eventId: randomUUID(),
+      eventName:
+        input.eventName ??
+        `${TARGET_EVENT_PREFIX[input.targetType] ?? input.targetType.toLowerCase()}.${ACTION_EVENT_SUFFIX[input.action] ?? input.action.toLowerCase()}`,
+      schemaVersion: 1,
+      stream: 'audit',
+      outcome: input.outcome ?? 'SUCCESS',
       actorUserId: input.performedBy,
       departmentId: input.departmentId ?? null,
       action: input.action,
       targetType: input.targetType,
-      targetId: input.targetId,
+      targetId: input.targetId ?? null,
       beforeData: input.before ?? null,
       afterData: input.after ?? null,
-      ipAddress: null,
-      userAgent: null,
+      ipAddress: context?.ipAddress ?? null,
+      userAgent: context?.userAgent ?? null,
       traceId: input.traceId,
-      requestId: input.requestId ?? null,
+      correlationId:
+        input.correlationId ?? context?.correlationId ?? input.traceId,
+      requestId: input.requestId ?? context?.requestId ?? null,
       reason: input.reason ?? null,
+      occurredAt: new Date(),
     }),
   );
+  return audit;
 }

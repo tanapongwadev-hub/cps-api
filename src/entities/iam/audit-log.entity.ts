@@ -9,10 +9,30 @@ import {
 } from 'typeorm';
 import { User } from './user.entity';
 
+export type AuditLogOutcome =
+  'ATTEMPTED' | 'SUCCESS' | 'FAILURE' | 'DENIED' | 'TIMEOUT';
+
 @Entity('audit_logs', { schema: 'iam' })
 export class AuditLog {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id: string;
+
+  @Index({ unique: true })
+  @Column({ name: 'event_id', type: 'varchar', length: 64 })
+  eventId: string;
+
+  @Index()
+  @Column({ name: 'event_name', type: 'varchar', length: 120 })
+  eventName: string;
+
+  @Column({ name: 'schema_version', type: 'integer', default: 1 })
+  schemaVersion: number;
+
+  @Column({ type: 'varchar', length: 20, default: 'audit' })
+  stream: 'audit';
+
+  @Column({ type: 'varchar', length: 32, default: 'SUCCESS' })
+  outcome: AuditLogOutcome;
 
   @Index()
   @Column({ name: 'actor_user_id', type: 'bigint', nullable: true })
@@ -45,6 +65,15 @@ export class AuditLog {
   @Column({ name: 'trace_id', type: 'varchar', length: 40, nullable: true })
   traceId: string | null;
 
+  @Index()
+  @Column({
+    name: 'correlation_id',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
+  correlationId: string | null;
+
   @Column({ name: 'request_id', type: 'varchar', length: 80, nullable: true })
   requestId: string | null;
 
@@ -56,6 +85,9 @@ export class AuditLog {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
+
+  @Column({ name: 'occurred_at', type: 'timestamp' })
+  occurredAt: Date;
 
   @ManyToOne(() => User)
   @JoinColumn({ name: 'actor_user_id' })

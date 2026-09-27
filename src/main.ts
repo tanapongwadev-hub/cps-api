@@ -2,16 +2,48 @@ import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join, resolve as resolvePath } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { CustomValidationPipe } from './common/pipes/validation.pipe';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { RequestContextService } from './common/request-context.service';
+import { configureAuditRequestContext } from './common/stock-ledger';
 import { getAppConfig } from './config/app.config';
 import { getEnv } from './config/env.utils';
 import { ThaiExceptionFilter } from './common/filters/thai-exception.filter';
 
+const CONTEXT_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+
+function contextId(value: string | undefined): string {
+  return value && CONTEXT_ID_PATTERN.test(value) ? value : randomUUID();
+}
+
+function requestIp(request: Request): string | null {
+  const ip = request.ip ?? request.socket.remoteAddress;
+  return ip?.slice(0, 45) ?? null;
+}
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.setGlobalPrefix('api/v1');
+  const requestContext = app.get(RequestContextService);
+  configureAuditRequestContext(() => requestContext.get());
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    const correlationId = contextId(request.header('x-correlation-id'));
+    const requestId = contextId(request.header('x-request-id'));
+    response.setHeader('X-Correlation-Id', correlationId);
+    response.setHeader('X-Request-Id', requestId);
+    requestContext.run(
+      {
+        correlationId,
+        requestId,
+        ipAddress: requestIp(request),
+        userAgent: request.header('user-agent') ?? null,
+      },
+      () => next(),
+    );
+  });
   // Storage root for Material images. Defaults to `<cwd>/uploads/materials`
   // but operators can override it via `MATERIAL_IMAGE_ROOT` so uploaded
   // content lives outside the project tree (e.g. on a dedicated drive).
@@ -45,13 +77,14 @@ async function bootstrap() {
   app.useGlobalFilters(new ThaiExceptionFilter());
 
   // Global logging interceptor
-  app.useGlobalInterceptors(new LoggingInterceptor());
+  app.useGlobalInterceptors(new LoggingInterceptor(requestContext));
 
   // CORS
   const corsOrigin = getEnv('CORS_ORIGIN', '');
   app.enableCors({
     origin: corsOrigin ? corsOrigin.split(',') : true,
     credentials: true,
+    exposedHeaders: ['X-Correlation-Id', 'X-Request-Id'],
   });
 
   // Swagger documentation

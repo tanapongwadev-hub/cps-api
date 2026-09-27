@@ -41,6 +41,7 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { ProcessLinesModule } from './modules/process-lines/process-lines.module';
 import { ProductionPlansModule } from './modules/production-plans/production-plans.module';
 import { MaterialJobOrdersModule } from './modules/material-job-orders/material-job-orders.module';
+import { RequestContextService } from './common/request-context.service';
 
 @Module({
   imports: [
@@ -94,6 +95,6 @@ import { MaterialJobOrdersModule } from './modules/material-job-orders/material-
     MaterialJobOrdersModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, RequestContextService],
 })
 export class AppModule {}
