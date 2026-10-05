@@ -19,6 +19,39 @@ export class InsufficientQuantityError extends Error {
 }
 
 /**
+ * MANUAL: checks a user-chosen split of `qty` across `rows`. Returns a Thai
+ * error message, or null when every line names a row that exists, no row is
+ * named twice, no line takes more than the row holds, and the lines add up
+ * to exactly `qty`.
+ */
+export function validateManualAllocation(
+  rows: readonly AllocatableRow[],
+  allocations: readonly Allocation[],
+  qty: number,
+): string | null {
+  if (!allocations.length) return 'ต้องระบุรายการที่จะใช้อย่างน้อย 1 รายการ';
+  const seen = new Set<string>();
+  let total = 0;
+  for (const a of allocations) {
+    if (!Number.isInteger(a.qty) || a.qty <= 0) {
+      return 'จำนวนในแต่ละรายการต้องเป็นจำนวนเต็มมากกว่า 0';
+    }
+    if (seen.has(a.id)) return 'เลือกรายการซ้ำกัน';
+    seen.add(a.id);
+    const row = rows.find((r) => r.id === a.id);
+    if (!row) return 'รายการที่เลือกไม่อยู่ในขั้นตอนนี้ หรือไม่มียอดคงเหลือ';
+    if (a.qty > row.remaining) {
+      return `เลือกเกินยอดคงเหลือ (คงเหลือ ${row.remaining} ชิ้น)`;
+    }
+    total += a.qty;
+  }
+  if (total !== qty) {
+    return `ยอดที่เลือกรวม ${total} ชิ้น ไม่เท่ากับจำนวน ${qty} ชิ้น`;
+  }
+  return null;
+}
+
+/**
  * FIFO: draw `qty` from `rows` in the order given (callers pass them already
  * sorted, e.g. WIP by received_at, id). Pieces are whole numbers; throws when
  * the rows together hold less than `qty`.

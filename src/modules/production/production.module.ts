@@ -7,7 +7,9 @@ import {
   ProductionOrderLine,
 } from '../production-orders/production-order.entity';
 import { ProcessController } from './production-process/process.controller';
+import { BoardService } from './production-process/board.service';
 import { ProcessService } from './production-process/process.service';
+import { TransferService } from './production-process/transfer.service';
 import { LotService } from './production-lot/lot.service';
 import { LedgerService } from './production-transaction/ledger.service';
 import { WipService } from './production-wip/wip.service';
@@ -57,7 +59,14 @@ export const PRODUCTION_TRACE_ENTITIES = [
     ]),
   ],
   controllers: [ProcessController],
-  providers: [LedgerService, WipService, LotService, ProcessService],
+  providers: [
+    LedgerService,
+    WipService,
+    LotService,
+    ProcessService,
+    TransferService,
+    BoardService,
+  ],
   exports: [TypeOrmModule, LedgerService, WipService, LotService],
 })
 export class ProductionModule {}

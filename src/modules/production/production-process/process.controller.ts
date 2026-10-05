@@ -13,8 +13,11 @@ import { ActiveAssignmentGuard } from '../../../common/guards/active-assignment.
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../../common/guards/permission.guard';
 import { PRODUCTION_ORDER_PERMISSIONS } from '../../production-orders/production-order-permissions';
+import { BoardService } from './board.service';
 import { ProduceDto } from './dto/produce.dto';
+import { TransferDto } from './dto/transfer.dto';
 import { ProcessService } from './process.service';
+import { TransferService } from './transfer.service';
 
 /**
  * Lot-model production movements. Steps are addressed by order line + step
@@ -24,7 +27,29 @@ import { ProcessService } from './process.service';
 @Controller('production')
 @UseGuards(JwtAuthGuard, ActiveAssignmentGuard, PermissionGuard)
 export class ProcessController {
-  constructor(private readonly service: ProcessService) {}
+  constructor(
+    private readonly service: ProcessService,
+    private readonly transfers: TransferService,
+    private readonly boards: BoardService,
+  ) {}
+
+  @Post('lines/:lineId/steps/:stepIndex/transfer')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
+  transfer(
+    @Param('lineId') lineId: string,
+    @Param('stepIndex', ParseIntPipe) stepIndex: number,
+    @Body() dto: TransferDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.transfers.transfer(lineId, stepIndex, dto, userId);
+  }
+
+  /** Process Board: per-step input/produced/waiting/ready/transferred/rejected + lots. */
+  @Get('lines/:lineId/board')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  board(@Param('lineId') lineId: string) {
+    return this.boards.board(lineId);
+  }
 
   @Post('lines/:lineId/steps/:stepIndex/produce')
   @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)

@@ -7,7 +7,7 @@ import {
 } from '../../production-orders/production-order.entity';
 import { allocateFifo } from '../domain/allocation';
 import { productionDayOf } from '../domain/production-day';
-import { ProcessWip } from '../entities/process-wip.entity';
+import { ProcessWip, ProcessWipOrigin } from '../entities/process-wip.entity';
 import { LedgerService } from '../production-transaction/ledger.service';
 
 @Injectable()
@@ -54,6 +54,50 @@ export class WipService {
       shiftKey: day.shift,
       operatorId: userId,
     });
+    return wip;
+  }
+
+  /**
+   * Transfer in: `qty` pieces of `sourceLotId` (with their origins) arrive
+   * at `stepIndex` and wait to be produced. One WIP row per transfer.
+   */
+  async receiveTransfer(
+    manager: EntityManager,
+    input: {
+      productionOrderId: string;
+      lineId: string;
+      stepIndex: number;
+      processStepId: string;
+      sourceLotId: string;
+      qty: number;
+      origins: Array<{ originLotId: string; qty: number }>;
+      receivedAt: Date;
+    },
+  ): Promise<ProcessWip> {
+    const repo = manager.getRepository(ProcessWip);
+    const wip = await repo.save(
+      repo.create({
+        productionOrderId: input.productionOrderId,
+        productionOrderLineId: input.lineId,
+        stepIndex: input.stepIndex,
+        processStepId: input.processStepId,
+        sourceLotId: input.sourceLotId,
+        qtyIn: input.qty,
+        qtyRemaining: input.qty,
+        receivedAt: input.receivedAt,
+        status: 'OPEN',
+      }),
+    );
+    if (input.origins.length) {
+      await manager.getRepository(ProcessWipOrigin).insert(
+        input.origins.map((o) => ({
+          wipId: wip.id,
+          originLotId: o.originLotId,
+          qty: o.qty,
+          qtyRemaining: o.qty,
+        })),
+      );
+    }
     return wip;
   }
 

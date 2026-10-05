@@ -4,6 +4,7 @@ import {
   ProductionOrder,
   ProductionOrderLine,
 } from '../../production-orders/production-order.entity';
+import { allocateFifo } from '../domain/allocation';
 import { formatLotNo, lotPrefix } from '../domain/lot-number';
 import { ProductionDay } from '../domain/production-day';
 import {
@@ -148,6 +149,64 @@ export class LotService {
       qty,
       transactionId,
     });
+  }
+
+  /**
+   * Lots of a step that still hold pieces (produced, not yet transferred),
+   * locked, oldest first (production date, id) — the FIFO order for transfer.
+   */
+  lockReadyLots(
+    manager: EntityManager,
+    lineId: string,
+    stepIndex: number,
+  ): Promise<ProductionLot[]> {
+    return manager
+      .getRepository(ProductionLot)
+      .createQueryBuilder('l')
+      .setLock('pessimistic_write')
+      .where('l.productionOrderLineId = :lineId', { lineId })
+      .andWhere('l.stepIndex = :stepIndex', { stepIndex })
+      .andWhere('l.remainingQty > 0')
+      .andWhere(`l.status = 'OPEN'`)
+      .orderBy('l.productionDate', 'ASC')
+      .addOrderBy('l.id', 'ASC')
+      .getMany();
+  }
+
+  /**
+   * Takes `qty` out of a lot's origin composition, oldest origin first, and
+   * persists the new remaining quantities. Returns what was taken per origin.
+   */
+  async takeOrigins(
+    manager: EntityManager,
+    lotId: string,
+    qty: number,
+  ): Promise<Array<{ originLotId: string; qty: number }>> {
+    const rows = (await manager.query(
+      `SELECT o.origin_lot_id, o.qty_remaining
+       FROM inventory.production_lot_origins o
+       JOIN inventory.production_lots ol ON ol.id = o.origin_lot_id
+       WHERE o.lot_id = $1 AND o.qty_remaining > 0
+       ORDER BY ol.production_date, ol.id
+       FOR UPDATE OF o`,
+      [lotId],
+    )) as unknown as Array<{ origin_lot_id: string; qty_remaining: number }>;
+    const taken = allocateFifo(
+      rows.map((r) => ({
+        id: String(r.origin_lot_id),
+        remaining: Number(r.qty_remaining),
+      })),
+      qty,
+    );
+    for (const t of taken) {
+      await manager.query(
+        `UPDATE inventory.production_lot_origins
+         SET qty_remaining = qty_remaining - $3
+         WHERE lot_id = $1 AND origin_lot_id = $2`,
+        [lotId, t.id, t.qty],
+      );
+    }
+    return taken.map((t) => ({ originLotId: t.id, qty: t.qty }));
   }
 
   originsOf(manager: EntityManager, lotId: string) {

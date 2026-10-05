@@ -1,4 +1,63 @@
-import { allocateFifo, InsufficientQuantityError } from './allocation';
+import {
+  allocateFifo,
+  InsufficientQuantityError,
+  validateManualAllocation,
+} from './allocation';
+
+describe('validateManualAllocation', () => {
+  const lots = [
+    { id: 'PS1', remaining: 100 },
+    { id: 'PS2', remaining: 200 },
+  ];
+
+  it('accepts a split that adds up exactly (scenario: 150 from PS2)', () => {
+    expect(
+      validateManualAllocation(lots, [{ id: 'PS2', qty: 150 }], 150),
+    ).toBeNull();
+    expect(
+      validateManualAllocation(
+        lots,
+        [
+          { id: 'PS1', qty: 50 },
+          { id: 'PS2', qty: 100 },
+        ],
+        150,
+      ),
+    ).toBeNull();
+  });
+
+  it('rejects totals that do not match', () => {
+    expect(
+      validateManualAllocation(lots, [{ id: 'PS2', qty: 100 }], 150),
+    ).toMatch(/ไม่เท่ากับ/);
+  });
+
+  it('rejects taking more than a lot holds', () => {
+    expect(
+      validateManualAllocation(lots, [{ id: 'PS1', qty: 120 }], 120),
+    ).toMatch(/เกินยอดคงเหลือ/);
+  });
+
+  it('rejects unknown lots, duplicates, empty and non-positive lines', () => {
+    expect(validateManualAllocation(lots, [{ id: 'X', qty: 1 }], 1)).toMatch(
+      /ไม่อยู่ใน/,
+    );
+    expect(
+      validateManualAllocation(
+        lots,
+        [
+          { id: 'PS1', qty: 1 },
+          { id: 'PS1', qty: 1 },
+        ],
+        2,
+      ),
+    ).toMatch(/ซ้ำ/);
+    expect(validateManualAllocation(lots, [], 1)).toMatch(/อย่างน้อย/);
+    expect(validateManualAllocation(lots, [{ id: 'PS1', qty: 0 }], 0)).toMatch(
+      /มากกว่า 0/,
+    );
+  });
+});
 import { formatLotNo, lotPrefix } from './lot-number';
 import {
   addDays,

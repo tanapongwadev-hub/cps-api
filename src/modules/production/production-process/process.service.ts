@@ -2,15 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { recordAuditEvent } from '../../../common/stock-ledger';
-import {
-  ProductionOrder,
-  ProductionOrderLine,
-} from '../../production-orders/production-order.entity';
+import { ProductionOrderLine } from '../../production-orders/production-order.entity';
 import { allocateFifo } from '../domain/allocation';
 import {
   ProductionDay,
@@ -26,8 +22,9 @@ import {
   OriginQty,
 } from '../production-transaction/ledger.service';
 import { WipService } from '../production-wip/wip.service';
-import { loadWorkflowSteps, WorkflowStepInfo } from '../workflow-steps';
+import { WorkflowStepInfo } from '../workflow-steps';
 import { ProduceDto } from './dto/produce.dto';
+import { lockLotModelLine, stepAt } from './line-context';
 
 export interface ProduceResult {
   /** true when this requestId was already processed (nothing written). */
@@ -102,30 +99,8 @@ export class ProcessService {
     if (dayError) throw new ConflictException(dayError);
 
     return this.dataSource.transaction(async (manager) => {
-      // One line at a time: every produce/transfer of a line queues here,
-      // so concurrent users can never draw the same WIP twice.
-      const line = await manager.getRepository(ProductionOrderLine).findOne({
-        where: { id: lineId },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!line)
-        throw new NotFoundException(`ไม่พบรายการสั่งผลิต id ${lineId}`);
-      const order = await manager
-        .getRepository(ProductionOrder)
-        .findOneOrFail({ where: { id: line.productionOrderId } });
-      if (order.trackingModel !== 'LOT') {
-        throw new ConflictException(
-          'ใบสั่งผลิตนี้ใช้ระบบกล่องแบบเดิม บันทึกผลิตแบบ Lot ไม่ได้',
-        );
-      }
-      if (order.status === 'COMPLETED') {
-        throw new ConflictException('ใบสั่งผลิตนี้เสร็จสิ้นแล้ว');
-      }
-      const steps = await loadWorkflowSteps(manager, line.workflowId);
-      const step = steps[stepIndex];
-      if (!step) {
-        throw new NotFoundException(`ไม่พบขั้นตอนที่ ${stepIndex + 1}`);
-      }
+      const { line, order, steps } = await lockLotModelLine(manager, lineId);
+      const step = stepAt(steps, stepIndex);
 
       // Idempotency: the same request already ran → return it as is.
       const done = await manager.getRepository(ProductionTransaction).findOne({
