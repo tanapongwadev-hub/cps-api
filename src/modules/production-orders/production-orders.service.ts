@@ -14,6 +14,7 @@ import {
 import { Product } from '../../entities/master/product.entity';
 import { MaterialJobOrder } from '../material-job-orders/material-job-order.entity';
 import { ProductionPlan } from '../production-plans/production-plan.entity';
+import { WipService } from '../production/production-wip/wip.service';
 import { CreateProductionOrderDto } from './dto/create-production-order.dto';
 import { ListProductionOrdersQueryDto } from './dto/list-production-orders-query.dto';
 import { CloseRemainingDto, RecordOutputDto } from './dto/record-output.dto';
@@ -35,6 +36,15 @@ export interface OutputView {
   remark: string | null;
   performedAt: Date;
   performedBy: string | null;
+}
+
+/** Packet endpoints (output/advance/close) only apply to PACKET-model orders. */
+function assertPacketModel(order: ProductionOrder): void {
+  if (order.trackingModel !== 'PACKET') {
+    throw new ConflictException(
+      'ใบสั่งผลิตนี้ใช้ระบบ Lot — บันทึกผลิตผ่านขั้นตอนแบบ Lot',
+    );
+  }
 }
 
 /** Today's date (YYYY-MM-DD) on the factory clock, Asia/Bangkok (UTC+7). */
@@ -79,6 +89,7 @@ export class ProductionOrdersService {
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
+    private readonly wip: WipService,
   ) {}
 
   // ----------------------------------------------------------------- create
@@ -118,6 +129,7 @@ export class ProductionOrdersService {
           code,
           productionPlanId: plan.id,
           status: 'IN_PROGRESS',
+          trackingModel: dto.trackingModel ?? 'PACKET',
           createdBy: userId,
         }),
       );
@@ -153,7 +165,7 @@ export class ProductionOrdersService {
         // No boxes / QR yet: the whole line quantity is on hold at the first
         // workflow step until real output is reported (recordOutput).
         const lineRepo = manager.getRepository(ProductionOrderLine);
-        await lineRepo.save(
+        const line = await lineRepo.save(
           lineRepo.create({
             productionOrderId: order.id,
             lineNo,
@@ -163,6 +175,19 @@ export class ProductionOrdersService {
             packingQuantity: packing,
           }),
         );
+        if (order.trackingModel === 'LOT') {
+          // Lot model: the plan quantity waits at the first step as WIP.
+          const firstStep = [...workflow.steps].sort(
+            (a, b) => a.sortOrder - b.sortOrder,
+          )[0];
+          await this.wip.releasePlan(
+            manager,
+            order,
+            line,
+            firstStep.processStepId,
+            userId,
+          );
+        }
         totalQuantity += planLine.quantity;
       }
 
@@ -565,6 +590,7 @@ export class ProductionOrdersService {
     if (order.status === 'COMPLETED') {
       throw new ConflictException('ใบสั่งผลิตนี้เสร็จสิ้นแล้ว');
     }
+    assertPacketModel(order);
     return line;
   }
 

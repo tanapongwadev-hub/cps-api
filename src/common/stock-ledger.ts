@@ -118,6 +118,8 @@ const TARGET_EVENT_PREFIX: Record<string, string> = {
   MATERIALS_DISBURSEMENT: 'material_disbursement',
   PRODUCTION_PLAN: 'production_plan',
   PRODUCTION_ORDER: 'production_order',
+  PRODUCTION_LOT: 'production.lot',
+  PRODUCTION_PACKAGE: 'production.package',
   MATERIAL_JOB_ORDER: 'material_job_order',
   STOCK_MOVEMENT: 'inventory.stock',
   QR: 'inventory.qr',
