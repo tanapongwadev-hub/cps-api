@@ -13,6 +13,7 @@ import { PRODUCT_MODEL_PERMISSIONS } from '../../modules/product-models/product-
 import { PRODUCT_TYPE_PERMISSIONS } from '../../modules/product-types/product-type-permissions';
 import { PRODUCTS_PERMISSIONS } from '../../modules/products/products-permissions';
 import { PRODUCTION_PLAN_PERMISSIONS } from '../../modules/production-plans/production-plan-permissions';
+import { PRODUCTION_ORDER_PERMISSIONS } from '../../modules/production-orders/production-order-permissions';
 import { REJECT_REASON_PERMISSIONS } from '../../modules/reject-reasons/reject-reason-permissions';
 import { STATUS_ITEM_PERMISSIONS } from '../../modules/status-items/status-item-permissions';
 import { SUPPLIER_PERMISSIONS } from '../../modules/suppliers/supplier-permissions';
@@ -132,6 +133,12 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   MATERIALS_PC_OVERVIEW: {
     READ: `${MATERIAL_PERMISSIONS.VIEW}`,
   },
+  // /products/process-orders — production orders (see migration 1790600000001).
+  PRODUCT_PROCESS_ORDERS: {
+    READ: PRODUCTION_ORDER_PERMISSIONS.VIEW,
+    CREATE: PRODUCTION_ORDER_PERMISSIONS.CREATE,
+    UPDATE: PRODUCTION_ORDER_PERMISSIONS.ADVANCE,
+  },
   // Report menus — read-only (VIEW only)
   MATERIALS_RECEIVING_REPORT: {
     READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
@@ -171,6 +178,7 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
 export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
   MATERIALS_PC_OVERVIEW: ['READ'],
+  PRODUCT_PROCESS_ORDERS: ['READ', 'CREATE', 'UPDATE'],
   MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
   MATERIALS_DISBURSEMENT: MATERIALS_DISBURSEMENT_ACTION_CODES,
   // Report menus — read-only

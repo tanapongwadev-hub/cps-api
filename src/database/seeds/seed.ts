@@ -388,6 +388,15 @@ export async function seed(dataSource: DataSource) {
         sort_order: 97,
       },
       {
+        code: 'PRODUCT_PROCESS_ORDERS',
+        name_th: 'การสั่งผลิตตามกระบวนการ',
+        name_en: 'Process Production Orders',
+        path: '/products/process-orders',
+        icon: 'workflow',
+        sort_order: 97,
+        parentCode: 'PRODUCTS_LIST',
+      },
+      {
         code: 'MATERIALS_PC_OVERVIEW',
         name_th: 'ภาพรวมวัตถุดิบ',
         name_en: 'Materials Overview',
