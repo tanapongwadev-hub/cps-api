@@ -8,7 +8,9 @@ import { ProductionPlan } from '../production-plans/production-plan.entity';
 import {
   ProductionOrder,
   ProductionOrderLine,
+  ProductionOrderOutput,
   ProductionOrderPacket,
+  ProductionOrderPacketEvent,
 } from './production-order.entity';
 import { ProductionOrdersController } from './production-orders.controller';
 import { ProductionOrdersService } from './production-orders.service';
@@ -19,7 +21,9 @@ import { ProductionOrdersService } from './production-orders.service';
     TypeOrmModule.forFeature([
       ProductionOrder,
       ProductionOrderLine,
+      ProductionOrderOutput,
       ProductionOrderPacket,
+      ProductionOrderPacketEvent,
       ProductionPlan,
       MaterialJobOrder,
       Product,

@@ -29,6 +29,19 @@ export class ProcessStep {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  /**
+   * Receiving step (lot traceability): FG = INCOME-FG, STORE = INCOME-STORE.
+   * Producing at a receiving step creates an FG/STORE lot that can be packed
+   * into QR boxes.
+   */
+  @Column({
+    name: 'receiving_type',
+    type: 'varchar',
+    length: 10,
+    default: 'NONE',
+  })
+  receivingType: 'NONE' | 'FG' | 'STORE';
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 

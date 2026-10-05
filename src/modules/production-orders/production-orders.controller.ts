@@ -12,8 +12,10 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
+import { AdvancePacketDto } from './dto/advance-packet.dto';
 import { CreateProductionOrderDto } from './dto/create-production-order.dto';
 import { ListProductionOrdersQueryDto } from './dto/list-production-orders-query.dto';
+import { CloseRemainingDto, RecordOutputDto } from './dto/record-output.dto';
 import { PRODUCTION_ORDER_PERMISSIONS } from './production-order-permissions';
 import { ProductionOrdersService } from './production-orders.service';
 
@@ -33,9 +35,30 @@ export class ProductionOrdersController {
   @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
   advance(
     @Param('packetId') packetId: string,
+    @Body() dto: AdvancePacketDto,
     @CurrentUser('id') userId: string,
   ) {
-    return this.service.advancePacket(packetId, userId);
+    return this.service.advancePacket(packetId, userId, dto?.quantity);
+  }
+
+  @Post('lines/:lineId/output')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
+  recordOutput(
+    @Param('lineId') lineId: string,
+    @Body() dto: RecordOutputDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.recordOutput(lineId, dto, userId);
+  }
+
+  @Post('lines/:lineId/close-remaining')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
+  closeRemaining(
+    @Param('lineId') lineId: string,
+    @Body() dto: CloseRemainingDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.closeRemaining(lineId, dto, userId);
   }
 
   @Get(':id')

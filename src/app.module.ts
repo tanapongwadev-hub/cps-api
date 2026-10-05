@@ -41,6 +41,7 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { ProcessLinesModule } from './modules/process-lines/process-lines.module';
 import { ProductionPlansModule } from './modules/production-plans/production-plans.module';
 import { ProductionOrdersModule } from './modules/production-orders/production-orders.module';
+import { ProductionModule } from './modules/production/production.module';
 import { MaterialJobOrdersModule } from './modules/material-job-orders/material-job-orders.module';
 import { RequestContextService } from './common/request-context.service';
 
@@ -94,6 +95,7 @@ import { RequestContextService } from './common/request-context.service';
     ProcessLinesModule,
     ProductionPlansModule,
     ProductionOrdersModule,
+    ProductionModule,
     MaterialJobOrdersModule,
   ],
   controllers: [AppController],
