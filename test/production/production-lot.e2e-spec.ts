@@ -25,6 +25,7 @@ import { ReconciliationService } from '../../src/modules/production/production-p
 import { ReversalService } from '../../src/modules/production/production-process/reversal.service';
 import { TransferService } from '../../src/modules/production/production-process/transfer.service';
 import { CloseService } from '../../src/modules/production/production-process/close.service';
+import { HistoryService } from '../../src/modules/production/production-process/history.service';
 import { PackageService } from '../../src/modules/production/production-package/package.service';
 import { WipService } from '../../src/modules/production/production-wip/wip.service';
 import { TraceabilityService } from '../../src/modules/production/traceability/traceability.service';
@@ -53,6 +54,7 @@ describe('Production lot traceability (cps_db_test)', () => {
   let packages: PackageService;
   let trace: TraceabilityService;
   let closes: CloseService;
+  let history: HistoryService;
   let lineId: string;
   let reasonId: string;
 
@@ -139,6 +141,7 @@ describe('Production lot traceability (cps_db_test)', () => {
     packages = app.get(PackageService);
     trace = app.get(TraceabilityService);
     closes = app.get(CloseService);
+    history = app.get(HistoryService);
 
     // Fixture: a product with an ACTIVE 4-step workflow ending in INCOME-FG.
     const flow = (
@@ -481,6 +484,35 @@ describe('Production lot traceability (cps_db_test)', () => {
       before.closedQty,
     ]);
     expect((await rec.reconcile(lineId)).issues).toEqual([]);
+  });
+
+  it('history — lists requests newest first with reversed/reversible flags', async () => {
+    const id = randomUUID();
+    await produce(1, { goodQty: 1 }, D2, id);
+    let h = await history.history(lineId);
+    expect(h[0]).toMatchObject({
+      requestId: id,
+      kind: 'PRODUCE',
+      goodQty: 1,
+      reversed: false,
+      reversible: true,
+    });
+    await rev.reverse(
+      lineId,
+      id,
+      { requestId: randomUUID(), reason: 'e2e' },
+      USER,
+    );
+    h = await history.history(lineId);
+    expect(h.find((e) => e.requestId === id)).toMatchObject({
+      reversed: true,
+      reversible: false,
+    });
+    // A transfer whose pieces were already used further on is listed but not reversible.
+    expect(
+      h.some((e) => e.kind === 'TRANSFER' && !e.reversed && !e.reversible),
+    ).toBe(true);
+    expect(h.some((e) => e.kind === 'RECEIVE')).toBe(true);
   });
 
   it('Case 13 — the order completes once every piece is received, rejected or closed', async () => {

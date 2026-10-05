@@ -22,6 +22,7 @@ import { TransferDto } from './dto/transfer.dto';
 import { CloseService } from './close.service';
 import { CloseRemainingDto } from './dto/close-remaining.dto';
 import { ReverseDto } from './dto/reverse.dto';
+import { HistoryService } from './history.service';
 import { ProcessService } from './process.service';
 import { ReconciliationService } from './reconciliation.service';
 import { ReversalService } from './reversal.service';
@@ -42,6 +43,7 @@ export class ProcessController {
     private readonly reversals: ReversalService,
     private readonly reconciliation: ReconciliationService,
     private readonly closes: CloseService,
+    private readonly histories: HistoryService,
   ) {}
 
   @Post('lines/:lineId/steps/:stepIndex/transfer')
@@ -109,6 +111,13 @@ export class ProcessController {
     @CurrentUser('id') userId: string,
   ) {
     return this.reversals.reverse(lineId, requestId, dto, userId);
+  }
+
+  /** Every produce/receive/transfer/close request of the line, newest first. */
+  @Get('lines/:lineId/history')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  history(@Param('lineId') lineId: string) {
+    return this.histories.history(lineId);
   }
 
   /** Consistency check of one order line (state vs ledger vs origins). */
