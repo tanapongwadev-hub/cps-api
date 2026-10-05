@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Query,
   UseGuards,
@@ -18,7 +19,10 @@ import { PRODUCTION_ORDER_PERMISSIONS } from '../../production-orders/production
 import { BoardService } from './board.service';
 import { ProduceDto } from './dto/produce.dto';
 import { TransferDto } from './dto/transfer.dto';
+import { ReverseDto } from './dto/reverse.dto';
 import { ProcessService } from './process.service';
+import { ReconciliationService } from './reconciliation.service';
+import { ReversalService } from './reversal.service';
 import { TransferService } from './transfer.service';
 
 /**
@@ -33,6 +37,8 @@ export class ProcessController {
     private readonly service: ProcessService,
     private readonly transfers: TransferService,
     private readonly boards: BoardService,
+    private readonly reversals: ReversalService,
+    private readonly reconciliation: ReconciliationService,
   ) {}
 
   @Post('lines/:lineId/steps/:stepIndex/transfer')
@@ -76,6 +82,25 @@ export class ProcessController {
       throw new BadRequestException('จำนวนต้องมากกว่า 0');
     }
     return this.service.allocationPreview(lineId, stepIndex, qty);
+  }
+
+  /** V10: take back a produce/transfer request whose pieces have not moved on. */
+  @Post('lines/:lineId/requests/:requestId/reverse')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
+  reverse(
+    @Param('lineId') lineId: string,
+    @Param('requestId', new ParseUUIDPipe()) requestId: string,
+    @Body() dto: ReverseDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.reversals.reverse(lineId, requestId, dto, userId);
+  }
+
+  /** Consistency check of one order line (state vs ledger vs origins). */
+  @Get('lines/:lineId/reconciliation')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  reconcile(@Param('lineId') lineId: string) {
+    return this.reconciliation.reconcile(lineId);
   }
 
   @Get('lines/:lineId/lots')

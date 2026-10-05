@@ -253,6 +253,7 @@ export class TraceabilityService {
        JOIN inventory.production_lots t ON t.id = s.target_lot_id
        WHERE t.production_order_line_id = $1
        GROUP BY s.target_lot_id, s.source_lot_id
+       HAVING SUM(s.qty) > 0
        ORDER BY s.source_lot_id`,
       [lineId],
     );
@@ -268,7 +269,7 @@ export class TraceabilityService {
        FROM inventory.production_lot_origins o
        JOIN inventory.production_lots l ON l.id = o.lot_id
        JOIN inventory.production_lots ol ON ol.id = o.origin_lot_id
-       WHERE l.production_order_line_id = $1
+       WHERE l.production_order_line_id = $1 AND o.qty > 0
        ORDER BY ol.production_date, ol.id`,
       [lineId],
     );

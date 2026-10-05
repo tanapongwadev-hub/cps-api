@@ -53,13 +53,18 @@ export class BoardService {
       new Map(rows.map((r) => [Number(r.step_index), r]));
     const wip = byStep(
       await this.dataSource.query<Agg[]>(
-        `SELECT step_index,
-                SUM(qty_in)::int AS input,
-                COALESCE(SUM(qty_remaining) FILTER (WHERE status = 'OPEN'), 0)::int AS waiting,
-                SUM(qty_rejected)::int AS rejected,
-                SUM(qty_closed)::int AS closed
-         FROM inventory.process_wip WHERE production_order_line_id = $1
-         GROUP BY step_index`,
+        // A reversed transfer closes its whole WIP row; it neither arrived
+        // nor was closed short, so it is left out of input/closed.
+        `SELECT w.step_index,
+                COALESCE(SUM(w.qty_in) FILTER (WHERE r.id IS NULL), 0)::int AS input,
+                COALESCE(SUM(w.qty_remaining) FILTER (WHERE w.status = 'OPEN'), 0)::int AS waiting,
+                SUM(w.qty_rejected)::int AS rejected,
+                COALESCE(SUM(w.qty_closed) FILTER (WHERE r.id IS NULL), 0)::int AS closed
+         FROM inventory.process_wip w
+         LEFT JOIN inventory.production_transactions r
+           ON r.target_wip_id = w.id AND r.transaction_type = 'REVERSAL'
+         WHERE w.production_order_line_id = $1
+         GROUP BY w.step_index`,
         [lineId],
       ),
     );
@@ -75,10 +80,13 @@ export class BoardService {
     );
     const transferred = byStep(
       await this.dataSource.query<Agg[]>(
-        `SELECT step_index, SUM(qty)::int AS transferred
-         FROM inventory.production_transactions
-         WHERE production_order_line_id = $1 AND transaction_type = 'TRANSFER'
-         GROUP BY step_index`,
+        `SELECT t.step_index, SUM(t.qty)::int AS transferred
+         FROM inventory.production_transactions t
+         LEFT JOIN inventory.production_transactions o ON o.id = t.reverses_transaction_id
+         WHERE t.production_order_line_id = $1
+           AND (t.transaction_type = 'TRANSFER'
+                OR (t.transaction_type = 'REVERSAL' AND o.transaction_type = 'TRANSFER'))
+         GROUP BY t.step_index`,
         [lineId],
       ),
     );

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { EntityManager, IsNull } from 'typeorm';
+import { EntityManager, IsNull, MoreThan } from 'typeorm';
 import {
   ProductionOrder,
   ProductionOrderLine,
@@ -209,9 +209,10 @@ export class LotService {
     return taken.map((t) => ({ originLotId: t.id, qty: t.qty }));
   }
 
+  /** Origin composition of a lot (rows reversed down to 0 are hidden). */
   originsOf(manager: EntityManager, lotId: string) {
     return manager.getRepository(ProductionLotOrigin).find({
-      where: { lotId },
+      where: { lotId, qty: MoreThan(0) },
       relations: ['originLot'],
       order: { originLotId: 'ASC' },
     });

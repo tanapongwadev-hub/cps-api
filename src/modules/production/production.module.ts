@@ -13,6 +13,8 @@ import { PackageController } from './production-package/package.controller';
 import { PackageService } from './production-package/package.service';
 import { BoardService } from './production-process/board.service';
 import { ProcessService } from './production-process/process.service';
+import { ReconciliationService } from './production-process/reconciliation.service';
+import { ReversalService } from './production-process/reversal.service';
 import { TransferService } from './production-process/transfer.service';
 import { LotService } from './production-lot/lot.service';
 import { LedgerService } from './production-transaction/ledger.service';
@@ -70,6 +72,8 @@ export const PRODUCTION_TRACE_ENTITIES = [
     ProcessService,
     TransferService,
     BoardService,
+    ReversalService,
+    ReconciliationService,
     PackageService,
     TraceabilityService,
   ],
