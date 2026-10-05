@@ -7,6 +7,8 @@ import {
   ProductionOrderLine,
 } from '../production-orders/production-order.entity';
 import { ProcessController } from './production-process/process.controller';
+import { TraceabilityController } from './traceability/traceability.controller';
+import { TraceabilityService } from './traceability/traceability.service';
 import { PackageController } from './production-package/package.controller';
 import { PackageService } from './production-package/package.service';
 import { BoardService } from './production-process/board.service';
@@ -60,7 +62,7 @@ export const PRODUCTION_TRACE_ENTITIES = [
       ProductWorkflow,
     ]),
   ],
-  controllers: [ProcessController, PackageController],
+  controllers: [ProcessController, PackageController, TraceabilityController],
   providers: [
     LedgerService,
     WipService,
@@ -69,6 +71,7 @@ export const PRODUCTION_TRACE_ENTITIES = [
     TransferService,
     BoardService,
     PackageService,
+    TraceabilityService,
   ],
   exports: [TypeOrmModule, LedgerService, WipService, LotService],
 })
