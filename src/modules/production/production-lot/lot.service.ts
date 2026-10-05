@@ -10,6 +10,7 @@ import {
   LotType,
   ProductionLot,
   ProductionLotOrigin,
+  ProductionLotSource,
 } from '../entities/production-lot.entity';
 import { WorkflowStepInfo } from '../workflow-steps';
 
@@ -113,6 +114,40 @@ export class LotService {
       [result.lot.id, qty],
     );
     return result;
+  }
+
+  /** Adds origin quantities to a (non-ORIGIN) lot's composition. */
+  async addOrigins(
+    manager: EntityManager,
+    lotId: string,
+    origins: Array<{ originLotId: string; qty: number }>,
+  ): Promise<void> {
+    for (const origin of origins) {
+      await manager.query(
+        `INSERT INTO inventory.production_lot_origins (lot_id, origin_lot_id, qty, qty_remaining)
+         VALUES ($1, $2, $3, $3)
+         ON CONFLICT (lot_id, origin_lot_id)
+         DO UPDATE SET qty = inventory.production_lot_origins.qty + EXCLUDED.qty,
+                       qty_remaining = inventory.production_lot_origins.qty_remaining + EXCLUDED.qty`,
+        [lotId, origin.originLotId, origin.qty],
+      );
+    }
+  }
+
+  /** Lineage edge: `qty` of `sourceLotId` went into `targetLotId`. */
+  async addSource(
+    manager: EntityManager,
+    targetLotId: string,
+    sourceLotId: string,
+    qty: number,
+    transactionId: string,
+  ): Promise<void> {
+    await manager.getRepository(ProductionLotSource).insert({
+      targetLotId,
+      sourceLotId,
+      qty,
+      transactionId,
+    });
   }
 
   originsOf(manager: EntityManager, lotId: string) {
