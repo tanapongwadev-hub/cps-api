@@ -1,9 +1,56 @@
 import {
+  allocateBySource,
   allocateFifo,
   InsufficientQuantityError,
   validateManualAllocation,
 } from './allocation';
 import { packageQrCode, splitIntoBoxes } from './packing';
+
+describe('allocateBySource (MANUAL at produce)', () => {
+  // WIP rows at a step in FIFO order; lot A arrived twice.
+  const rows = [
+    { id: 'w1', sourceId: 'A', remaining: 100 },
+    { id: 'w2', sourceId: 'B', remaining: 50 },
+    { id: 'w3', sourceId: 'A', remaining: 30 },
+    { id: 'w0', sourceId: null, remaining: 999 },
+  ];
+
+  it('draws each picked lot FIFO across its own rows only', () => {
+    expect(
+      allocateBySource(
+        rows,
+        [
+          { id: 'B', qty: 20 },
+          { id: 'A', qty: 110 },
+        ],
+        130,
+      ),
+    ).toEqual({
+      allocations: [
+        { id: 'w2', qty: 20 },
+        { id: 'w1', qty: 100 },
+        { id: 'w3', qty: 10 },
+      ],
+    });
+  });
+
+  it('rejects more than a lot holds across its rows', () => {
+    const result = allocateBySource(rows, [{ id: 'A', qty: 131 }], 131);
+    expect('error' in result && result.error).toContain('130');
+  });
+
+  it('rejects a sum that differs from the quantity', () => {
+    expect('error' in allocateBySource(rows, [{ id: 'B', qty: 10 }], 20)).toBe(
+      true,
+    );
+  });
+
+  it('ignores plan-release rows (no source lot) and unknown lots', () => {
+    expect('error' in allocateBySource(rows, [{ id: 'X', qty: 1 }], 1)).toBe(
+      true,
+    );
+  });
+});
 
 describe('packing', () => {
   it('scenario: FG 150 by 100 → BOX001 100 + BOX002 50', () => {

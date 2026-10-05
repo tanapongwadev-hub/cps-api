@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   Param,
   ParseIntPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
@@ -60,6 +62,20 @@ export class ProcessController {
     @CurrentUser('id') userId: string,
   ) {
     return this.service.produce(lineId, stepIndex, dto, userId);
+  }
+
+  /** Source lots waiting at a step (+ FIFO split of `qty`) for MANUAL produce. */
+  @Get('lines/:lineId/steps/:stepIndex/allocation-preview')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  allocationPreview(
+    @Param('lineId') lineId: string,
+    @Param('stepIndex', ParseIntPipe) stepIndex: number,
+    @Query('qty', new ParseIntPipe({ optional: true })) qty?: number,
+  ) {
+    if (qty !== undefined && qty < 1) {
+      throw new BadRequestException('จำนวนต้องมากกว่า 0');
+    }
+    return this.service.allocationPreview(lineId, stepIndex, qty);
   }
 
   @Get('lines/:lineId/lots')

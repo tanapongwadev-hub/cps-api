@@ -51,6 +51,45 @@ export function validateManualAllocation(
   return null;
 }
 
+/** A WIP row tagged with the lot it came from (null = plan release). */
+export interface SourcedRow extends AllocatableRow {
+  sourceId: string | null;
+}
+
+/**
+ * MANUAL at produce: the user picks source lots and quantities (`picks`,
+ * id = source lot id). Validates the picks against the per-lot totals of
+ * `rows`, then draws each pick FIFO from that lot's own rows (rows are given
+ * in FIFO order). Returns per-row allocations, or a Thai error message.
+ */
+export function allocateBySource(
+  rows: readonly SourcedRow[],
+  picks: readonly Allocation[],
+  qty: number,
+): { allocations: Allocation[] } | { error: string } {
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    if (row.sourceId === null || row.remaining <= 0) continue;
+    totals.set(row.sourceId, (totals.get(row.sourceId) ?? 0) + row.remaining);
+  }
+  const error = validateManualAllocation(
+    [...totals].map(([id, remaining]) => ({ id, remaining })),
+    picks,
+    qty,
+  );
+  if (error) return { error };
+  const allocations: Allocation[] = [];
+  for (const pick of picks) {
+    allocations.push(
+      ...allocateFifo(
+        rows.filter((r) => r.sourceId === pick.id),
+        pick.qty,
+      ),
+    );
+  }
+  return { allocations };
+}
+
 /**
  * FIFO: draw `qty` from `rows` in the order given (callers pass them already
  * sorted, e.g. WIP by received_at, id). Pieces are whole numbers; throws when

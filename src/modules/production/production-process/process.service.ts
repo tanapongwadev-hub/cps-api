@@ -2,12 +2,18 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { recordAuditEvent } from '../../../common/stock-ledger';
 import { ProductionOrderLine } from '../../production-orders/production-order.entity';
-import { allocateFifo } from '../domain/allocation';
+import {
+  Allocation,
+  allocateBySource,
+  allocateFifo,
+  InsufficientQuantityError,
+} from '../domain/allocation';
 import {
   ProductionDay,
   productionDayOf,
@@ -97,6 +103,17 @@ export class ProcessService {
       : productionDayOf(now);
     const dayError = validateProductionDay(day, now);
     if (dayError) throw new ConflictException(dayError);
+    const mode = dto.allocationMode ?? 'FIFO';
+    if (mode === 'MANUAL' && stepIndex === 0) {
+      throw new BadRequestException(
+        'ขั้นตอนแรกไม่มี Lot ต้นทางให้เลือก ใช้แบบ FIFO',
+      );
+    }
+    if (mode === 'MANUAL' && dto.goodQty < 1) {
+      throw new BadRequestException(
+        'เลือก Lot ต้นทางได้เมื่อมีจำนวนดีอย่างน้อย 1 ชิ้น',
+      );
+    }
 
     return this.dataSource.transaction(async (manager) => {
       const { line, order, steps } = await lockLotModelLine(manager, lineId);
@@ -136,6 +153,21 @@ export class ProcessService {
           `จำนวนเกินงานรอผลิต (รอผลิตอยู่ ${available} ชิ้น)`,
         );
       }
+      let manualGood: Allocation[] | null = null;
+      if (mode === 'MANUAL') {
+        const picked = allocateBySource(
+          rows.map((r) => ({
+            id: r.id,
+            sourceId: r.sourceLotId,
+            remaining: r.qtyRemaining,
+          })),
+          (dto.allocations ?? []).map((a) => ({ id: a.lotId, qty: a.qty })),
+          dto.goodQty,
+        );
+        if ('error' in picked) throw new ConflictException(picked.error);
+        manualGood = picked.allocations;
+      }
+
       const originsByWip = await this.wip.lockOrigins(
         manager,
         rows.map((r) => r.id),
@@ -167,10 +199,13 @@ export class ProcessService {
       const rejectOrigins = new Map<string, number>();
 
       for (const draw of draws) {
-        const allocations = allocateFifo(
-          rows.map((r) => ({ id: r.id, remaining: r.qtyRemaining })),
-          draw.qty,
-        );
+        const allocations =
+          draw.kind === 'GOOD' && manualGood
+            ? manualGood
+            : allocateFifo(
+                rows.map((r) => ({ id: r.id, remaining: r.qtyRemaining })),
+                draw.qty,
+              );
         for (const allocation of allocations) {
           const row = rows.find((r) => r.id === allocation.id)!;
           let origins: OriginQty[];
@@ -217,7 +252,7 @@ export class ProcessService {
               qty: allocation.qty,
               transactionDate: day.productionDate,
               shiftKey: day.shift,
-              allocationMode: 'FIFO',
+              allocationMode: draw.kind === 'GOOD' ? mode : 'FIFO',
               remark: dto.remark?.trim() || null,
               operatorId: userId,
             },
@@ -353,6 +388,142 @@ export class ProcessService {
         receivedQty: fresh.receivedQty,
         rejectedQty: fresh.rejectedQty,
       },
+    };
+  }
+
+  /**
+   * Read-only: the source lots waiting at a step (with their origin pieces),
+   * oldest first, plus — when `qty` is given — how FIFO would split it across
+   * them. Feeds the "เลือก Lot ต้นทาง" form; nothing is locked or written, so
+   * the real produce call re-validates everything.
+   */
+  async allocationPreview(lineId: string, stepIndex: number, qty?: number) {
+    const lineRows = (await this.dataSource.query(
+      `SELECT o.tracking_model FROM inventory.production_order_lines l
+       JOIN inventory.production_orders o ON o.id = l.production_order_id
+       WHERE l.id = $1`,
+      [lineId],
+    )) as unknown as Array<{ tracking_model: string }>;
+    if (!lineRows.length) {
+      throw new NotFoundException(`ไม่พบรายการสั่งผลิต id ${lineId}`);
+    }
+    if (lineRows[0].tracking_model !== 'LOT') {
+      throw new ConflictException('ใบสั่งผลิตนี้ใช้ระบบกล่องแบบเดิม');
+    }
+
+    const wipRows = (await this.dataSource.query(
+      `SELECT w.id, w.source_lot_id, w.qty_remaining
+       FROM inventory.process_wip w
+       WHERE w.production_order_line_id = $1 AND w.step_index = $2
+         AND w.status = 'OPEN' AND w.qty_remaining > 0
+       ORDER BY w.received_at, w.id`,
+      [lineId, stepIndex],
+    )) as unknown as Array<{
+      id: string;
+      source_lot_id: string | null;
+      qty_remaining: number;
+    }>;
+    const lots = (await this.dataSource.query(
+      `SELECT DISTINCT l.id, l.lot_no, l.production_date::text AS production_date,
+              l.shift_key
+       FROM inventory.process_wip w
+       JOIN inventory.production_lots l ON l.id = w.source_lot_id
+       WHERE w.production_order_line_id = $1 AND w.step_index = $2
+         AND w.status = 'OPEN' AND w.qty_remaining > 0`,
+      [lineId, stepIndex],
+    )) as unknown as Array<{
+      id: string;
+      lot_no: string;
+      production_date: string;
+      shift_key: string;
+    }>;
+    const origins = (await this.dataSource.query(
+      `SELECT w.source_lot_id, ol.lot_no, ol.production_date::text AS production_date,
+              ol.shift_key, SUM(o.qty_remaining)::int AS qty
+       FROM inventory.process_wip_origins o
+       JOIN inventory.process_wip w ON w.id = o.wip_id
+       JOIN inventory.production_lots ol ON ol.id = o.origin_lot_id
+       WHERE w.production_order_line_id = $1 AND w.step_index = $2
+         AND w.status = 'OPEN' AND o.qty_remaining > 0
+       GROUP BY w.source_lot_id, ol.id, ol.lot_no, ol.production_date, ol.shift_key
+       ORDER BY ol.production_date, ol.id`,
+      [lineId, stepIndex],
+    )) as unknown as Array<{
+      source_lot_id: string;
+      lot_no: string;
+      production_date: string;
+      shift_key: string;
+      qty: number;
+    }>;
+
+    // Source lots in FIFO order of their first waiting row.
+    const order: string[] = [];
+    const waiting = new Map<string, number>();
+    let planQty = 0;
+    for (const row of wipRows) {
+      const qtyLeft = Number(row.qty_remaining);
+      if (row.source_lot_id === null) {
+        planQty += qtyLeft;
+        continue;
+      }
+      const id = String(row.source_lot_id);
+      if (!waiting.has(id)) order.push(id);
+      waiting.set(id, (waiting.get(id) ?? 0) + qtyLeft);
+    }
+    const lotById = new Map(lots.map((l) => [String(l.id), l]));
+    const sources = order.map((id) => {
+      const lot = lotById.get(id)!;
+      return {
+        lotId: id,
+        lotNo: lot.lot_no,
+        productionDate: lot.production_date,
+        shift: lot.shift_key,
+        waitingQty: waiting.get(id)!,
+        origins: origins
+          .filter((o) => String(o.source_lot_id) === id)
+          .map((o) => ({
+            lotNo: o.lot_no,
+            productionDate: o.production_date,
+            shift: o.shift_key,
+            qty: Number(o.qty),
+          })),
+      };
+    });
+
+    let fifo: Array<{ lotId: string; qty: number }> | null = null;
+    let fifoError: string | null = null;
+    if (qty !== undefined) {
+      try {
+        const byRow = allocateFifo(
+          wipRows.map((r) => ({
+            id: String(r.id),
+            remaining: Number(r.qty_remaining),
+          })),
+          qty,
+        );
+        const sums = new Map<string, number>();
+        for (const a of byRow) {
+          const row = wipRows.find((r) => String(r.id) === a.id)!;
+          const key =
+            row.source_lot_id === null ? '' : String(row.source_lot_id);
+          sums.set(key, (sums.get(key) ?? 0) + a.qty);
+        }
+        fifo = [...sums]
+          .filter(([key]) => key !== '')
+          .map(([lotId, q]) => ({ lotId, qty: q }));
+      } catch (err) {
+        if (!(err instanceof InsufficientQuantityError)) throw err;
+        fifoError = `จำนวนเกินงานรอผลิต (รอผลิตอยู่ ${err.available} ชิ้น)`;
+      }
+    }
+
+    return {
+      stepIndex,
+      waitingQty: planQty + [...waiting.values()].reduce((a, b) => a + b, 0),
+      planQty,
+      sources,
+      fifo,
+      fifoError,
     };
   }
 

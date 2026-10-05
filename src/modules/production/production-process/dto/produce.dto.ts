@@ -15,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { SHIFTS, type Shift } from '../../domain/production-day';
+import { TransferAllocationDto } from './transfer.dto';
 
 export class RejectLineDto {
   @IsString()
@@ -49,6 +50,22 @@ export class ProduceDto {
   @ValidateNested({ each: true })
   @Type(() => RejectLineDto)
   rejects?: RejectLineDto[];
+
+  /**
+   * How good pieces pick their source lots: FIFO (default) or MANUAL, where
+   * `allocations` names source lots (lots of the previous step waiting here)
+   * and quantities adding up to `goodQty`. Rejects are always FIFO.
+   */
+  @IsOptional()
+  @IsIn(['FIFO', 'MANUAL'])
+  allocationMode?: 'FIFO' | 'MANUAL';
+
+  @ValidateIf((o: ProduceDto) => o.allocationMode === 'MANUAL')
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => TransferAllocationDto)
+  allocations?: TransferAllocationDto[];
 
   @IsOptional()
   @IsDateString({ strict: true })
