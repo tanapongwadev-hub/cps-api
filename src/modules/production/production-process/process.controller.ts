@@ -19,6 +19,8 @@ import { PRODUCTION_ORDER_PERMISSIONS } from '../../production-orders/production
 import { BoardService } from './board.service';
 import { ProduceDto } from './dto/produce.dto';
 import { TransferDto } from './dto/transfer.dto';
+import { CloseService } from './close.service';
+import { CloseRemainingDto } from './dto/close-remaining.dto';
 import { ReverseDto } from './dto/reverse.dto';
 import { ProcessService } from './process.service';
 import { ReconciliationService } from './reconciliation.service';
@@ -39,6 +41,7 @@ export class ProcessController {
     private readonly boards: BoardService,
     private readonly reversals: ReversalService,
     private readonly reconciliation: ReconciliationService,
+    private readonly closes: CloseService,
   ) {}
 
   @Post('lines/:lineId/steps/:stepIndex/transfer')
@@ -82,6 +85,18 @@ export class ProcessController {
       throw new BadRequestException('จำนวนต้องมากกว่า 0');
     }
     return this.service.allocationPreview(lineId, stepIndex, qty);
+  }
+
+  /** Close pieces waiting at a step that will not be produced (reason required). */
+  @Post('lines/:lineId/steps/:stepIndex/close-remaining')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
+  closeRemaining(
+    @Param('lineId') lineId: string,
+    @Param('stepIndex', ParseIntPipe) stepIndex: number,
+    @Body() dto: CloseRemainingDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.closes.closeRemaining(lineId, stepIndex, dto, userId);
   }
 
   /** V10: take back a produce/transfer request whose pieces have not moved on. */

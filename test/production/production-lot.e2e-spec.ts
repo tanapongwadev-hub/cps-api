@@ -24,6 +24,7 @@ import { ProcessService } from '../../src/modules/production/production-process/
 import { ReconciliationService } from '../../src/modules/production/production-process/reconciliation.service';
 import { ReversalService } from '../../src/modules/production/production-process/reversal.service';
 import { TransferService } from '../../src/modules/production/production-process/transfer.service';
+import { CloseService } from '../../src/modules/production/production-process/close.service';
 import { PackageService } from '../../src/modules/production/production-package/package.service';
 import { WipService } from '../../src/modules/production/production-wip/wip.service';
 import { TraceabilityService } from '../../src/modules/production/traceability/traceability.service';
@@ -51,6 +52,7 @@ describe('Production lot traceability (cps_db_test)', () => {
   let board: BoardService;
   let packages: PackageService;
   let trace: TraceabilityService;
+  let closes: CloseService;
   let lineId: string;
   let reasonId: string;
 
@@ -136,6 +138,7 @@ describe('Production lot traceability (cps_db_test)', () => {
     board = app.get(BoardService);
     packages = app.get(PackageService);
     trace = app.get(TraceabilityService);
+    closes = app.get(CloseService);
 
     // Fixture: a product with an ACTIVE 4-step workflow ending in INCOME-FG.
     const flow = (
@@ -451,7 +454,102 @@ describe('Production lot traceability (cps_db_test)', () => {
     expect(r.ok).toBe(true);
   });
 
-  it.todo(
-    'Case 13 — LOT order completes when every piece is received/rejected/closed (completion + short-close for LOT orders not built yet)',
-  );
+  it('close remaining — closes waiting pieces with a reason, and can be reversed', async () => {
+    const before = (await steps())[1];
+    expect(before.waitingQty).toBeGreaterThan(0);
+    const id = randomUUID();
+    const r = await closes.closeRemaining(
+      lineId,
+      1,
+      { requestId: id, qty: 1, reason: 'e2e: วัตถุดิบไม่พอ' },
+      USER,
+    );
+    expect([r.closedQty, r.step.waitingQty]).toEqual([
+      1,
+      before.waitingQty - 1,
+    ]);
+    expect((await steps())[1].closedQty).toBe(before.closedQty + 1);
+    await rev.reverse(
+      lineId,
+      id,
+      { requestId: randomUUID(), reason: 'e2e' },
+      USER,
+    );
+    const after = (await steps())[1];
+    expect([after.waitingQty, after.closedQty]).toEqual([
+      before.waitingQty,
+      before.closedQty,
+    ]);
+    expect((await rec.reconcile(lineId)).issues).toEqual([]);
+  });
+
+  it('Case 13 — the order completes once every piece is received, rejected or closed', async () => {
+    const orderStatus = async () =>
+      (
+        await q<{ status: string }>(
+          `SELECT o.status FROM inventory.production_orders o
+         JOIN inventory.production_order_lines l ON l.production_order_id = o.id WHERE l.id = $1`,
+          [lineId],
+        )
+      )[0].status;
+
+    // Wind the line down: WE/PS close what still waits and send on what is
+    // ready; CHECK produces everything it holds; FG receives it.
+    for (let s = 0; s < 3; s += 1) {
+      const step = (await steps())[s];
+      if (step.waitingQty > 0) {
+        if (s < 2) {
+          await closes.closeRemaining(
+            lineId,
+            s,
+            { requestId: randomUUID(), reason: 'e2e: ปิดยอด' },
+            USER,
+          );
+        } else {
+          await produce(s, { goodQty: step.waitingQty }, D2);
+        }
+      }
+      const ready = (await steps())[s].readyQty;
+      if (ready > 0) await transfer(s, { qty: ready }, T2);
+    }
+    const fgWaiting = (await steps())[3].waitingQty;
+    expect(fgWaiting).toBeGreaterThan(0);
+    await produce(3, { goodQty: fgWaiting }, D2);
+    // Received but not packed yet → still in progress.
+    expect(await orderStatus()).toBe('IN_PROGRESS');
+    const fgOpen = (await lotsAt(3)).filter((l) => l.remaining_qty > 0);
+    expect(fgOpen.length).toBeGreaterThan(0);
+    for (const lot of fgOpen) {
+      await packages.generate(
+        { requestId: randomUUID(), fgLotId: lot.id, packSize: 100 },
+        USER,
+      );
+    }
+
+    expect(await orderStatus()).toBe('COMPLETED');
+    const line = (
+      await q<{
+        quantity: number;
+        received_qty: number;
+        rejected_qty: number;
+        short_closed_quantity: number;
+      }>(
+        `SELECT quantity, received_qty, rejected_qty, short_closed_quantity FROM inventory.production_order_lines WHERE id = $1`,
+        [lineId],
+      )
+    )[0];
+    expect(
+      line.received_qty + line.rejected_qty + line.short_closed_quantity,
+    ).toBe(line.quantity);
+    expect((await rec.reconcile(lineId)).issues).toEqual([]);
+    // No new movement on a completed order.
+    await expectConflict(
+      closes.closeRemaining(
+        lineId,
+        0,
+        { requestId: randomUUID(), reason: 'e2e' },
+        USER,
+      ),
+    );
+  });
 });

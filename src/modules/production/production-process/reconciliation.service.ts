@@ -104,6 +104,19 @@ export class ReconciliationService {
          WHERE expected <> actual`,
       ],
       [
+        // Closed = short closes (net of their reversals) + whole rows closed
+        // by a reversed transfer (that REVERSAL row points at the WIP row).
+        'wip.closed = ledger closes',
+        `SELECT * FROM (
+           SELECT w.id::text AS ref, w.qty_closed AS expected,
+                  (${netSum('t.source_wip_id = w.id', `'SHORT_CLOSE'`)}
+                   - COALESCE((SELECT SUM(t.qty) FROM inventory.production_transactions t
+                               WHERE t.target_wip_id = w.id AND t.transaction_type = 'REVERSAL'), 0))::int AS actual
+           FROM inventory.process_wip w
+           WHERE w.production_order_line_id = $1) x
+         WHERE expected <> actual`,
+      ],
+      [
         'package.initial = SUM(package_sources.qty)',
         `SELECT p.qr_code AS ref, p.initial_qty AS expected, COALESCE(SUM(s.qty), 0)::int AS actual
          FROM inventory.production_packages p
@@ -120,11 +133,13 @@ export class ReconciliationService {
              (SELECT COALESCE(SUM(produced_qty), 0) FROM inventory.production_lots
                WHERE production_order_line_id = $1 AND lot_type IN ('FG','STORE'))::int AS received,
              (SELECT COALESCE(SUM(qty_rejected), 0) FROM inventory.process_wip
-               WHERE production_order_line_id = $1)::int AS rejected)
+               WHERE production_order_line_id = $1)::int AS rejected,
+             ${netSum('t.production_order_line_id = $1', `'SHORT_CLOSE'`)}::int AS closed)
          SELECT x.ref, x.expected, x.actual FROM inventory.production_order_lines l, c,
            LATERAL (VALUES ('produced_qty', l.produced_qty, c.produced),
                            ('received_qty', l.received_qty, c.received),
-                           ('rejected_qty', l.rejected_qty, c.rejected)) AS x(ref, expected, actual)
+                           ('rejected_qty', l.rejected_qty, c.rejected),
+                           ('short_closed_quantity', l.short_closed_quantity, c.closed)) AS x(ref, expected, actual)
          WHERE l.id = $1 AND x.expected <> x.actual`,
       ],
     ];

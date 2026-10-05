@@ -30,6 +30,7 @@ import {
 import { WipService } from '../production-wip/wip.service';
 import { WorkflowStepInfo } from '../workflow-steps';
 import { ProduceDto } from './dto/produce.dto';
+import { completeLotOrderIfDone } from './completion';
 import { lockLotModelLine, stepAt } from './line-context';
 
 export interface ProduceResult {
@@ -308,6 +309,7 @@ export class ProcessService {
         },
       });
 
+      await completeLotOrderIfDone(manager, order.id, userId, dto.requestId);
       return this.result(manager, line, step, lot?.id ?? null, false, isNew);
     });
   }

@@ -17,6 +17,7 @@ import { ProductionLot } from '../entities/production-lot.entity';
 import { ProductionTransaction } from '../entities/production-transaction.entity';
 import { LotService } from '../production-lot/lot.service';
 import { LedgerService } from '../production-transaction/ledger.service';
+import { completeLotOrderIfDone } from './completion';
 import { WipService } from '../production-wip/wip.service';
 import { WorkflowStepInfo } from '../workflow-steps';
 import { TransferDto } from './dto/transfer.dto';
@@ -180,6 +181,7 @@ export class TransferService {
         },
       });
 
+      await completeLotOrderIfDone(manager, order.id, userId, dto.requestId);
       return this.result(manager, line.id, step, next, dto.requestId, false);
     });
   }

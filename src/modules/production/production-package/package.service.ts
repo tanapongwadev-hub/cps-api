@@ -15,6 +15,7 @@ import {
   ProductionPackageSource,
 } from '../entities/production-package.entity';
 import { ProductionTransaction } from '../entities/production-transaction.entity';
+import { completeLotOrderIfDone } from '../production-process/completion';
 import { lockLotModelLine } from '../production-process/line-context';
 import { LotService } from '../production-lot/lot.service';
 import { LedgerService } from '../production-transaction/ledger.service';
@@ -189,6 +190,7 @@ export class PackageService {
         },
       });
 
+      await completeLotOrderIfDone(manager, order.id, userId, dto.requestId);
       return this.result(manager, lot, created, false);
     });
   }

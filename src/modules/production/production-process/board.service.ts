@@ -132,6 +132,7 @@ export class BoardService {
         lineNo: line.lineNo,
         orderId: line.productionOrderId,
         orderCode: line.order?.code ?? null,
+        orderStatus: line.order?.status ?? null,
         product: line.product
           ? {
               id: line.product.id,

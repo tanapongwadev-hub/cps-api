@@ -22,7 +22,13 @@ import { ReverseDto } from './dto/reverse.dto';
 import { lockLotModelLine } from './line-context';
 
 /** Movement types a user can take back (one produce or transfer request). */
-const REVERSIBLE = ['PROCESS_OUTPUT', 'FG_RECEIVE', 'REJECT', 'TRANSFER'];
+const REVERSIBLE = [
+  'PROCESS_OUTPUT',
+  'FG_RECEIVE',
+  'REJECT',
+  'TRANSFER',
+  'SHORT_CLOSE',
+];
 
 export interface ReverseResult {
   replayed: boolean;
@@ -134,11 +140,27 @@ export class ReversalService {
       );
 
       const day = productionDayOf(new Date());
-      const counters = { produced: 0, received: 0, rejected: 0 };
+      const counters = { produced: 0, received: 0, rejected: 0, closed: 0 };
       for (const tx of originals) {
         const origins = originsByTx.get(tx.id) ?? [];
         if (tx.transactionType === 'TRANSFER') {
           await this.undoTransfer(manager, tx, origins, wipOf, lotOf);
+        } else if (tx.transactionType === 'SHORT_CLOSE') {
+          // Closed pieces wait at the step again, with their origins.
+          const wip = wipOf(tx.sourceWipId);
+          wip.qtyClosed -= tx.qty;
+          wip.qtyRemaining += tx.qty;
+          wip.status = 'OPEN';
+          if (wip.sourceLotId) {
+            for (const o of origins) {
+              await manager.query(
+                `UPDATE inventory.process_wip_origins SET qty_remaining = qty_remaining + $3
+                 WHERE wip_id = $1 AND origin_lot_id = $2`,
+                [wip.id, o.originLotId, o.qty],
+              );
+            }
+          }
+          counters.closed += tx.qty;
         } else {
           await this.undoProduce(manager, tx, origins, wipOf, lotOf);
           const lot = tx.targetLotId ? lotOf(tx.targetLotId) : null;
@@ -204,6 +226,7 @@ export class ReversalService {
       line.producedQty -= counters.produced;
       line.receivedQty -= counters.received;
       line.rejectedQty -= counters.rejected;
+      line.shortClosedQuantity -= counters.closed;
       await manager.getRepository(ProductionOrderLine).save(line);
 
       await recordAuditEvent(manager, {
@@ -269,7 +292,7 @@ export class ReversalService {
         }
         continue;
       }
-      if (!tx.targetLotId) continue; // REJECT
+      if (!tx.targetLotId) continue; // REJECT / SHORT_CLOSE: nothing went on
       const perOrigin = need.get(tx.targetLotId) ?? new Map<string, number>();
       for (const o of originsByTx.get(tx.id) ?? []) {
         perOrigin.set(

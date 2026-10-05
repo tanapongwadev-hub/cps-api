@@ -12,6 +12,7 @@ import { TraceabilityService } from './traceability/traceability.service';
 import { PackageController } from './production-package/package.controller';
 import { PackageService } from './production-package/package.service';
 import { BoardService } from './production-process/board.service';
+import { CloseService } from './production-process/close.service';
 import { ProcessService } from './production-process/process.service';
 import { ReconciliationService } from './production-process/reconciliation.service';
 import { ReversalService } from './production-process/reversal.service';
@@ -74,6 +75,7 @@ export const PRODUCTION_TRACE_ENTITIES = [
     BoardService,
     ReversalService,
     ReconciliationService,
+    CloseService,
     PackageService,
     TraceabilityService,
   ],
