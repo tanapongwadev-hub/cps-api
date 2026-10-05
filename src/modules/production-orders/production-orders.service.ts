@@ -899,6 +899,7 @@ export class ProductionOrdersService {
       productionPlanId: order.productionPlanId,
       planCode: order.productionPlan?.code ?? null,
       status: order.status,
+      trackingModel: order.trackingModel,
       createdAt: order.createdAt,
       completedAt: order.completedAt,
       packetCount: packets.length,
