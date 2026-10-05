@@ -4,8 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import * as QRCode from 'qrcode';
 import { DataSource, EntityManager } from 'typeorm';
+import { qrSvgDataUrl as qrDataUrl } from '../../common/qr-svg';
 import { recordAuditEvent } from '../../common/stock-ledger';
 import {
   ProductWorkflow,
@@ -56,25 +56,6 @@ export interface StepView {
   index: number;
   code: string;
   name: string;
-}
-
-// A packet's QR content never changes, so its SVG image is cached in-process
-// instead of being regenerated for every page load (~300 per large order).
-// Bounded FIFO so a long-running process can't grow it without limit.
-const QR_CACHE_LIMIT = 20_000;
-const qrCache = new Map<string, string>();
-
-async function qrDataUrl(content: string): Promise<string> {
-  const cached = qrCache.get(content);
-  if (cached) return cached;
-  const svg = await QRCode.toString(content, { type: 'svg', margin: 1 });
-  const url = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-  if (qrCache.size >= QR_CACHE_LIMIT) {
-    const oldest: IteratorResult<string> = qrCache.keys().next();
-    if (!oldest.done) qrCache.delete(oldest.value);
-  }
-  qrCache.set(content, url);
-  return url;
 }
 
 export interface PacketTimelineEvent {

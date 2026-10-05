@@ -3,6 +3,29 @@ import {
   InsufficientQuantityError,
   validateManualAllocation,
 } from './allocation';
+import { packageQrCode, splitIntoBoxes } from './packing';
+
+describe('packing', () => {
+  it('scenario: FG 150 by 100 → BOX001 100 + BOX002 50', () => {
+    expect(splitIntoBoxes(150, 100)).toEqual([100, 50]);
+  });
+
+  it('exact multiples have no partial box; small quantities are one box', () => {
+    expect(splitIntoBoxes(300, 100)).toEqual([100, 100, 100]);
+    expect(splitIntoBoxes(30, 100)).toEqual([30]);
+  });
+
+  it('rejects invalid input', () => {
+    expect(() => splitIntoBoxes(0, 100)).toThrow();
+    expect(() => splitIntoBoxes(10, 0)).toThrow();
+    expect(() => splitIntoBoxes(10.5, 100)).toThrow();
+  });
+
+  it('formats the box QR code', () => {
+    expect(packageQrCode('FG-691002-001', 1)).toBe('QR-FG-691002-001-BOX001');
+    expect(packageQrCode('ST-691002-003', 12)).toBe('QR-ST-691002-003-BOX012');
+  });
+});
 
 describe('validateManualAllocation', () => {
   const lots = [
