@@ -103,7 +103,7 @@ export class ProcessController {
 
   /** V10: take back a produce/transfer request whose pieces have not moved on. */
   @Post('lines/:lineId/requests/:requestId/reverse')
-  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.REVERSE)
   reverse(
     @Param('lineId') lineId: string,
     @Param('requestId', new ParseUUIDPipe()) requestId: string,

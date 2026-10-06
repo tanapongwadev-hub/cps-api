@@ -56,6 +56,12 @@ export async function seed(dataSource: DataSource) {
         name_en: 'Issue',
         sort_order: 8,
       },
+      {
+        code: 'REVERSE',
+        name_th: 'กลับรายการ',
+        name_en: 'Reverse',
+        sort_order: 11,
+      },
     ];
 
     for (const action of actions) {
