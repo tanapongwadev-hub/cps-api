@@ -19,6 +19,7 @@ import {
   productionDayOf,
   validateProductionDay,
 } from '../domain/production-day';
+import { parseTransferBoxCode } from '../domain/packing';
 import { ProcessWip } from '../entities/process-wip.entity';
 import { LotType, ProductionLot } from '../entities/production-lot.entity';
 import { ProductionTransaction } from '../entities/production-transaction.entity';
@@ -32,6 +33,12 @@ import { WorkflowStepInfo } from '../workflow-steps';
 import { ProduceDto } from './dto/produce.dto';
 import { completeLotOrderIfDone } from './completion';
 import { lockLotModelLine, stepAt } from './line-context';
+import {
+  consumeFromBoxes,
+  recordBoxRows,
+  resolveBoxes,
+  type BoxConsumption,
+} from './wip-boxes';
 
 export interface ProduceResult {
   /** true when this requestId was already processed (nothing written). */
@@ -110,6 +117,12 @@ export class ProcessService {
         'ขั้นตอนแรกไม่มี Lot ต้นทางให้เลือก ใช้แบบ FIFO',
       );
     }
+    const scanned = dto.boxes ?? [];
+    if (scanned.length && (stepIndex === 0 || mode === 'MANUAL')) {
+      throw new BadRequestException(
+        'สแกนกล่องใช้ได้ตั้งแต่ขั้นตอนที่ 2 และใช้ร่วมกับการเลือก Lot ไม่ได้',
+      );
+    }
     if (mode === 'MANUAL' && dto.goodQty < 1) {
       throw new BadRequestException(
         'เลือก Lot ต้นทางได้เมื่อมีจำนวนดีอย่างน้อย 1 ชิ้น',
@@ -153,6 +166,36 @@ export class ProcessService {
         throw new ConflictException(
           `จำนวนเกินงานรอผลิต (รอผลิตอยู่ ${available} ชิ้น)`,
         );
+      }
+      // Box mode: only the scanned boxes may give pieces, in scan order.
+      const boxPlan = new Map<string, { order: number[]; left: number }>();
+      const boxWipOrder: string[] = [];
+      if (scanned.length) {
+        const resolved = await resolveBoxes(
+          manager,
+          line.id,
+          stepIndex,
+          scanned,
+          parseTransferBoxCode,
+        );
+        for (const b of resolved) {
+          if (!rows.some((r) => r.id === b.wipId)) {
+            throw new ConflictException(
+              `กล่อง ${b.qrCode} ไม่มีงานรอผลิตที่ขั้นตอนนี้`,
+            );
+          }
+          const plan = boxPlan.get(b.wipId) ?? { order: [], left: 0 };
+          plan.order.push(b.boxNo);
+          plan.left += b.left;
+          boxPlan.set(b.wipId, plan);
+          if (!boxWipOrder.includes(b.wipId)) boxWipOrder.push(b.wipId);
+        }
+        const inBoxes = [...boxPlan.values()].reduce((n, p) => n + p.left, 0);
+        if (dto.goodQty + rejectTotal > inBoxes) {
+          throw new ConflictException(
+            `จำนวนเกินชิ้นงานในกล่องที่สแกน (เหลือ ${inBoxes} ชิ้น)`,
+          );
+        }
       }
       let manualGood: Allocation[] | null = null;
       if (mode === 'MANUAL') {
@@ -203,14 +246,37 @@ export class ProcessService {
         const allocations =
           draw.kind === 'GOOD' && manualGood
             ? manualGood
-            : allocateFifo(
-                rows.map((r) => ({ id: r.id, remaining: r.qtyRemaining })),
-                draw.qty,
-              );
+            : boxPlan.size
+              ? allocateFifo(
+                  boxWipOrder.map((id) => ({
+                    id,
+                    remaining: Math.min(
+                      rows.find((r) => r.id === id)!.qtyRemaining,
+                      boxPlan.get(id)!.left,
+                    ),
+                  })),
+                  draw.qty,
+                )
+              : allocateFifo(
+                  rows.map((r) => ({ id: r.id, remaining: r.qtyRemaining })),
+                  draw.qty,
+                );
         for (const allocation of allocations) {
           const row = rows.find((r) => r.id === allocation.id)!;
           let origins: OriginQty[];
-          if (lotType === 'ORIGIN') {
+          let boxes: BoxConsumption | null = null;
+          if (row.qrCode) {
+            // Transferred batch: pieces come out box by box, with the boxes' own origins.
+            boxes = await consumeFromBoxes(
+              manager,
+              row.id,
+              allocation.qty,
+              boxPlan.get(row.id)?.order,
+            );
+            origins = boxes.origins;
+            const plan = boxPlan.get(row.id);
+            if (plan) plan.left -= allocation.qty;
+          } else if (lotType === 'ORIGIN') {
             // First step: good pieces become their own origin; rejected
             // pieces never became a lot, so they have no origin.
             origins =
@@ -253,12 +319,19 @@ export class ProcessService {
               qty: allocation.qty,
               transactionDate: day.productionDate,
               shiftKey: day.shift,
-              allocationMode: draw.kind === 'GOOD' ? mode : 'FIFO',
+              allocationMode:
+                draw.kind === 'GOOD'
+                  ? boxPlan.size
+                    ? 'MANUAL'
+                    : mode
+                  : 'FIFO',
               remark: dto.remark?.trim() || null,
               operatorId: userId,
             },
             origins,
           );
+
+          if (boxes) await recordBoxRows(manager, tx.id, row.id, boxes.boxes);
 
           const tally = draw.kind === 'GOOD' ? goodOrigins : rejectOrigins;
           for (const o of origins) {

@@ -11,6 +11,11 @@ import { WipService } from '../production-wip/wip.service';
 import { completeLotOrderIfDone } from './completion';
 import { CloseRemainingDto } from './dto/close-remaining.dto';
 import { lockLotModelLine, stepAt } from './line-context';
+import {
+  consumeFromBoxes,
+  recordBoxRows,
+  type BoxConsumption,
+} from './wip-boxes';
 
 export interface CloseRemainingResult {
   replayed: boolean;
@@ -82,18 +87,25 @@ export class CloseService {
         qty,
       )) {
         const row = rows.find((r) => r.id === a.id)!;
-        const origins = row.sourceLotId
-          ? await this.wip.takeOrigins(
-              manager,
-              originsByWip.get(row.id) ?? [],
-              a.qty,
-            )
-          : [];
+        let boxes: BoxConsumption | null = null;
+        let origins;
+        if (row.qrCode) {
+          boxes = await consumeFromBoxes(manager, row.id, a.qty);
+          origins = boxes.origins;
+        } else {
+          origins = row.sourceLotId
+            ? await this.wip.takeOrigins(
+                manager,
+                originsByWip.get(row.id) ?? [],
+                a.qty,
+              )
+            : [];
+        }
         row.qtyClosed += a.qty;
         row.qtyRemaining -= a.qty;
         if (row.qtyRemaining === 0) row.status = 'DONE';
         await wipRepo.save(row);
-        await this.ledger.write(
+        const closeTx = await this.ledger.write(
           manager,
           {
             requestId: dto.requestId,
@@ -112,6 +124,9 @@ export class CloseService {
           },
           origins,
         );
+        if (boxes) {
+          await recordBoxRows(manager, closeTx.id, row.id, boxes.boxes);
+        }
       }
 
       line.shortClosedQuantity += qty;

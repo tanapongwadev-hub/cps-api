@@ -5,8 +5,10 @@ import {
   validateManualAllocation,
 } from './allocation';
 import {
+  allocateToBoxes,
   packageQrCode,
   parseTransferBoxCode,
+  sliceOrigins,
   splitIntoBoxes,
   transferBoxCode,
   wipBoxes,
@@ -272,7 +274,7 @@ describe('transfer boxes (wipBoxes)', () => {
         { key: 'A', qty: 150 },
         { key: 'B', qty: 100 },
       ],
-      0,
+      [],
     );
     expect(boxes.map((b) => b.qty)).toEqual([100, 100, 50]);
     expect(boxes[0].origins).toEqual([{ key: 'A', qty: 100 }]);
@@ -284,17 +286,43 @@ describe('transfer boxes (wipBoxes)', () => {
     expect(boxes.every((b) => b.status === 'WAITING')).toBe(true);
   });
 
-  it('applies consumed pieces from the first box on', () => {
-    const boxes = wipBoxes(250, 100, [{ key: 'A', qty: 250 }], 130);
+  it('shows per-box progress and CLOSED for a closed-out batch', () => {
+    const boxes = wipBoxes(250, 100, [{ key: 'A', qty: 250 }], [100, 30, 0]);
     expect(boxes.map((b) => [b.doneQty, b.status])).toEqual([
       [100, 'DONE'],
       [30, 'PARTIAL'],
       [0, 'WAITING'],
     ]);
+    const closed = wipBoxes(250, 100, [{ key: 'A', qty: 250 }], [100], true);
+    expect(closed.map((b) => b.status)).toEqual(['DONE', 'CLOSED', 'CLOSED']);
+  });
+
+  it('draws from chosen boxes in order; null when they cannot cover it', () => {
+    const sizes = [100, 100, 50];
+    expect(allocateToBoxes(sizes, [0, 0, 0], 120, [3, 1])).toEqual([
+      { boxNo: 3, qty: 50 },
+      { boxNo: 1, qty: 70 },
+    ]);
+    expect(allocateToBoxes(sizes, [100, 20, 0], 80)).toEqual([
+      { boxNo: 2, qty: 80 },
+    ]);
+    expect(allocateToBoxes(sizes, [0, 0, 0], 60, [3])).toBeNull();
+  });
+
+  it('slices a box origin list by position', () => {
+    const o = [
+      { key: 'A', qty: 50 },
+      { key: 'B', qty: 50 },
+    ];
+    expect(sliceOrigins(o, 30, 40)).toEqual([
+      { key: 'A', qty: 20 },
+      { key: 'B', qty: 20 },
+    ]);
+    expect(sliceOrigins(o, 0, 100)).toEqual(o);
   });
 
   it('is one box without a pack size, and codes round-trip', () => {
-    expect(wipBoxes(70, null, [{ key: 'A', qty: 70 }], 0)).toHaveLength(1);
+    expect(wipBoxes(70, null, [{ key: 'A', qty: 70 }], [])).toHaveLength(1);
     const code = transferBoxCode('TQ-WE-691004-010-S2-01', 3);
     expect(code).toBe('TQ-WE-691004-010-S2-01-B003');
     expect(parseTransferBoxCode(code)).toEqual({

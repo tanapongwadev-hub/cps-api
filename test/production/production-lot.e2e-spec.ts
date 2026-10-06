@@ -451,6 +451,65 @@ describe('Production lot traceability (cps_db_test)', () => {
     ]);
   });
 
+  it('box mode — producing from scanned boxes draws exactly those boxes, and reversal puts the pieces back', async () => {
+    // A step after the first with several waiting boxes.
+    let stepIdx = -1;
+    let boxes: Awaited<ReturnType<typeof board.tags>> = [];
+    for (let i = 1; i < 4 && stepIdx < 0; i += 1) {
+      const all = (await board.tags(lineId, i)).filter(
+        (b) => b.status !== 'DONE' && b.status !== 'CLOSED',
+      );
+      if (all.length >= 2) {
+        stepIdx = i;
+        boxes = all;
+      }
+    }
+    expect(stepIdx).toBeGreaterThan(0);
+    // Not the first waiting box: FIFO would never pick it.
+    const pick = boxes[boxes.length - 1];
+    const left = pick.qty - pick.doneQty;
+    const untouched = boxes.filter((b) => b.qrCode !== pick.qrCode);
+
+    const id = randomUUID();
+    await produce(stepIdx, { goodQty: left, boxes: [pick.qrCode] }, D2, id);
+
+    const after = await board.tags(lineId, stepIdx);
+    const mine = after.find((b) => b.qrCode === pick.qrCode)!;
+    expect(mine.doneQty).toBe(pick.qty);
+    expect(mine.status).toBe('DONE');
+    for (const u of untouched) {
+      const now = after.find((b) => b.qrCode === u.qrCode)!;
+      expect(now.doneQty).toBe(u.doneQty);
+    }
+    const lotOrigins = await q<{ n: number }>(
+      `SELECT COALESCE(SUM(o.qty), 0)::int AS n FROM inventory.production_transaction_origins o
+       JOIN inventory.production_transactions t ON t.id = o.transaction_id
+       WHERE t.request_id = $1`,
+      [id],
+    );
+    expect(lotOrigins[0].n).toBe(left);
+
+    // A box that is not here, or one that is already used up, is refused.
+    await expectConflict(
+      produce(stepIdx, { goodQty: 1, boxes: [pick.qrCode] }, D2),
+    );
+    await expectConflict(
+      produce(stepIdx, { goodQty: 1, boxes: ['TQ-NOPE-S1-01-B001'] }, D2),
+    );
+
+    await rev.reverse(
+      lineId,
+      id,
+      { requestId: randomUUID(), reason: 'e2e: box mode' },
+      USER,
+    );
+    const back = (await board.tags(lineId, stepIdx)).find(
+      (b) => b.qrCode === pick.qrCode,
+    )!;
+    expect(back.doneQty).toBe(pick.doneQty);
+    expect((await rec.reconcile(lineId)).issues).toEqual([]);
+  });
+
   it('reconciliation — the whole line agrees with its ledger and origins', async () => {
     const r = await rec.reconcile(lineId);
     expect(r.issues).toEqual([]);

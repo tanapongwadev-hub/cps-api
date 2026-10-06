@@ -67,6 +67,17 @@ export class ProduceDto {
   @Type(() => TransferAllocationDto)
   allocations?: TransferAllocationDto[];
 
+  /**
+   * Box QR codes (`TQ-…-B001`) scanned at this step: the pieces are drawn
+   * from exactly these boxes, in scan order. Steps after the first only; the
+   * total (good + rejects) may be less than the boxes hold.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  boxes?: string[];
+
   @IsOptional()
   @IsDateString({ strict: true })
   productionDate?: string;

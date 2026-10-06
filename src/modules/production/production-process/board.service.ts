@@ -2,7 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ProductionOrderLine } from '../../production-orders/production-order.entity';
-import { loadWipBoxes, type TransferBox } from './wip-boxes';
+import { parseTransferBoxCode } from '../domain/packing';
+import { loadWipBoxes, resolveBoxes, type TransferBox } from './wip-boxes';
 import { loadWorkflowSteps } from '../workflow-steps';
 
 export interface BoardStep {
@@ -53,6 +54,33 @@ export class BoardService {
       rows.map((r) => String(r.id)),
     );
     return rows.flatMap((r) => byWip.get(String(r.id)) ?? []);
+  }
+
+  /**
+   * A scanned box at a step: checks it is here and still holds pieces, and
+   * says how many — the produce dialog adds it to the boxes being worked.
+   */
+  async boxAt(lineId: string, stepIndex: number, code: string) {
+    const manager = this.dataSource.manager;
+    const [found] = await resolveBoxes(
+      manager,
+      lineId,
+      stepIndex,
+      [code],
+      parseTransferBoxCode,
+    );
+    const box = (await loadWipBoxes(manager, [found.wipId]))
+      .get(found.wipId)!
+      .find((b) => b.boxNo === found.boxNo)!;
+    return {
+      qrCode: box.qrCode,
+      boxNo: box.boxNo,
+      boxCount: box.boxCount,
+      qty: box.qty,
+      left: found.left,
+      sourceLotNo: box.sourceLotNo,
+      origins: box.origins,
+    };
   }
 
   async board(lineId: string) {

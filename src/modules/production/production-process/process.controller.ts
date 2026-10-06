@@ -56,6 +56,18 @@ export class ProcessController {
     return this.boards.tags(lineId, stepIndex);
   }
 
+  /** Check a scanned box at a step before producing from it. */
+  @Get('lines/:lineId/steps/:stepIndex/boxes')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  boxAt(
+    @Param('lineId') lineId: string,
+    @Param('stepIndex', ParseIntPipe) stepIndex: number,
+    @Query('code') code: string,
+  ) {
+    if (!code?.trim()) throw new BadRequestException('ไม่มีรหัส QR กล่อง');
+    return this.boards.boxAt(lineId, stepIndex, code);
+  }
+
   @Post('lines/:lineId/steps/:stepIndex/transfer')
   @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
   transfer(

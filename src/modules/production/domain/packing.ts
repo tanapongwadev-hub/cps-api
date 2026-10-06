@@ -44,7 +44,7 @@ export function parseTransferBoxCode(
   return m ? { batchQr: m[1].toUpperCase(), boxNo: Number(m[2]) } : null;
 }
 
-export type WipBoxStatus = 'WAITING' | 'PARTIAL' | 'DONE';
+export type WipBoxStatus = 'WAITING' | 'PARTIAL' | 'DONE' | 'CLOSED';
 
 export interface WipBox<K> {
   boxNo: number;
@@ -56,26 +56,19 @@ export interface WipBox<K> {
   origins: Array<{ key: K; qty: number }>;
 }
 
-/**
- * The boxes of one WIP row (a transferred batch): `qtyIn` pieces split into
- * boxes of `packSize` (full ones first, then a partial one). Origins are
- * dealt out in order (oldest first), the same order the row gives its pieces
- * up. `consumed` (used + rejected + closed) is applied from the first box on —
- * the row hands out pieces FIFO, so box 1 is worked on first. Boxes are
- * computed, never stored, so reversals need no bookkeeping.
- */
-export function wipBoxes<K>(
-  qtyIn: number,
-  packSize: number | null,
+/** Box sizes of a batch: full boxes of `packSize`, then a partial one. */
+export function boxSizes(qtyIn: number, packSize: number | null): number[] {
+  return packSize && packSize > 0 ? splitIntoBoxes(qtyIn, packSize) : [qtyIn];
+}
+
+/** Splits an origin list (oldest first) into the nominal origins of each box. */
+export function dealOrigins<K>(
+  sizes: number[],
   origins: Array<{ key: K; qty: number }>,
-  consumed: number,
-): WipBox<K>[] {
-  const sizes =
-    packSize && packSize > 0 ? splitIntoBoxes(qtyIn, packSize) : [qtyIn];
+): Array<Array<{ key: K; qty: number }>> {
   const pool = origins.map((o) => ({ ...o }));
   let at = 0;
-  let left = consumed;
-  return sizes.map((qty, i) => {
+  return sizes.map((qty) => {
     const boxOrigins: Array<{ key: K; qty: number }> = [];
     let need = qty;
     while (need > 0 && at < pool.length) {
@@ -85,14 +78,89 @@ export function wipBoxes<K>(
       need -= take;
       if (pool[at].qty === 0) at += 1;
     }
-    const doneQty = Math.max(0, Math.min(qty, left));
-    left -= doneQty;
+    return boxOrigins;
+  });
+}
+
+/** The origin pieces at positions [from, from+len) of one box's origin list. */
+export function sliceOrigins<K>(
+  origins: Array<{ key: K; qty: number }>,
+  from: number,
+  len: number,
+): Array<{ key: K; qty: number }> {
+  const out: Array<{ key: K; qty: number }> = [];
+  let skip = from;
+  let need = len;
+  for (const o of origins) {
+    if (need <= 0) break;
+    if (skip >= o.qty) {
+      skip -= o.qty;
+      continue;
+    }
+    const take = Math.min(o.qty - skip, need);
+    out.push({ key: o.key, qty: take });
+    need -= take;
+    skip = 0;
+  }
+  return out;
+}
+
+/**
+ * Draws `qty` pieces from boxes: `order` lists box numbers (1-based) in the
+ * order to work them (default: all, ascending); each gives what it has left.
+ * Returns null when the chosen boxes cannot cover `qty`.
+ */
+export function allocateToBoxes(
+  sizes: number[],
+  done: number[],
+  qty: number,
+  order?: number[],
+): Array<{ boxNo: number; qty: number }> | null {
+  const sequence = order ?? sizes.map((_, i) => i + 1);
+  const out: Array<{ boxNo: number; qty: number }> = [];
+  let need = qty;
+  for (const boxNo of sequence) {
+    if (need <= 0) break;
+    const left = (sizes[boxNo - 1] ?? 0) - (done[boxNo - 1] ?? 0);
+    if (left <= 0) continue;
+    const take = Math.min(left, need);
+    out.push({ boxNo, qty: take });
+    need -= take;
+  }
+  return need > 0 ? null : out;
+}
+
+/**
+ * The boxes of one WIP row (a transferred batch): `qtyIn` pieces split into
+ * boxes of `packSize` (full first, then a partial one), origins dealt out
+ * oldest first. `done[i]` is what box i+1 already gave (produced, scrapped,
+ * closed). `closed`: the row was closed out (e.g. its transfer reversed), so
+ * unfinished boxes are CLOSED rather than waiting.
+ */
+export function wipBoxes<K>(
+  qtyIn: number,
+  packSize: number | null,
+  origins: Array<{ key: K; qty: number }>,
+  done: number[],
+  closed = false,
+): WipBox<K>[] {
+  const sizes = boxSizes(qtyIn, packSize);
+  const dealt = dealOrigins(sizes, origins);
+  return sizes.map((qty, i) => {
+    const doneQty = Math.max(0, Math.min(qty, done[i] ?? 0));
     return {
       boxNo: i + 1,
       qty,
       doneQty,
-      status: doneQty === 0 ? 'WAITING' : doneQty < qty ? 'PARTIAL' : 'DONE',
-      origins: boxOrigins,
+      status:
+        doneQty === qty
+          ? 'DONE'
+          : closed
+            ? 'CLOSED'
+            : doneQty === 0
+              ? 'WAITING'
+              : 'PARTIAL',
+      origins: dealt[i],
     };
   });
 }

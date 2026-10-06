@@ -24,6 +24,7 @@ import {
 import { LedgerService } from '../production-transaction/ledger.service';
 import { ReverseDto } from './dto/reverse.dto';
 import { lockLotModelLine } from './line-context';
+import { mirrorBoxRows } from './wip-boxes';
 
 /** Movement types a user can take back (one produce or transfer request). */
 const REVERSIBLE = [
@@ -214,6 +215,10 @@ export class ReversalService {
           },
           origins.map((o) => ({ originLotId: o.originLotId, qty: -o.qty })),
         );
+        if (tx.transactionType !== 'TRANSFER') {
+          // Pieces go back into the same boxes they came out of.
+          await mirrorBoxRows(manager, tx.id, reversal.id);
+        }
         if (
           tx.transactionType !== 'TRANSFER' &&
           tx.transactionType !== 'REJECT' &&
