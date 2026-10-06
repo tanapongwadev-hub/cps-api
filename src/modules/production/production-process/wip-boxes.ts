@@ -5,6 +5,7 @@ import {
   allocateToBoxes,
   boxSizes,
   dealOrigins,
+  parseTransferBoxCode,
   sliceOrigins,
   transferBoxCode,
   wipBoxes,
@@ -13,18 +14,29 @@ import {
 import type { OriginQty } from '../production-transaction/ledger.service';
 
 export interface TransferBox {
-  /** QR content of the box: {batch QR}-B{nnn}. */
+  /**
+   * The box's current QR: {batch QR}-B{nnn}, plus -R{n} once pieces were
+   * taken out of it (the label is reprinted with the pieces that stay).
+   */
   qrCode: string;
   /** data: URL (SVG) */
   qrImage: string;
+  /** {batch QR}-B{nnn} — the box as first labelled. */
+  baseCode: string;
+  /** How many times the box was split (pieces taken, rest stays). */
+  revision: number;
   batchQr: string;
   wipId: string;
   sourceLotNo: string;
   boxNo: number;
   boxCount: number;
+  /** Pieces the box held when sent. */
   qty: number;
   doneQty: number;
+  /** Pieces still in the box now (qty - doneQty; 0 once closed out). */
+  left: number;
   status: WipBoxStatus;
+  /** Origins of the pieces the box was sent with. */
   origins: Array<{ lotNo: string; qty: number }>;
 }
 
@@ -40,6 +52,8 @@ interface WipBoxState {
   origins: Array<{ key: string; lotNo: string; qty: number }>;
   /** Pieces already taken out of each box (index = box no - 1). */
   done: number[];
+  /** Times each box was split (net of reversals). */
+  rev: number[];
 }
 
 /**
@@ -85,11 +99,17 @@ async function loadBoxStates(
     qty: number;
   }>;
   const boxRows = (await manager.query(
-    `SELECT wip_id, box_no, SUM(qty)::int AS qty
+    `SELECT wip_id, box_no, SUM(qty)::int AS qty,
+            SUM(CASE WHEN qty > 0 THEN 1 ELSE -1 END)::int AS rev
      FROM inventory.production_transaction_boxes
      WHERE wip_id = ANY($1::bigint[]) GROUP BY wip_id, box_no`,
     [ids],
-  )) as unknown as Array<{ wip_id: string; box_no: number; qty: number }>;
+  )) as unknown as Array<{
+    wip_id: string;
+    box_no: number;
+    qty: number;
+    rev: number;
+  }>;
   // Ledger consumption of the row (net of reversals), to find legacy usage.
   const ledger = (await manager.query(
     `SELECT t.source_wip_id AS wip_id, COALESCE(SUM(t.qty), 0)::int AS qty
@@ -109,10 +129,12 @@ async function loadBoxStates(
       row.pack_size === null ? null : Number(row.pack_size),
     );
     const done = sizes.map(() => 0);
+    const rev = sizes.map(() => 0);
     let explained = 0;
     for (const b of boxRows) {
       if (String(b.wip_id) !== String(row.id)) continue;
       done[Number(b.box_no) - 1] = Number(b.qty);
+      rev[Number(b.box_no) - 1] = Math.max(0, Number(b.rev));
       explained += Number(b.qty);
     }
     const ledgerQty = Number(
@@ -139,6 +161,7 @@ async function loadBoxStates(
           qty: Number(o.qty),
         })),
       done,
+      rev,
     });
   }
   return states;
@@ -167,10 +190,13 @@ export async function loadWipBoxes(
       st.wipId,
       await Promise.all(
         boxes.map(async (b) => {
-          const code = transferBoxCode(st.qrCode, b.boxNo);
+          const revision = st.rev[b.boxNo - 1] ?? 0;
+          const code = transferBoxCode(st.qrCode, b.boxNo, revision);
           return {
             qrCode: code,
             qrImage: await qrSvgDataUrl(code),
+            baseCode: transferBoxCode(st.qrCode, b.boxNo),
+            revision,
             batchQr: st.qrCode,
             wipId: st.wipId,
             sourceLotNo: st.sourceLotNo,
@@ -178,6 +204,7 @@ export async function loadWipBoxes(
             boxCount: boxes.length,
             qty: b.qty,
             doneQty: b.doneQty,
+            left: b.status === 'CLOSED' ? 0 : Math.max(0, b.qty - b.doneQty),
             status: b.status,
             origins: b.origins.map((o) => ({
               lotNo: lotNoOf.get(o.key) ?? o.key,
@@ -275,28 +302,60 @@ export async function mirrorBoxRows(
   );
 }
 
+export interface StepBox {
+  wipId: string;
+  boxNo: number;
+  /** Current QR (with -R{n} after a split). */
+  qrCode: string;
+  left: number;
+}
+
 /**
- * Boxes of a step that still hold pieces, looked up by scanned QR codes
- * (in scan order) — used by produce to work specific boxes.
+ * Boxes at a step that still hold pieces, in FIFO order: batches by arrival
+ * (oldest first), boxes of a batch by number. Scanning must follow this order.
+ */
+export async function fifoBoxes(
+  manager: EntityManager,
+  lineId: string,
+  stepIndex: number,
+): Promise<StepBox[]> {
+  const rows = (await manager.query(
+    `SELECT id FROM inventory.process_wip
+     WHERE production_order_line_id = $1 AND step_index = $2
+       AND status = 'OPEN' AND qr_code IS NOT NULL
+     ORDER BY received_at, id`,
+    [lineId, stepIndex],
+  )) as unknown as Array<{ id: string }>;
+  const byWip = await loadWipBoxes(
+    manager,
+    rows.map((r) => String(r.id)),
+  );
+  return rows.flatMap((r) =>
+    (byWip.get(String(r.id)) ?? [])
+      .filter((b) => b.left > 0 && b.status !== 'CLOSED')
+      .map((b) => ({
+        wipId: b.wipId,
+        boxNo: b.boxNo,
+        qrCode: b.qrCode,
+        left: b.left,
+      })),
+  );
+}
+
+/**
+ * Looks up scanned box QR codes (in scan order) at a step. A code of a
+ * superseded label (the box was split since) is refused with the current one.
  */
 export async function resolveBoxes(
   manager: EntityManager,
   lineId: string,
   stepIndex: number,
   codes: string[],
-  parse: (code: string) => { batchQr: string; boxNo: number } | null,
-): Promise<
-  Array<{ wipId: string; boxNo: number; qrCode: string; left: number }>
-> {
-  const out: Array<{
-    wipId: string;
-    boxNo: number;
-    qrCode: string;
-    left: number;
-  }> = [];
+): Promise<StepBox[]> {
+  const out: StepBox[] = [];
   const seen = new Set<string>();
   for (const code of codes) {
-    const ref = parse(code);
+    const ref = parseTransferBoxCode(code);
     if (!ref) throw new ConflictException(`QR กล่อง "${code}" ไม่ถูกต้อง`);
     const key = `${ref.batchQr}#${ref.boxNo}`;
     if (seen.has(key)) {
@@ -311,24 +370,40 @@ export async function resolveBoxes(
     if (!wip.length) {
       throw new ConflictException(`กล่อง ${code} ไม่ได้อยู่ที่ขั้นตอนนี้`);
     }
-    const state = (await loadBoxStates(manager, [String(wip[0].id)])).get(
-      String(wip[0].id),
-    );
-    const sizes = state ? boxSizes(state.qtyIn, state.packSize) : [];
-    const size = sizes[ref.boxNo - 1];
-    if (!state || !size) {
-      throw new ConflictException(`ไม่พบกล่อง ${code}`);
-    }
-    const left = state.closedOut ? 0 : size - state.done[ref.boxNo - 1];
-    if (left <= 0) {
+    const box = (await loadWipBoxes(manager, [String(wip[0].id)]))
+      .get(String(wip[0].id))
+      ?.find((b) => b.boxNo === ref.boxNo);
+    if (!box) throw new ConflictException(`ไม่พบกล่อง ${code}`);
+    if (box.left <= 0) {
       throw new ConflictException(`กล่อง ${code} ไม่มีชิ้นงานเหลือให้ผลิต`);
     }
+    if (box.qrCode !== code.trim().toUpperCase()) {
+      throw new ConflictException(
+        `QR ${code} เป็นป้ายเก่าของกล่องที่ถูกแบ่งแล้ว — ใช้ป้ายใหม่ ${box.qrCode} (เหลือ ${box.left} ชิ้น)`,
+      );
+    }
     out.push({
-      wipId: String(wip[0].id),
-      boxNo: ref.boxNo,
-      qrCode: code.trim().toUpperCase(),
-      left,
+      wipId: box.wipId,
+      boxNo: box.boxNo,
+      qrCode: box.qrCode,
+      left: box.left,
     });
   }
   return out;
+}
+
+/** Scanned boxes must be the next ones in FIFO order, with no gap. */
+export function assertFifoScan(fifo: StepBox[], scanned: StepBox[]): void {
+  scanned.forEach((box, i) => {
+    const expected = fifo[i];
+    if (
+      !expected ||
+      expected.wipId !== box.wipId ||
+      expected.boxNo !== box.boxNo
+    ) {
+      throw new ConflictException(
+        `ต้องสแกนตามลำดับ FIFO — กล่องที่ต้องใช้${i === 0 ? 'ก่อน' : 'ถัดไป'}คือ ${expected?.qrCode ?? '(ไม่มี)'}`,
+      );
+    }
+  });
 }

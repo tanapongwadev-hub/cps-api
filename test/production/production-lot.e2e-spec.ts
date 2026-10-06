@@ -451,62 +451,93 @@ describe('Production lot traceability (cps_db_test)', () => {
     ]);
   });
 
-  it('box mode — producing from scanned boxes draws exactly those boxes, and reversal puts the pieces back', async () => {
-    // A step after the first with several waiting boxes.
+  it('box mode — scans follow FIFO, a split box gets a new QR, reversal restores the old one', async () => {
+    // A step after the first with several boxes still waiting.
+    const open = (rows: Awaited<ReturnType<typeof board.tags>>) =>
+      rows.filter((r) => r.left > 0 && r.status !== 'CLOSED');
     let stepIdx = -1;
-    let boxes: Awaited<ReturnType<typeof board.tags>> = [];
     for (let i = 1; i < 4 && stepIdx < 0; i += 1) {
-      const all = (await board.tags(lineId, i)).filter(
-        (b) => b.status !== 'DONE' && b.status !== 'CLOSED',
-      );
-      if (all.length >= 2) {
-        stepIdx = i;
-        boxes = all;
-      }
+      if (open(await board.tags(lineId, i)).length >= 2) stepIdx = i;
     }
     expect(stepIdx).toBeGreaterThan(0);
-    // Not the first waiting box: FIFO would never pick it.
-    const pick = boxes[boxes.length - 1];
-    const left = pick.qty - pick.doneQty;
-    const untouched = boxes.filter((b) => b.qrCode !== pick.qrCode);
 
-    const id = randomUUID();
-    await produce(stepIdx, { goodQty: left, boxes: [pick.qrCode] }, D2, id);
+    const first = (await board.nextBox(lineId, stepIdx))!;
+    const other = open(await board.tags(lineId, stepIdx)).find(
+      (r) => r.qrCode !== first.qrCode,
+    )!;
+    expect(first.left).toBeGreaterThanOrEqual(2);
 
-    const after = await board.tags(lineId, stepIdx);
-    const mine = after.find((b) => b.qrCode === pick.qrCode)!;
-    expect(mine.doneQty).toBe(pick.qty);
-    expect(mine.status).toBe('DONE');
-    for (const u of untouched) {
-      const now = after.find((b) => b.qrCode === u.qrCode)!;
-      expect(now.doneQty).toBe(u.doneQty);
-    }
-    const lotOrigins = await q<{ n: number }>(
-      `SELECT COALESCE(SUM(o.qty), 0)::int AS n FROM inventory.production_transaction_origins o
-       JOIN inventory.production_transactions t ON t.id = o.transaction_id
-       WHERE t.request_id = $1`,
-      [id],
-    );
-    expect(lotOrigins[0].n).toBe(left);
-
-    // A box that is not here, or one that is already used up, is refused.
+    // Skipping the FIFO box is refused, both by produce and by the scan check.
     await expectConflict(
-      produce(stepIdx, { goodQty: 1, boxes: [pick.qrCode] }, D2),
+      produce(stepIdx, { goodQty: 1, boxes: [other.qrCode] }, D2),
     );
+    await expectConflict(board.boxAt(lineId, stepIdx, other.qrCode, []));
     await expectConflict(
       produce(stepIdx, { goodQty: 1, boxes: ['TQ-NOPE-S1-01-B001'] }, D2),
     );
 
-    await rev.reverse(
-      lineId,
-      id,
-      { requestId: randomUUID(), reason: 'e2e: box mode' },
-      USER,
+    // Take half of the FIFO box: it is split, the rest keeps a new QR.
+    const half = Math.floor(first.left / 2);
+    const id1 = randomUUID();
+    const res = (await produce(
+      stepIdx,
+      { goodQty: half, boxes: [first.qrCode] },
+      D2,
+      id1,
+    )) as {
+      splits?: Array<{
+        qrCode: string;
+        left: number;
+        status: string;
+        revision: number;
+      }>;
+    };
+    expect(res.splits).toHaveLength(1);
+    const split = res.splits![0];
+    const baseCode = first.qrCode.replace(/-R\d+$/, '');
+    expect(split.revision).toBe(first.revision + 1);
+    expect(split.qrCode).toBe(`${baseCode}-R${split.revision}`);
+    expect(split.left).toBe(first.left - half);
+    expect(split.status).toBe('PARTIAL');
+
+    // The old label no longer works; the new one does and is next in FIFO.
+    await expectConflict(
+      produce(stepIdx, { goodQty: 1, boxes: [first.qrCode] }, D2),
     );
-    const back = (await board.tags(lineId, stepIdx)).find(
-      (b) => b.qrCode === pick.qrCode,
+    expect((await board.nextBox(lineId, stepIdx))!.qrCode).toBe(split.qrCode);
+    const scan = (await trace.scan(first.qrCode)) as unknown as {
+      box: { supersededBy: string | null; left: number };
+    };
+    expect(scan.box.supersededBy).toBe(split.qrCode);
+    expect(scan.box.left).toBe(split.left);
+
+    // Finish the box with its new QR.
+    const id2 = randomUUID();
+    await produce(
+      stepIdx,
+      { goodQty: split.left, boxes: [split.qrCode] },
+      D2,
+      id2,
+    );
+    const done = (await board.tags(lineId, stepIdx)).find(
+      (r) => r.baseCode === baseCode,
     )!;
-    expect(back.doneQty).toBe(pick.doneQty);
+    expect(done.status).toBe('DONE');
+
+    // Undo both (newest first): the box is back as it was, old QR valid again.
+    for (const id of [id2, id1]) {
+      await rev.reverse(
+        lineId,
+        id,
+        { requestId: randomUUID(), reason: 'e2e: box mode' },
+        USER,
+      );
+    }
+    const back = (await board.tags(lineId, stepIdx)).find(
+      (r) => r.baseCode === baseCode,
+    )!;
+    expect(back.qrCode).toBe(first.qrCode);
+    expect(back.left).toBe(first.left);
     expect((await rec.reconcile(lineId)).issues).toEqual([]);
   });
 
@@ -761,7 +792,7 @@ describe('Production lot traceability (cps_db_test)', () => {
     const mine = list.filter((t) => t.batchQr === tag.qr_code);
     expect(mine.length).toBeGreaterThan(0);
     for (const b of mine) {
-      expect(b.qrCode).toBe(
+      expect(b.baseCode).toBe(
         `${tag.qr_code}-B${String(b.boxNo).padStart(3, '0')}`,
       );
       expect(b.qrImage).toMatch(/^data:image\/svg\+xml/);

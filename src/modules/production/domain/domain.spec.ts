@@ -328,6 +328,15 @@ describe('transfer boxes (wipBoxes)', () => {
     expect(parseTransferBoxCode(code)).toEqual({
       batchQr: 'TQ-WE-691004-010-S2-01',
       boxNo: 3,
+      revision: 0,
+    });
+    expect(transferBoxCode('TQ-WE-691004-010-S2-01', 3, 2)).toBe(
+      'TQ-WE-691004-010-S2-01-B003-R2',
+    );
+    expect(parseTransferBoxCode('tq-WE-691004-010-S2-01-b003-r2')).toEqual({
+      batchQr: 'TQ-WE-691004-010-S2-01',
+      boxNo: 3,
+      revision: 2,
     });
     expect(parseTransferBoxCode('TQ-WE-691004-010-S2-01')).toBeNull();
   });

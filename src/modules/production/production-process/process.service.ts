@@ -19,7 +19,6 @@ import {
   productionDayOf,
   validateProductionDay,
 } from '../domain/production-day';
-import { parseTransferBoxCode } from '../domain/packing';
 import { ProcessWip } from '../entities/process-wip.entity';
 import { LotType, ProductionLot } from '../entities/production-lot.entity';
 import { ProductionTransaction } from '../entities/production-transaction.entity';
@@ -34,10 +33,14 @@ import { ProduceDto } from './dto/produce.dto';
 import { completeLotOrderIfDone } from './completion';
 import { lockLotModelLine, stepAt } from './line-context';
 import {
+  assertFifoScan,
   consumeFromBoxes,
+  fifoBoxes,
+  loadWipBoxes,
   recordBoxRows,
   resolveBoxes,
   type BoxConsumption,
+  type TransferBox,
 } from './wip-boxes';
 
 export interface ProduceResult {
@@ -58,6 +61,8 @@ export interface ProduceResult {
     origins: Array<{ lotNo: string; qty: number; qtyRemaining: number }>;
   } | null;
   step: { stepIndex: number; code: string; name: string; waitingQty: number };
+  /** Boxes split by this record (pieces left, new QR to print). */
+  splits?: TransferBox[];
   line: {
     id: string;
     producedQty: number;
@@ -176,8 +181,9 @@ export class ProcessService {
           line.id,
           stepIndex,
           scanned,
-          parseTransferBoxCode,
         );
+        // Boxes are worked oldest first: the scan must follow FIFO, no gaps.
+        assertFifoScan(await fifoBoxes(manager, line.id, stepIndex), resolved);
         for (const b of resolved) {
           if (!rows.some((r) => r.id === b.wipId)) {
             throw new ConflictException(
@@ -239,6 +245,7 @@ export class ProcessService {
         })),
       ];
       const wipRepo = manager.getRepository(ProcessWip);
+      const touched = new Map<string, Set<number>>();
       const goodOrigins = new Map<string, number>();
       const rejectOrigins = new Map<string, number>();
 
@@ -331,7 +338,12 @@ export class ProcessService {
             origins,
           );
 
-          if (boxes) await recordBoxRows(manager, tx.id, row.id, boxes.boxes);
+          if (boxes) {
+            await recordBoxRows(manager, tx.id, row.id, boxes.boxes);
+            const set = touched.get(row.id) ?? new Set<number>();
+            for (const b of boxes.boxes) set.add(b.boxNo);
+            touched.set(row.id, set);
+          }
 
           const tally = draw.kind === 'GOOD' ? goodOrigins : rejectOrigins;
           for (const o of origins) {
@@ -383,7 +395,24 @@ export class ProcessService {
       });
 
       await completeLotOrderIfDone(manager, order.id, userId, dto.requestId);
-      return this.result(manager, line, step, lot?.id ?? null, false, isNew);
+      const result = await this.result(
+        manager,
+        line,
+        step,
+        lot?.id ?? null,
+        false,
+        isNew,
+      );
+      // Boxes that were split by this record: their label changes (new QR,
+      // fewer pieces) and must be reprinted.
+      const splits: TransferBox[] = [];
+      for (const [wipId, boxNos] of touched) {
+        const all = (await loadWipBoxes(manager, [wipId])).get(wipId) ?? [];
+        splits.push(
+          ...all.filter((b) => boxNos.has(b.boxNo) && b.status === 'PARTIAL'),
+        );
+      }
+      return { ...result, splits };
     });
   }
 

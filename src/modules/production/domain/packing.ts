@@ -31,17 +31,32 @@ export function packageQrCode(lotNo: string, boxNo: number): string {
   return `QR-${lotNo}-BOX${String(boxNo).padStart(3, '0')}`;
 }
 
-/** QR of one box of a transfer batch: {batch QR}-B{nnn}. */
-export function transferBoxCode(batchQr: string, boxNo: number): string {
-  return `${batchQr}-B${String(boxNo).padStart(3, '0')}`;
+/**
+ * QR of one box of a transfer batch: {batch QR}-B{nnn}. After pieces were
+ * taken out of the box (it was split) the label that stays on it is
+ * reprinted as {…}-B{nnn}-R{revision}.
+ */
+export function transferBoxCode(
+  batchQr: string,
+  boxNo: number,
+  revision = 0,
+): string {
+  const base = `${batchQr}-B${String(boxNo).padStart(3, '0')}`;
+  return revision > 0 ? `${base}-R${revision}` : base;
 }
 
 /** Splits a box code back into its batch QR and box number (null if not a box code). */
 export function parseTransferBoxCode(
   code: string,
-): { batchQr: string; boxNo: number } | null {
-  const m = /^(TQ-.+)-B(\d{3,})$/i.exec(code.trim());
-  return m ? { batchQr: m[1].toUpperCase(), boxNo: Number(m[2]) } : null;
+): { batchQr: string; boxNo: number; revision: number } | null {
+  const m = /^(TQ-.+)-B(\d{3,})(?:-R(\d+))?$/i.exec(code.trim());
+  return m
+    ? {
+        batchQr: m[1].toUpperCase(),
+        boxNo: Number(m[2]),
+        revision: m[3] ? Number(m[3]) : 0,
+      }
+    : null;
 }
 
 export type WipBoxStatus = 'WAITING' | 'PARTIAL' | 'DONE' | 'CLOSED';

@@ -33,6 +33,12 @@ import { TransferService } from './transfer.service';
  * index (a process can appear twice in one workflow). Permissions reuse the
  * production-order codes until the dedicated ones arrive (plan Phase 8).
  */
+const splitCodes = (value?: string): string[] =>
+  (value ?? '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+
 @Controller('production')
 @UseGuards(JwtAuthGuard, ActiveAssignmentGuard, PermissionGuard)
 export class ProcessController {
@@ -56,16 +62,28 @@ export class ProcessController {
     return this.boards.tags(lineId, stepIndex);
   }
 
-  /** Check a scanned box at a step before producing from it. */
+  /** Check a scanned box (must be next in FIFO after `scanned`) before producing from it. */
   @Get('lines/:lineId/steps/:stepIndex/boxes')
   @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
   boxAt(
     @Param('lineId') lineId: string,
     @Param('stepIndex', ParseIntPipe) stepIndex: number,
     @Query('code') code: string,
+    @Query('scanned') scanned?: string,
   ) {
     if (!code?.trim()) throw new BadRequestException('ไม่มีรหัส QR กล่อง');
-    return this.boards.boxAt(lineId, stepIndex, code);
+    return this.boards.boxAt(lineId, stepIndex, code, splitCodes(scanned));
+  }
+
+  /** The next box to work at a step in FIFO order (after the `scanned` ones). */
+  @Get('lines/:lineId/steps/:stepIndex/boxes/next')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  nextBox(
+    @Param('lineId') lineId: string,
+    @Param('stepIndex', ParseIntPipe) stepIndex: number,
+    @Query('scanned') scanned?: string,
+  ) {
+    return this.boards.nextBox(lineId, stepIndex, splitCodes(scanned));
   }
 
   @Post('lines/:lineId/steps/:stepIndex/transfer')

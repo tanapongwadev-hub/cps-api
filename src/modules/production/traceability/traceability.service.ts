@@ -185,10 +185,17 @@ export class TraceabilityService {
       box: box
         ? {
             qrCode: box.qrCode,
+            revision: box.revision,
+            /** Set when the scanned label is an old one of a split box. */
+            supersededBy:
+              boxRef && boxRef.revision !== box.revision && box.left > 0
+                ? box.qrCode
+                : null,
             boxNo: box.boxNo,
             boxCount: box.boxCount,
             qty: box.qty,
             doneQty: box.doneQty,
+            left: box.left,
             status: box.status,
             origins: box.origins.map((o) => ({
               lotNo: o.lotNo,
@@ -203,6 +210,7 @@ export class TraceabilityService {
         boxNo: b.boxNo,
         qty: b.qty,
         doneQty: b.doneQty,
+        left: b.left,
         status: b.status,
       })),
       qrCode: wip.qr_code,

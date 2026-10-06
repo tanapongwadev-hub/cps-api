@@ -2,8 +2,13 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ProductionOrderLine } from '../../production-orders/production-order.entity';
-import { parseTransferBoxCode } from '../domain/packing';
-import { loadWipBoxes, resolveBoxes, type TransferBox } from './wip-boxes';
+import {
+  assertFifoScan,
+  fifoBoxes,
+  loadWipBoxes,
+  resolveBoxes,
+  type TransferBox,
+} from './wip-boxes';
 import { loadWorkflowSteps } from '../workflow-steps';
 
 export interface BoardStep {
@@ -57,27 +62,49 @@ export class BoardService {
   }
 
   /**
-   * A scanned box at a step: checks it is here and still holds pieces, and
-   * says how many — the produce dialog adds it to the boxes being worked.
+   * A scanned box at a step: checks it is here, still holds pieces, and is the
+   * next one in FIFO order after the `scanned` ones — the produce dialog adds
+   * it to the boxes being worked.
    */
-  async boxAt(lineId: string, stepIndex: number, code: string) {
+  async boxAt(
+    lineId: string,
+    stepIndex: number,
+    code: string,
+    scanned: string[] = [],
+  ) {
     const manager = this.dataSource.manager;
-    const [found] = await resolveBoxes(
-      manager,
-      lineId,
-      stepIndex,
-      [code],
-      parseTransferBoxCode,
-    );
-    const box = (await loadWipBoxes(manager, [found.wipId]))
-      .get(found.wipId)!
-      .find((b) => b.boxNo === found.boxNo)!;
+    const wanted = await resolveBoxes(manager, lineId, stepIndex, [
+      ...scanned,
+      code,
+    ]);
+    assertFifoScan(await fifoBoxes(manager, lineId, stepIndex), wanted);
+    const found = wanted[wanted.length - 1];
+    return this.boxInfo(found.wipId, found.boxNo);
+  }
+
+  /** The next box to work at a step (FIFO) after the `scanned` ones, or null. */
+  async nextBox(lineId: string, stepIndex: number, scanned: string[] = []) {
+    const manager = this.dataSource.manager;
+    const done = scanned.length
+      ? await resolveBoxes(manager, lineId, stepIndex, scanned)
+      : [];
+    const fifo = await fifoBoxes(manager, lineId, stepIndex);
+    assertFifoScan(fifo, done);
+    const next = fifo[done.length];
+    return next ? this.boxInfo(next.wipId, next.boxNo) : null;
+  }
+
+  private async boxInfo(wipId: string, boxNo: number) {
+    const box = (await loadWipBoxes(this.dataSource.manager, [wipId]))
+      .get(wipId)!
+      .find((x) => x.boxNo === boxNo)!;
     return {
       qrCode: box.qrCode,
       boxNo: box.boxNo,
       boxCount: box.boxCount,
       qty: box.qty,
-      left: found.left,
+      left: box.left,
+      revision: box.revision,
       sourceLotNo: box.sourceLotNo,
       origins: box.origins,
     };
