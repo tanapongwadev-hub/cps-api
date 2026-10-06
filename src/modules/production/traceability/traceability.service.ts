@@ -73,6 +73,7 @@ export class TraceabilityService {
   async scan(code: string) {
     const value = code.trim();
     if (/^QR-/i.test(value)) return this.traceByQrCode(value);
+    if (/^TQ-/i.test(value)) return this.traceByTransferTag(value);
     const rows = await this.dataSource.query<Array<{ id: string }>>(
       `SELECT id FROM inventory.production_lots WHERE lot_no = $1`,
       [value.toUpperCase()],
@@ -83,6 +84,118 @@ export class TraceabilityService {
     return {
       kind: 'LOT' as const,
       ...(await this.traceLot(String(rows[0].id), 'backward')),
+    };
+  }
+
+  /**
+   * Transfer tag (QR made when work is sent to the next step): where this
+   * batch is now — waiting at the step, produced into which lots, scrapped or
+   * closed — plus where it came from.
+   */
+  async traceByTransferTag(code: string) {
+    const rows = await this.dataSource.query<
+      Array<{
+        id: string;
+        qr_code: string;
+        line_id: string;
+        step_index: number;
+        step_code: string;
+        step_name: string;
+        source_lot_id: string;
+        qty_in: number;
+        qty_used: number;
+        qty_rejected: number;
+        qty_closed: number;
+        qty_remaining: number;
+        received_at: Date;
+      }>
+    >(
+      `SELECT w.id, w.qr_code, w.production_order_line_id AS line_id, w.step_index,
+              ps.code AS step_code, ps.name_th AS step_name, w.source_lot_id,
+              w.qty_in, w.qty_used, w.qty_rejected, w.qty_closed, w.qty_remaining,
+              w.received_at
+       FROM inventory.process_wip w
+       JOIN master.process_steps ps ON ps.id = w.process_step_id
+       WHERE w.qr_code = $1`,
+      [code.trim().toUpperCase()],
+    );
+    const wip = rows[0];
+    if (!wip) throw new NotFoundException(`ไม่พบ QR ส่งต่อ "${code}"`);
+
+    const lineId = String(wip.line_id);
+    const graph = await this.loadLine(lineId);
+    const context = await this.lineContext(lineId);
+    const source = graph.lots.get(String(wip.source_lot_id))!;
+    const origins = await this.dataSource.query<
+      Array<{
+        lot_no: string;
+        production_date: string;
+        shift_key: string;
+        qty: number;
+        qty_remaining: number;
+      }>
+    >(
+      `SELECT l.lot_no, l.production_date::text AS production_date, l.shift_key,
+              o.qty, o.qty_remaining
+       FROM inventory.process_wip_origins o
+       JOIN inventory.production_lots l ON l.id = o.origin_lot_id
+       WHERE o.wip_id = $1 ORDER BY l.production_date, l.id`,
+      [wip.id],
+    );
+    const produced = await this.dataSource.query<
+      Array<{
+        lot_no: string;
+        lot_type: string;
+        step_code: string;
+        remaining_qty: number;
+        qty: number;
+      }>
+    >(
+      `SELECT tl.lot_no, tl.lot_type, ps.code AS step_code, tl.remaining_qty,
+              SUM(t.qty)::int AS qty
+       FROM inventory.production_transactions t
+       LEFT JOIN inventory.production_transactions o ON o.id = t.reverses_transaction_id
+       JOIN inventory.production_lots tl ON tl.id = t.target_lot_id
+       JOIN master.process_steps ps ON ps.id = tl.process_step_id
+       WHERE t.source_wip_id = $1
+         AND (t.transaction_type IN ('PROCESS_OUTPUT','FG_RECEIVE')
+              OR (t.transaction_type = 'REVERSAL'
+                  AND o.transaction_type IN ('PROCESS_OUTPUT','FG_RECEIVE')))
+       GROUP BY tl.id, ps.code HAVING SUM(t.qty) <> 0
+       ORDER BY tl.id`,
+      [wip.id],
+    );
+    return {
+      kind: 'TRANSFER' as const,
+      qrCode: wip.qr_code,
+      ...context,
+      fromStep: { stepIndex: source.step_index, code: source.process_code },
+      toStep: {
+        stepIndex: Number(wip.step_index),
+        code: wip.step_code,
+        name: wip.step_name,
+      },
+      sourceLotNo: source.lot_no,
+      sentAt: wip.received_at,
+      qty: Number(wip.qty_in),
+      waitingQty: Number(wip.qty_remaining),
+      producedQty: Number(wip.qty_used),
+      rejectedQty: Number(wip.qty_rejected),
+      closedQty: Number(wip.qty_closed),
+      producedInto: produced.map((p) => ({
+        lotNo: p.lot_no,
+        lotType: p.lot_type,
+        stepCode: p.step_code,
+        qty: Number(p.qty),
+        lotRemainingQty: Number(p.remaining_qty),
+      })),
+      origins: origins.map((o) => ({
+        lotNo: o.lot_no,
+        productionDate: o.production_date,
+        shift: o.shift_key,
+        qty: Number(o.qty),
+      })),
+      lineage: this.node(graph, source.id, 'backward', null, new Set()),
     };
   }
 

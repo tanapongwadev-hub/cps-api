@@ -666,4 +666,39 @@ describe('Production lot traceability (cps_db_test)', () => {
     expect(await orderStatus()).toBe('COMPLETED');
     expect((await rec.reconcile(lineId)).issues).toEqual([]);
   });
+  it('transfer tags — every transfer gets a QR that tells where the batch is now', async () => {
+    const wips = await q<{ id: string; qr_code: string; step_index: number }>(
+      `SELECT id, qr_code, step_index FROM inventory.process_wip
+       WHERE production_order_line_id = $1 AND source_lot_id IS NOT NULL ORDER BY id`,
+      [lineId],
+    );
+    expect(wips.length).toBeGreaterThan(0);
+    for (const w of wips) {
+      expect(w.qr_code).toMatch(/^TQ-.+-S\d+-\d{2}$/);
+    }
+    expect(new Set(wips.map((w) => w.qr_code)).size).toBe(wips.length);
+
+    const tag = wips[0];
+    const scan = (await trace.scan(tag.qr_code)) as unknown as {
+      kind: string;
+      qty: number;
+      waitingQty: number;
+      producedQty: number;
+      rejectedQty: number;
+      closedQty: number;
+      toStep: { stepIndex: number };
+      lineage: { lotNo: string };
+      origins: Array<{ qty: number }>;
+    };
+    expect(scan.kind).toBe('TRANSFER');
+    expect(scan.toStep.stepIndex).toBe(Number(tag.step_index));
+    expect(
+      scan.waitingQty + scan.producedQty + scan.rejectedQty + scan.closedQty,
+    ).toBe(scan.qty);
+    expect(scan.origins.reduce((n, o) => n + o.qty, 0)).toBe(scan.qty);
+
+    const list = await board.tags(lineId, Number(tag.step_index));
+    expect(list.some((t) => t.qrCode === tag.qr_code)).toBe(true);
+    expect(list[0].qrImage).toMatch(/^data:image\/svg\+xml/);
+  });
 });

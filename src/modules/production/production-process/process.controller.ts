@@ -46,6 +46,16 @@ export class ProcessController {
     private readonly histories: HistoryService,
   ) {}
 
+  /** Transfer tags (QR) of the work sent into a step — for reprinting. */
+  @Get('lines/:lineId/steps/:stepIndex/tags')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  tags(
+    @Param('lineId') lineId: string,
+    @Param('stepIndex', ParseIntPipe) stepIndex: number,
+  ) {
+    return this.boards.tags(lineId, stepIndex);
+  }
+
   @Post('lines/:lineId/steps/:stepIndex/transfer')
   @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.ADVANCE)
   transfer(

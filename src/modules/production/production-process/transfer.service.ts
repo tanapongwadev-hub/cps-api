@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
+import { qrSvgDataUrl } from '../../../common/qr-svg';
 import { recordAuditEvent } from '../../../common/stock-ledger';
 import {
   Allocation,
@@ -30,6 +31,9 @@ export interface TransferResult {
   transfers: Array<{
     lotNo: string;
     qty: number;
+    /** Transfer tag of the WIP row this created at the next step. */
+    qrCode: string | null;
+    qrImage: string | null;
     origins: Array<{ lotNo: string; qty: number }>;
   }>;
 }
@@ -112,7 +116,11 @@ export class TransferService {
       }
 
       const lotRepo = manager.getRepository(ProductionLot);
-      const audit: TransferResult['transfers'] = [];
+      const audit: Array<{
+        lotNo: string;
+        qty: number;
+        origins: Array<{ lotNo: string; qty: number }>;
+      }> = [];
       for (const allocation of allocations) {
         const lot = lots.find((l) => l.id === allocation.id)!;
         const origins = await this.lots.takeOrigins(
@@ -130,6 +138,7 @@ export class TransferService {
           stepIndex: next.index,
           processStepId: next.processStepId,
           sourceLotId: lot.id,
+          sourceLotNo: lot.lotNo,
           qty: allocation.qty,
           origins,
           receivedAt: now,
@@ -195,14 +204,20 @@ export class TransferService {
     replayed: boolean,
   ): Promise<TransferResult> {
     const moves = (await manager.query(
-      `SELECT t.id, l.lot_no, t.qty
+      `SELECT t.id, l.lot_no, t.qty, w.qr_code
        FROM inventory.production_transactions t
        JOIN inventory.production_lots l ON l.id = t.source_lot_id
+       LEFT JOIN inventory.process_wip w ON w.id = t.target_wip_id
        WHERE t.request_id = $1 AND t.production_order_line_id = $2
          AND t.transaction_type = 'TRANSFER'
        ORDER BY t.id`,
       [requestId, lineId],
-    )) as unknown as Array<{ id: string; lot_no: string; qty: number }>;
+    )) as unknown as Array<{
+      id: string;
+      lot_no: string;
+      qty: number;
+      qr_code: string | null;
+    }>;
     const origins = (await manager.query(
       `SELECT o.transaction_id, ol.lot_no, o.qty
        FROM inventory.production_transaction_origins o
@@ -235,13 +250,17 @@ export class TransferService {
         code: next.code,
         waitingQty: totals[0].waiting,
       },
-      transfers: moves.map((m) => ({
-        lotNo: m.lot_no,
-        qty: Number(m.qty),
-        origins: origins
-          .filter((o) => String(o.transaction_id) === String(m.id))
-          .map((o) => ({ lotNo: o.lot_no, qty: Number(o.qty) })),
-      })),
+      transfers: await Promise.all(
+        moves.map(async (m) => ({
+          lotNo: m.lot_no,
+          qty: Number(m.qty),
+          qrCode: m.qr_code,
+          qrImage: m.qr_code ? await qrSvgDataUrl(m.qr_code) : null,
+          origins: origins
+            .filter((o) => String(o.transaction_id) === String(m.id))
+            .map((o) => ({ lotNo: o.lot_no, qty: Number(o.qty) })),
+        })),
+      ),
     };
   }
 }

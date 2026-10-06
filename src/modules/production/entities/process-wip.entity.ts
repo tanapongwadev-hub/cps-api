@@ -58,6 +58,10 @@ export class ProcessWip {
   @Column({ name: 'received_at', type: 'timestamptz' })
   receivedAt: Date;
 
+  /** Transfer tag TQ-{source lot}-S{step}-{nn} (null for the plan release). */
+  @Column({ name: 'qr_code', type: 'varchar', length: 80, nullable: true })
+  qrCode: string | null;
+
   @Column({ type: 'varchar', length: 10, default: 'OPEN' })
   status: WipStatus;
 

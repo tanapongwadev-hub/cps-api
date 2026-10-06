@@ -6,6 +6,7 @@ import {
   ProductionOrderLine,
 } from '../../production-orders/production-order.entity';
 import { allocateFifo } from '../domain/allocation';
+import { transferQrCode } from '../domain/packing';
 import { productionDayOf } from '../domain/production-day';
 import { ProcessWip, ProcessWipOrigin } from '../entities/process-wip.entity';
 import { LedgerService } from '../production-transaction/ledger.service';
@@ -69,14 +70,27 @@ export class WipService {
       stepIndex: number;
       processStepId: string;
       sourceLotId: string;
+      sourceLotNo: string;
       qty: number;
       origins: Array<{ originLotId: string; qty: number }>;
       receivedAt: Date;
     },
   ): Promise<ProcessWip> {
     const repo = manager.getRepository(ProcessWip);
+    // Several transfers of one lot to one step get -01, -02, … (the order line
+    // is locked, so the count cannot race).
+    const taken = (await manager.query(
+      `SELECT COUNT(*)::int AS n FROM inventory.process_wip
+       WHERE source_lot_id = $1 AND step_index = $2`,
+      [input.sourceLotId, input.stepIndex],
+    )) as unknown as Array<{ n: number }>;
     const wip = await repo.save(
       repo.create({
+        qrCode: transferQrCode(
+          input.sourceLotNo,
+          input.stepIndex,
+          taken[0].n + 1,
+        ),
         productionOrderId: input.productionOrderId,
         productionOrderLineId: input.lineId,
         stepIndex: input.stepIndex,

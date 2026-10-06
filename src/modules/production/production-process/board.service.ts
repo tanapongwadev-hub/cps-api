@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ProductionOrderLine } from '../../production-orders/production-order.entity';
+import { qrSvgDataUrl } from '../../../common/qr-svg';
 import { loadWorkflowSteps } from '../workflow-steps';
 
 export interface BoardStep {
@@ -33,10 +34,67 @@ export interface BoardStep {
   }>;
 }
 
+export interface StepTag {
+  qrCode: string;
+  qrImage: string;
+  sourceLotNo: string;
+  qty: number;
+  waitingQty: number;
+  sentAt: string;
+  origins: Array<{ lotNo: string; qty: number }>;
+}
+
 /** Process Board numbers for one order line (read-only, no locks). */
 @Injectable()
 export class BoardService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  /** Transfer tags of the work sent into one step (newest first), for reprint. */
+  async tags(lineId: string, stepIndex: number): Promise<StepTag[]> {
+    const rows = await this.dataSource.query<
+      Array<{
+        id: string;
+        qr_code: string;
+        lot_no: string;
+        qty_in: number;
+        qty_remaining: number;
+        received_at: string;
+      }>
+    >(
+      `SELECT w.id, w.qr_code, l.lot_no, w.qty_in, w.qty_remaining, w.received_at::text
+       FROM inventory.process_wip w
+       JOIN inventory.production_lots l ON l.id = w.source_lot_id
+       WHERE w.production_order_line_id = $1 AND w.step_index = $2
+         AND w.qr_code IS NOT NULL
+       ORDER BY w.id DESC`,
+      [lineId, stepIndex],
+    );
+    const origins = rows.length
+      ? await this.dataSource.query<
+          Array<{ wip_id: string; lot_no: string; qty: number }>
+        >(
+          `SELECT o.wip_id, l.lot_no, o.qty
+           FROM inventory.process_wip_origins o
+           JOIN inventory.production_lots l ON l.id = o.origin_lot_id
+           WHERE o.wip_id = ANY($1::bigint[])
+           ORDER BY l.production_date, l.id`,
+          [rows.map((r) => r.id)],
+        )
+      : [];
+    return Promise.all(
+      rows.map(async (r) => ({
+        qrCode: r.qr_code,
+        qrImage: await qrSvgDataUrl(r.qr_code),
+        sourceLotNo: r.lot_no,
+        qty: Number(r.qty_in),
+        waitingQty: Number(r.qty_remaining),
+        sentAt: r.received_at,
+        origins: origins
+          .filter((o) => String(o.wip_id) === String(r.id))
+          .map((o) => ({ lotNo: o.lot_no, qty: Number(o.qty) })),
+      })),
+    );
+  }
 
   async board(lineId: string) {
     const line = await this.dataSource

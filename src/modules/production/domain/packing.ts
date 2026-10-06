@@ -17,6 +17,15 @@ export function splitIntoBoxes(qty: number, packSize: number): number[] {
   ];
 }
 
+/** QR content of a transfer tag: TQ-{source lot no}-S{to step no}-{nn}. */
+export function transferQrCode(
+  sourceLotNo: string,
+  toStepIndex: number,
+  seq: number,
+): string {
+  return `TQ-${sourceLotNo}-S${toStepIndex + 1}-${String(seq).padStart(2, '0')}`;
+}
+
 /** QR content of a box: QR-{lot no}-BOX{nnn}, e.g. QR-FG-691002-001-BOX001. */
 export function packageQrCode(lotNo: string, boxNo: number): string {
   return `QR-${lotNo}-BOX${String(boxNo).padStart(3, '0')}`;
