@@ -6,8 +6,12 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { recordAuditEvent } from '../../../common/stock-ledger';
-import { ProductionOrderLine } from '../../production-orders/production-order.entity';
+import {
+  ProductionOrder,
+  ProductionOrderLine,
+} from '../../production-orders/production-order.entity';
 import { productionDayOf } from '../domain/production-day';
+import { ProductionPackage } from '../entities/production-package.entity';
 import { ProcessWip } from '../entities/process-wip.entity';
 import {
   ProductionLot,
@@ -28,6 +32,7 @@ const REVERSIBLE = [
   'REJECT',
   'TRANSFER',
   'SHORT_CLOSE',
+  'PACKING',
 ];
 
 export interface ReverseResult {
@@ -64,7 +69,8 @@ export class ReversalService {
     userId: string,
   ): Promise<ReverseResult> {
     return this.dataSource.transaction(async (manager) => {
-      const { line, order } = await lockLotModelLine(manager, lineId);
+      // A completed order may still have its last boxes voided (reopens it).
+      const { line, order } = await lockLotModelLine(manager, lineId, true);
       const txRepo = manager.getRepository(ProductionTransaction);
 
       const originals = await txRepo.find({
@@ -96,6 +102,22 @@ export class ReversalService {
         manager,
         originals.map((t) => t.id),
       );
+
+      const packing = originals.every((t) => t.transactionType === 'PACKING');
+      if (packing) {
+        return this.reversePacking(
+          manager,
+          order,
+          originals,
+          originsByTx,
+          targetRequestId,
+          dto,
+          userId,
+        );
+      }
+      if (order.status === 'COMPLETED') {
+        throw new ConflictException('ใบสั่งผลิตนี้เสร็จสิ้นแล้ว');
+      }
 
       // Locks in the produce/transfer order: WIP rows, then lots.
       const wipIds = originals.flatMap((t) =>
@@ -251,6 +273,110 @@ export class ReversalService {
 
       return this.summary(manager, targetRequestId, originals, false);
     });
+  }
+
+  /**
+   * Voids the boxes of one packing request: each box becomes VOID (its number
+   * and QR stay taken), its pieces go back into the FG/STORE lot with their
+   * origins, and REVERSAL rows (negative) net the PACKING rows out. Only while
+   * every box is still PACKED and untouched. A completed order is reopened.
+   */
+  private async reversePacking(
+    manager: EntityManager,
+    order: ProductionOrder,
+    originals: ProductionTransaction[],
+    originsByTx: Map<string, Array<{ originLotId: string; qty: number }>>,
+    targetRequestId: string,
+    dto: ReverseDto,
+    userId: string,
+  ): Promise<ReverseResult> {
+    const lotId = originals[0].sourceLotId!;
+    // Lock order as in packing: lot, then its boxes.
+    const lot = await manager.getRepository(ProductionLot).findOneOrFail({
+      where: { id: lotId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const packageRepo = manager.getRepository(ProductionPackage);
+    const packages = await packageRepo
+      .createQueryBuilder('p')
+      .setLock('pessimistic_write')
+      .where('p.id IN (:...ids)', { ids: originals.map((t) => t.packageId) })
+      .orderBy('p.id', 'ASC')
+      .getMany();
+    const blocked = packages.find(
+      (p) => p.status !== 'PACKED' || p.currentQty !== p.initialQty,
+    );
+    if (blocked) {
+      throw new ConflictException(
+        `ยกเลิกกล่องไม่ได้ เพราะกล่อง ${blocked.qrCode} ถูกจัดเก็บ ส่งออก หรือยกเลิกไปแล้ว`,
+      );
+    }
+
+    const day = productionDayOf(new Date());
+    for (const tx of originals) {
+      const pkg = packages.find((p) => p.id === tx.packageId)!;
+      const origins = originsByTx.get(tx.id) ?? [];
+      pkg.status = 'VOID';
+      pkg.currentQty = 0;
+      lot.remainingQty += tx.qty;
+      for (const o of origins) {
+        await manager.query(
+          `UPDATE inventory.production_lot_origins SET qty_remaining = qty_remaining + $3
+           WHERE lot_id = $1 AND origin_lot_id = $2`,
+          [lot.id, o.originLotId, o.qty],
+        );
+      }
+      await this.ledger.write(
+        manager,
+        {
+          requestId: dto.requestId,
+          productionOrderId: order.id,
+          productionOrderLineId: tx.productionOrderLineId,
+          stepIndex: tx.stepIndex,
+          processStepId: tx.processStepId,
+          transactionType: 'REVERSAL',
+          sourceLotId: lot.id,
+          packageId: tx.packageId,
+          qty: -tx.qty,
+          transactionDate: day.productionDate,
+          shiftKey: day.shift,
+          reversesTransactionId: tx.id,
+          remark: dto.reason.trim(),
+          operatorId: userId,
+        },
+        origins.map((o) => ({ originLotId: o.originLotId, qty: -o.qty })),
+      );
+    }
+    await packageRepo.save(packages);
+    lot.status = lot.remainingQty === 0 ? 'CONSUMED' : 'OPEN';
+    await manager.getRepository(ProductionLot).save(lot);
+
+    const reopened = order.status === 'COMPLETED';
+    if (reopened) {
+      order.status = 'IN_PROGRESS';
+      order.completedAt = null;
+      await manager.getRepository(ProductionOrder).save(order);
+    }
+
+    await recordAuditEvent(manager, {
+      traceId: lot.lotNo,
+      action: 'UPDATE',
+      eventName: 'production.package.voided',
+      targetType: 'PRODUCTION_PACKAGE',
+      targetId: lot.id,
+      performedBy: userId,
+      requestId: dto.requestId,
+      after: {
+        lotNo: lot.lotNo,
+        productionOrder: order.code,
+        reversedRequestId: targetRequestId,
+        reason: dto.reason.trim(),
+        boxes: packages.map((p) => p.qrCode),
+        qty: originals.reduce((s, t) => s + t.qty, 0),
+        orderReopened: reopened,
+      },
+    });
+    return this.summary(manager, targetRequestId, originals, false);
   }
 
   private async originsOf(manager: EntityManager, txIds: string[]) {

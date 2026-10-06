@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
-export type HistoryKind = 'PRODUCE' | 'RECEIVE' | 'TRANSFER' | 'CLOSE';
+export type HistoryKind = 'PRODUCE' | 'RECEIVE' | 'TRANSFER' | 'CLOSE' | 'PACK';
 
 export interface HistoryEntry {
   requestId: string;
@@ -13,6 +13,9 @@ export interface HistoryEntry {
   rejectQty: number;
   closedQty: number;
   transferredQty: number;
+  /** PACK: pieces and boxes packed. */
+  packedQty: number;
+  boxCount: number;
   /** Lots written to (produce) or taken from (transfer). */
   lotNos: string[];
   productionDate: string;
@@ -35,6 +38,7 @@ interface Row {
   target_lot: string | null;
   target_lot_remaining: number | null;
   target_wip_untouched: boolean | null;
+  pkg_untouched: boolean | null;
   transaction_date: string;
   shift_key: string;
   remark: string | null;
@@ -46,8 +50,7 @@ interface Row {
 /**
  * Read-only history of one order line: every produce / receive / transfer /
  * close request (grouped by requestId), newest first, with whether it has
- * been reversed and whether it still can be. Packing and plan release are not
- * listed (not reversible here).
+ * been reversed and whether it still can be. Plan release is not listed.
  */
 @Injectable()
 export class HistoryService {
@@ -68,6 +71,7 @@ export class HistoryService {
               tl.remaining_qty AS target_lot_remaining,
               (tw.id IS NOT NULL AND tw.qty_remaining = tw.qty_in AND tw.qty_used = 0
                  AND tw.qty_rejected = 0 AND tw.qty_closed = 0) AS target_wip_untouched,
+              (pk.id IS NOT NULL AND pk.status = 'PACKED' AND pk.current_qty = pk.initial_qty) AS pkg_untouched,
               t.transaction_date::text, t.shift_key, t.remark,
               NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS operator,
               t.created_at::text,
@@ -78,9 +82,10 @@ export class HistoryService {
        LEFT JOIN inventory.production_lots sl ON sl.id = t.source_lot_id
        LEFT JOIN inventory.production_lots tl ON tl.id = t.target_lot_id
        LEFT JOIN inventory.process_wip tw ON tw.id = t.target_wip_id
+       LEFT JOIN inventory.production_packages pk ON pk.id = t.package_id
        LEFT JOIN iam.users u ON u.id = t.operator_id
        WHERE t.production_order_line_id = $1
-         AND t.transaction_type IN ('PROCESS_OUTPUT','FG_RECEIVE','REJECT','TRANSFER','SHORT_CLOSE')
+         AND t.transaction_type IN ('PROCESS_OUTPUT','FG_RECEIVE','REJECT','TRANSFER','SHORT_CLOSE','PACKING')
        ORDER BY t.id`,
       [lineId],
     );
@@ -99,15 +104,18 @@ export class HistoryService {
           .filter((r) => types.includes(r.type))
           .reduce((s, r) => s + Number(r.qty), 0);
       const isTransfer = list.some((r) => r.type === 'TRANSFER');
+      const isPack = list.some((r) => r.type === 'PACKING');
       const isClose = list.some((r) => r.type === 'SHORT_CLOSE');
       const isReceive = list.some((r) => r.type === 'FG_RECEIVE');
-      const kind: HistoryKind = isTransfer
-        ? 'TRANSFER'
-        : isClose
-          ? 'CLOSE'
-          : isReceive
-            ? 'RECEIVE'
-            : 'PRODUCE';
+      const kind: HistoryKind = isPack
+        ? 'PACK'
+        : isTransfer
+          ? 'TRANSFER'
+          : isClose
+            ? 'CLOSE'
+            : isReceive
+              ? 'RECEIVE'
+              : 'PRODUCE';
       const reversed = list.every((r) => r.reversed);
 
       // Per target lot: how much this request put there.
@@ -124,9 +132,11 @@ export class HistoryService {
       }
       const reversible =
         !reversed &&
-        (isTransfer
-          ? list.every((r) => r.target_wip_untouched === true)
-          : [...perLot.values()].every((l) => l.remaining >= l.qty));
+        (isPack
+          ? list.every((r) => r.pkg_untouched === true)
+          : isTransfer
+            ? list.every((r) => r.target_wip_untouched === true)
+            : [...perLot.values()].every((l) => l.remaining >= l.qty));
 
       entries.push({
         requestId,
@@ -137,10 +147,12 @@ export class HistoryService {
         rejectQty: sum(['REJECT']),
         closedQty: sum(['SHORT_CLOSE']),
         transferredQty: sum(['TRANSFER']),
+        packedQty: sum(['PACKING']),
+        boxCount: list.filter((r) => r.type === 'PACKING').length,
         lotNos: [
           ...new Set(
             list
-              .map((r) => (isTransfer ? r.source_lot : r.target_lot))
+              .map((r) => (isTransfer || isPack ? r.source_lot : r.target_lot))
               .filter((n): n is string => !!n),
           ),
         ],

@@ -20,6 +20,7 @@ export interface LineContext {
 export async function lockLotModelLine(
   manager: EntityManager,
   lineId: string,
+  allowCompleted = false,
 ): Promise<LineContext> {
   const line = await manager.getRepository(ProductionOrderLine).findOne({
     where: { id: lineId },
@@ -34,7 +35,7 @@ export async function lockLotModelLine(
       'ใบสั่งผลิตนี้ใช้ระบบกล่องแบบเดิม บันทึกแบบ Lot ไม่ได้',
     );
   }
-  if (order.status === 'COMPLETED') {
+  if (order.status === 'COMPLETED' && !allowCompleted) {
     throw new ConflictException('ใบสั่งผลิตนี้เสร็จสิ้นแล้ว');
   }
   const steps = await loadWorkflowSteps(manager, line.workflowId);

@@ -584,4 +584,86 @@ describe('Production lot traceability (cps_db_test)', () => {
       ),
     );
   });
+  it('void packing — boxes become VOID, pieces return to the lot, a completed order reopens', async () => {
+    const last = (
+      await q<{ request_id: string; qty: number }>(
+        `SELECT request_id, SUM(qty)::int AS qty FROM inventory.production_transactions
+         WHERE production_order_line_id = $1 AND transaction_type = 'PACKING'
+         GROUP BY request_id ORDER BY MAX(id) DESC LIMIT 1`,
+        [lineId],
+      )
+    )[0];
+    const orderStatus = async () =>
+      (
+        await q<{ status: string }>(
+          `SELECT o.status FROM inventory.production_orders o
+           JOIN inventory.production_order_lines l ON l.production_order_id = o.id WHERE l.id = $1`,
+          [lineId],
+        )
+      )[0].status;
+    expect(await orderStatus()).toBe('COMPLETED');
+    const before = (
+      await q<{ remaining: number }>(
+        `SELECT COALESCE(SUM(remaining_qty), 0)::int AS remaining FROM inventory.production_lots
+         WHERE production_order_line_id = $1 AND lot_type = 'FG'`,
+        [lineId],
+      )
+    )[0].remaining;
+
+    const id = randomUUID();
+    const res = await rev.reverse(
+      lineId,
+      last.request_id,
+      { requestId: id, reason: 'e2e: แพ็กผิด' },
+      USER,
+    );
+    expect(res.movements.every((m) => m.type === 'PACKING')).toBe(true);
+    const voided = await q<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM inventory.production_packages p
+       JOIN inventory.production_transactions t ON t.package_id = p.id
+       WHERE t.request_id = $1 AND t.transaction_type = 'PACKING' AND p.status = 'VOID' AND p.current_qty = 0`,
+      [last.request_id],
+    );
+    expect(voided[0].n).toBeGreaterThan(0);
+    const after = (
+      await q<{ remaining: number }>(
+        `SELECT COALESCE(SUM(remaining_qty), 0)::int AS remaining FROM inventory.production_lots
+         WHERE production_order_line_id = $1 AND lot_type = 'FG'`,
+        [lineId],
+      )
+    )[0].remaining;
+    expect(after).toBe(before + Number(last.qty));
+    expect(await orderStatus()).toBe('IN_PROGRESS');
+    expect((await rec.reconcile(lineId)).issues).toEqual([]);
+
+    // Replay returns the same result; a second reversal is refused.
+    const again = await rev.reverse(
+      lineId,
+      last.request_id,
+      { requestId: id, reason: 'e2e: แพ็กผิด' },
+      USER,
+    );
+    expect(again.replayed).toBe(true);
+    await expectConflict(
+      rev.reverse(
+        lineId,
+        last.request_id,
+        { requestId: randomUUID(), reason: 'e2e' },
+        USER,
+      ),
+    );
+
+    // The lot can be packed again; the voided box numbers stay taken.
+    const [fg] = await q<{ id: string }>(
+      `SELECT id FROM inventory.production_lots
+       WHERE production_order_line_id = $1 AND lot_type = 'FG' AND remaining_qty > 0 LIMIT 1`,
+      [lineId],
+    );
+    await packages.generate(
+      { requestId: randomUUID(), fgLotId: fg.id, packSize: 100 },
+      USER,
+    );
+    expect(await orderStatus()).toBe('COMPLETED');
+    expect((await rec.reconcile(lineId)).issues).toEqual([]);
+  });
 });
