@@ -397,6 +397,15 @@ export async function seed(dataSource: DataSource) {
         parentCode: 'PRODUCTS_LIST',
       },
       {
+        code: 'PRODUCTION_TRACEABILITY',
+        name_th: 'สอบกลับการผลิต',
+        name_en: 'Production Traceability',
+        path: '/production/traceability',
+        icon: 'scan-search',
+        sort_order: 98,
+        parentCode: 'PRODUCTS_LIST',
+      },
+      {
         code: 'MATERIALS_PC_OVERVIEW',
         name_th: 'ภาพรวมวัตถุดิบ',
         name_en: 'Materials Overview',
