@@ -123,6 +123,18 @@ export class ProcessService {
       );
     }
     const scanned = dto.boxes ?? [];
+    // For now the only way to record production after the first step is to
+    // scan the boxes (FIFO). The unscanned FIFO / pick-a-lot ways still exist
+    // in this service; set PRODUCTION_REQUIRE_BOX_SCAN=false to bring them back.
+    if (
+      stepIndex > 0 &&
+      !scanned.length &&
+      process.env.PRODUCTION_REQUIRE_BOX_SCAN !== 'false'
+    ) {
+      throw new ConflictException(
+        'ขั้นตอนนี้ต้องสแกน QR กล่องก่อนบันทึกผลิต (ตามลำดับ FIFO)',
+      );
+    }
     if (scanned.length && (stepIndex === 0 || mode === 'MANUAL')) {
       throw new BadRequestException(
         'สแกนกล่องใช้ได้ตั้งแต่ขั้นตอนที่ 2 และใช้ร่วมกับการเลือก Lot ไม่ได้',

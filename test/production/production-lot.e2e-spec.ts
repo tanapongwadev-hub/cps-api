@@ -541,6 +541,15 @@ describe('Production lot traceability (cps_db_test)', () => {
     expect((await rec.reconcile(lineId)).issues).toEqual([]);
   });
 
+  it('scan-only — with the switch on, producing after the first step without scanning is refused', async () => {
+    process.env.PRODUCTION_REQUIRE_BOX_SCAN = 'true';
+    try {
+      await expectConflict(produce(1, { goodQty: 1 }, D2));
+    } finally {
+      process.env.PRODUCTION_REQUIRE_BOX_SCAN = 'false';
+    }
+  });
+
   it('reconciliation — the whole line agrees with its ledger and origins', async () => {
     const r = await rec.reconcile(lineId);
     expect(r.issues).toEqual([]);
