@@ -41,6 +41,13 @@ export class TransferDto {
   @Min(1)
   qty: number;
 
+  /** Pieces per box (default: the order line's packing quantity). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  packSize?: number;
+
   @IsOptional()
   @IsIn(['FIFO', 'MANUAL'])
   allocationMode?: 'FIFO' | 'MANUAL';

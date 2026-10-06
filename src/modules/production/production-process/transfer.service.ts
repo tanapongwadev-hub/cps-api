@@ -1,7 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
-import { qrSvgDataUrl } from '../../../common/qr-svg';
 import { recordAuditEvent } from '../../../common/stock-ledger';
 import {
   Allocation,
@@ -19,6 +18,7 @@ import { ProductionTransaction } from '../entities/production-transaction.entity
 import { LotService } from '../production-lot/lot.service';
 import { LedgerService } from '../production-transaction/ledger.service';
 import { completeLotOrderIfDone } from './completion';
+import { loadWipBoxes, type TransferBox } from './wip-boxes';
 import { WipService } from '../production-wip/wip.service';
 import { WorkflowStepInfo } from '../workflow-steps';
 import { TransferDto } from './dto/transfer.dto';
@@ -31,9 +31,10 @@ export interface TransferResult {
   transfers: Array<{
     lotNo: string;
     qty: number;
-    /** Transfer tag of the WIP row this created at the next step. */
+    /** Batch QR of the WIP row this created at the next step. */
     qrCode: string | null;
-    qrImage: string | null;
+    /** One box (one QR each) per pack of the batch. */
+    boxes: TransferBox[];
     origins: Array<{ lotNo: string; qty: number }>;
   }>;
 }
@@ -139,6 +140,7 @@ export class TransferService {
           processStepId: next.processStepId,
           sourceLotId: lot.id,
           sourceLotNo: lot.lotNo,
+          packSize: dto.packSize ?? line.packingQuantity,
           qty: allocation.qty,
           origins,
           receivedAt: now,
@@ -204,7 +206,7 @@ export class TransferService {
     replayed: boolean,
   ): Promise<TransferResult> {
     const moves = (await manager.query(
-      `SELECT t.id, l.lot_no, t.qty, w.qr_code
+      `SELECT t.id, l.lot_no, t.qty, w.qr_code, t.target_wip_id
        FROM inventory.production_transactions t
        JOIN inventory.production_lots l ON l.id = t.source_lot_id
        LEFT JOIN inventory.process_wip w ON w.id = t.target_wip_id
@@ -217,6 +219,7 @@ export class TransferService {
       lot_no: string;
       qty: number;
       qr_code: string | null;
+      target_wip_id: string;
     }>;
     const origins = (await manager.query(
       `SELECT o.transaction_id, ol.lot_no, o.qty
@@ -230,6 +233,10 @@ export class TransferService {
       lot_no: string;
       qty: number;
     }>;
+    const boxesByWip = await loadWipBoxes(
+      manager,
+      moves.map((m) => String(m.target_wip_id)),
+    );
     const totals = (await manager.query(
       `SELECT
          (SELECT COALESCE(SUM(remaining_qty), 0) FROM inventory.production_lots
@@ -250,17 +257,15 @@ export class TransferService {
         code: next.code,
         waitingQty: totals[0].waiting,
       },
-      transfers: await Promise.all(
-        moves.map(async (m) => ({
-          lotNo: m.lot_no,
-          qty: Number(m.qty),
-          qrCode: m.qr_code,
-          qrImage: m.qr_code ? await qrSvgDataUrl(m.qr_code) : null,
-          origins: origins
-            .filter((o) => String(o.transaction_id) === String(m.id))
-            .map((o) => ({ lotNo: o.lot_no, qty: Number(o.qty) })),
-        })),
-      ),
+      transfers: moves.map((m) => ({
+        lotNo: m.lot_no,
+        qty: Number(m.qty),
+        qrCode: m.qr_code,
+        boxes: boxesByWip.get(String(m.target_wip_id)) ?? [],
+        origins: origins
+          .filter((o) => String(o.transaction_id) === String(m.id))
+          .map((o) => ({ lotNo: o.lot_no, qty: Number(o.qty) })),
+      })),
     };
   }
 }

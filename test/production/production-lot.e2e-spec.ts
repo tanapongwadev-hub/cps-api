@@ -697,8 +697,28 @@ describe('Production lot traceability (cps_db_test)', () => {
     ).toBe(scan.qty);
     expect(scan.origins.reduce((n, o) => n + o.qty, 0)).toBe(scan.qty);
 
+    // Boxes: one QR per pack of the batch, computed from the WIP row.
     const list = await board.tags(lineId, Number(tag.step_index));
-    expect(list.some((t) => t.qrCode === tag.qr_code)).toBe(true);
-    expect(list[0].qrImage).toMatch(/^data:image\/svg\+xml/);
+    const mine = list.filter((t) => t.batchQr === tag.qr_code);
+    expect(mine.length).toBeGreaterThan(0);
+    for (const b of mine) {
+      expect(b.qrCode).toBe(
+        `${tag.qr_code}-B${String(b.boxNo).padStart(3, '0')}`,
+      );
+      expect(b.qrImage).toMatch(/^data:image\/svg\+xml/);
+      expect(b.origins.reduce((n, o) => n + o.qty, 0)).toBe(b.qty);
+    }
+    expect(mine.reduce((n, b) => n + b.qty, 0)).toBe(scan.qty);
+    expect(mine.slice(0, -1).every((b) => b.qty === 100)).toBe(true);
+
+    const boxScan = (await trace.scan(mine[0].qrCode)) as unknown as {
+      kind: string;
+      box: { boxNo: number; qty: number; boxCount: number } | null;
+      boxes: unknown[];
+    };
+    expect(boxScan.kind).toBe('TRANSFER');
+    expect(boxScan.box?.boxNo).toBe(1);
+    expect(boxScan.box?.qty).toBe(mine[0].qty);
+    expect(boxScan.boxes).toHaveLength(mine.length);
   });
 });

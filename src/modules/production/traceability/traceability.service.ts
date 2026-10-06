@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { parseTransferBoxCode } from '../domain/packing';
+import { loadWipBoxes } from '../production-process/wip-boxes';
 
 export interface OriginShare {
   lotNo: string;
@@ -92,7 +94,9 @@ export class TraceabilityService {
    * batch is now — waiting at the step, produced into which lots, scrapped or
    * closed — plus where it came from.
    */
-  async traceByTransferTag(code: string) {
+  async traceByTransferTag(rawCode: string) {
+    const boxRef = parseTransferBoxCode(rawCode);
+    const code = boxRef ? boxRef.batchQr : rawCode;
     const rows = await this.dataSource.query<
       Array<{
         id: string;
@@ -165,8 +169,42 @@ export class TraceabilityService {
        ORDER BY tl.id`,
       [wip.id],
     );
+    const boxes =
+      (await loadWipBoxes(this.dataSource.manager, [String(wip.id)])).get(
+        String(wip.id),
+      ) ?? [];
+    const box = boxRef
+      ? boxes.find((b) => b.boxNo === boxRef.boxNo)
+      : undefined;
+    if (boxRef && !box) {
+      throw new NotFoundException(`ไม่พบ QR ส่งต่อ "${rawCode}"`);
+    }
+    const originInfo = new Map(origins.map((o) => [o.lot_no, o]));
     return {
       kind: 'TRANSFER' as const,
+      box: box
+        ? {
+            qrCode: box.qrCode,
+            boxNo: box.boxNo,
+            boxCount: box.boxCount,
+            qty: box.qty,
+            doneQty: box.doneQty,
+            status: box.status,
+            origins: box.origins.map((o) => ({
+              lotNo: o.lotNo,
+              productionDate: originInfo.get(o.lotNo)?.production_date ?? '',
+              shift: originInfo.get(o.lotNo)?.shift_key ?? '',
+              qty: o.qty,
+            })),
+          }
+        : null,
+      boxes: boxes.map((b) => ({
+        qrCode: b.qrCode,
+        boxNo: b.boxNo,
+        qty: b.qty,
+        doneQty: b.doneQty,
+        status: b.status,
+      })),
       qrCode: wip.qr_code,
       ...context,
       fromStep: { stepIndex: source.step_index, code: source.process_code },

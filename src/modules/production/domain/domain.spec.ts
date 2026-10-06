@@ -4,7 +4,13 @@ import {
   InsufficientQuantityError,
   validateManualAllocation,
 } from './allocation';
-import { packageQrCode, splitIntoBoxes } from './packing';
+import {
+  packageQrCode,
+  parseTransferBoxCode,
+  splitIntoBoxes,
+  transferBoxCode,
+  wipBoxes,
+} from './packing';
 
 describe('allocateBySource (MANUAL at produce)', () => {
   // WIP rows at a step in FIFO order; lot A arrived twice.
@@ -254,5 +260,47 @@ describe('allocateFifo', () => {
   it('rejects non-positive or fractional quantities', () => {
     expect(() => allocateFifo(rows, 0)).toThrow();
     expect(() => allocateFifo(rows, 1.5)).toThrow();
+  });
+});
+
+describe('transfer boxes (wipBoxes)', () => {
+  it('splits a batch into full boxes then a partial one, origins dealt oldest first', () => {
+    const boxes = wipBoxes(
+      250,
+      100,
+      [
+        { key: 'A', qty: 150 },
+        { key: 'B', qty: 100 },
+      ],
+      0,
+    );
+    expect(boxes.map((b) => b.qty)).toEqual([100, 100, 50]);
+    expect(boxes[0].origins).toEqual([{ key: 'A', qty: 100 }]);
+    expect(boxes[1].origins).toEqual([
+      { key: 'A', qty: 50 },
+      { key: 'B', qty: 50 },
+    ]);
+    expect(boxes[2].origins).toEqual([{ key: 'B', qty: 50 }]);
+    expect(boxes.every((b) => b.status === 'WAITING')).toBe(true);
+  });
+
+  it('applies consumed pieces from the first box on', () => {
+    const boxes = wipBoxes(250, 100, [{ key: 'A', qty: 250 }], 130);
+    expect(boxes.map((b) => [b.doneQty, b.status])).toEqual([
+      [100, 'DONE'],
+      [30, 'PARTIAL'],
+      [0, 'WAITING'],
+    ]);
+  });
+
+  it('is one box without a pack size, and codes round-trip', () => {
+    expect(wipBoxes(70, null, [{ key: 'A', qty: 70 }], 0)).toHaveLength(1);
+    const code = transferBoxCode('TQ-WE-691004-010-S2-01', 3);
+    expect(code).toBe('TQ-WE-691004-010-S2-01-B003');
+    expect(parseTransferBoxCode(code)).toEqual({
+      batchQr: 'TQ-WE-691004-010-S2-01',
+      boxNo: 3,
+    });
+    expect(parseTransferBoxCode('TQ-WE-691004-010-S2-01')).toBeNull();
   });
 });

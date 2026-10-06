@@ -71,6 +71,7 @@ export class WipService {
       processStepId: string;
       sourceLotId: string;
       sourceLotNo: string;
+      packSize: number;
       qty: number;
       origins: Array<{ originLotId: string; qty: number }>;
       receivedAt: Date;
@@ -86,6 +87,7 @@ export class WipService {
     )) as unknown as Array<{ n: number }>;
     const wip = await repo.save(
       repo.create({
+        packSize: input.packSize,
         qrCode: transferQrCode(
           input.sourceLotNo,
           input.stepIndex,

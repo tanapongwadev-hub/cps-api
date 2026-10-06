@@ -30,3 +30,69 @@ export function transferQrCode(
 export function packageQrCode(lotNo: string, boxNo: number): string {
   return `QR-${lotNo}-BOX${String(boxNo).padStart(3, '0')}`;
 }
+
+/** QR of one box of a transfer batch: {batch QR}-B{nnn}. */
+export function transferBoxCode(batchQr: string, boxNo: number): string {
+  return `${batchQr}-B${String(boxNo).padStart(3, '0')}`;
+}
+
+/** Splits a box code back into its batch QR and box number (null if not a box code). */
+export function parseTransferBoxCode(
+  code: string,
+): { batchQr: string; boxNo: number } | null {
+  const m = /^(TQ-.+)-B(\d{3,})$/i.exec(code.trim());
+  return m ? { batchQr: m[1].toUpperCase(), boxNo: Number(m[2]) } : null;
+}
+
+export type WipBoxStatus = 'WAITING' | 'PARTIAL' | 'DONE';
+
+export interface WipBox<K> {
+  boxNo: number;
+  qty: number;
+  /** Pieces of this box already produced / scrapped / closed. */
+  doneQty: number;
+  status: WipBoxStatus;
+  /** Origin pieces in the box, oldest origin first (sums to qty). */
+  origins: Array<{ key: K; qty: number }>;
+}
+
+/**
+ * The boxes of one WIP row (a transferred batch): `qtyIn` pieces split into
+ * boxes of `packSize` (full ones first, then a partial one). Origins are
+ * dealt out in order (oldest first), the same order the row gives its pieces
+ * up. `consumed` (used + rejected + closed) is applied from the first box on —
+ * the row hands out pieces FIFO, so box 1 is worked on first. Boxes are
+ * computed, never stored, so reversals need no bookkeeping.
+ */
+export function wipBoxes<K>(
+  qtyIn: number,
+  packSize: number | null,
+  origins: Array<{ key: K; qty: number }>,
+  consumed: number,
+): WipBox<K>[] {
+  const sizes =
+    packSize && packSize > 0 ? splitIntoBoxes(qtyIn, packSize) : [qtyIn];
+  const pool = origins.map((o) => ({ ...o }));
+  let at = 0;
+  let left = consumed;
+  return sizes.map((qty, i) => {
+    const boxOrigins: Array<{ key: K; qty: number }> = [];
+    let need = qty;
+    while (need > 0 && at < pool.length) {
+      const take = Math.min(need, pool[at].qty);
+      if (take > 0) boxOrigins.push({ key: pool[at].key, qty: take });
+      pool[at].qty -= take;
+      need -= take;
+      if (pool[at].qty === 0) at += 1;
+    }
+    const doneQty = Math.max(0, Math.min(qty, left));
+    left -= doneQty;
+    return {
+      boxNo: i + 1,
+      qty,
+      doneQty,
+      status: doneQty === 0 ? 'WAITING' : doneQty < qty ? 'PARTIAL' : 'DONE',
+      origins: boxOrigins,
+    };
+  });
+}

@@ -62,6 +62,10 @@ export class ProcessWip {
   @Column({ name: 'qr_code', type: 'varchar', length: 80, nullable: true })
   qrCode: string | null;
 
+  /** Pieces per box of this batch (boxes are computed, see wipBoxes). */
+  @Column({ name: 'pack_size', type: 'integer', nullable: true })
+  packSize: number | null;
+
   @Column({ type: 'varchar', length: 10, default: 'OPEN' })
   status: WipStatus;
 
