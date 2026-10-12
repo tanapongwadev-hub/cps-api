@@ -6,22 +6,26 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, EntityManager, Repository, SelectQueryBuilder } from 'typeorm';
 import { DeliveryType } from '../../entities/master/delivery-type.entity';
 import { MaterialTypeMaster } from '../../entities/master/material-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
-import { Material, MaterialShape } from '../../entities/master/material.entity';
+import { Material, MaterialLocationType, MaterialShape } from '../../entities/master/material.entity';
+import { MaterialDraft } from '../../entities/master/material-draft.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { CreateMaterialDto } from './dto/create-material.dto';
+import { MaterialProcessingOutputDto } from './dto/material-processing-output.dto';
 import {
   ListMaterialsQueryDto,
   MaterialSortBy,
 } from './dto/list-materials-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { MaterialImageStorageService } from './material-image-storage.service';
+import { MaterialDraftsService } from './material-drafts.service';
+import { createTraceId, recordAuditEvent } from '../../common/stock-ledger';
 
 const MATERIAL_SORT_COLUMNS: Record<MaterialSortBy, string> = {
   code: 'material.code',
@@ -90,6 +94,7 @@ export class MaterialsService {
     private loadingPointRepository: Repository<LoadingPoint>,
     private dataSource?: DataSource,
     private imageStorage?: MaterialImageStorageService,
+    private drafts?: MaterialDraftsService,
   ) {}
 
   async create(
@@ -99,8 +104,12 @@ export class MaterialsService {
     this.assertUniqueSupplierIds(dto.supplierIds);
     const resolvedRatio = this.resolveRatio(dto.materialType, dto.ratio);
     let promotedImagePath: string | undefined;
+    let committedDraftImage: string | null = null;
+    let committedOutputDraftImage: string | null = null;
+    const outputImage: { promoted?: string; previous?: string | null } = {};
     try {
-      return await this.getDataSource().transaction(async (manager) => {
+      const result = await this.getDataSource().transaction(async (manager) => {
+        const draft = dto.draftId ? await this.requireDrafts().lockForCommit(manager, dto.draftId, userId, null, dto.draftUpdatedAt) : null;
         const materialRepository = manager.getRepository(Material);
         const unitRepository = manager.getRepository(Unit);
         const supplierRepository = manager.getRepository(Supplier);
@@ -133,8 +142,9 @@ export class MaterialsService {
           },
         );
         if (dto.imagePath) {
+          const incoming = draft?.imagePath === dto.imagePath ? await this.getImageStorage().copyDraftToTemporary(dto.imagePath) : dto.imagePath;
           promotedImagePath = await this.getImageStorage().promote(
-            dto.imagePath,
+            incoming,
           );
         }
 
@@ -143,6 +153,7 @@ export class MaterialsService {
           name: dto.name,
           type: dto.type ?? null,
           materialType: dto.materialType ?? null,
+          locationType: dto.locationType ?? MaterialLocationType.EXTERNAL,
           ratio: resolvedRatio,
           unitId: dto.unitId,
           deliveryTypeId: dto.deliveryTypeId ?? null,
@@ -160,6 +171,7 @@ export class MaterialsService {
           createdBy: userId,
           updatedBy: userId,
         });
+        await this.saveProcessingOutput(manager, material, dto.processingOutput, userId, outputImage, draft);
         const savedMaterial = await this.saveMaterial(
           materialRepository,
           material,
@@ -181,10 +193,20 @@ export class MaterialsService {
           );
         }
 
+        if (draft) {
+          committedDraftImage = draft.imagePath;
+          committedOutputDraftImage = typeof draft.data.outputImagePath === 'string' ? draft.data.outputImagePath : null;
+          await manager.getRepository(MaterialDraft).remove(draft);
+        }
         return this.findOneUsing(materialRepository, savedMaterial.id);
       });
+      await this.drafts?.discardImage(committedDraftImage);
+      await this.drafts?.discardImage(committedOutputDraftImage);
+      if (outputImage.previous) await this.discardCommittedImage(outputImage.previous);
+      return result;
     } catch (error) {
       await this.compensatePromotedImage(promotedImagePath);
+      await this.compensatePromotedImage(outputImage.promoted);
       throw error;
     }
   }
@@ -198,9 +220,19 @@ export class MaterialsService {
     let promotedImagePath: string | undefined;
     let previousImagePath: string | null | undefined;
     let imageChanged = false;
+    let committedDraftImage: string | null = null;
+    let committedOutputDraftImage: string | null = null;
+    const outputImage: { promoted?: string; previous?: string | null } = {};
     let result: MaterialWithSuppliers;
     try {
       result = await this.getDataSource().transaction(async (manager) => {
+        const draft = dto.draftId ? await this.requireDrafts().lockForCommit(manager, dto.draftId, userId, id, dto.draftUpdatedAt) : null;
+        if (draft && (!draft.materialUpdatedAt || draft.materialUpdatedAt.getTime() !== new Date(dto.updatedAt).getTime())) {
+          throw new ConflictException('เวอร์ชันวัสดุต้นทางไม่ตรงกับร่าง');
+        }
+        if (draft?.outputUpdatedAt && dto.processingOutput && draft.outputUpdatedAt.getTime() !== new Date(dto.processingOutput.updatedAt ?? '').getTime()) {
+          throw new ConflictException('เวอร์ชันวัสดุปลายทางไม่ตรงกับร่าง');
+        }
         const materialRepository = manager.getRepository(Material);
         const unitRepository = manager.getRepository(Unit);
         const supplierRepository = manager.getRepository(Supplier);
@@ -269,8 +301,9 @@ export class MaterialsService {
           previousImagePath = material.imagePath;
           imageChanged = dto.imagePath !== material.imagePath;
           if (imageChanged && dto.imagePath !== null) {
+            const incoming = draft?.imagePath === dto.imagePath ? await this.getImageStorage().copyDraftToTemporary(dto.imagePath) : dto.imagePath;
             promotedImagePath = await this.getImageStorage().promote(
-              dto.imagePath,
+              incoming,
             );
             effectiveDto = { ...dto, imagePath: promotedImagePath };
           }
@@ -290,6 +323,11 @@ export class MaterialsService {
         }
 
         this.applyUpdate(material, effectiveDto, normalizedCode, userId);
+        if (material.materialType !== MaterialShape.PCS &&
+          await materialRepository.findOne({ where: { processingMaterialId: material.id } })) {
+          throw new BadRequestException('วัสดุปลายทางที่เชื่อมโยงอยู่ต้องเป็นชนิด PCS');
+        }
+        await this.saveProcessingOutput(manager, material, dto.processingOutput, userId, outputImage, draft);
         await this.saveMaterial(materialRepository, material);
         if (dto.supplierIds !== undefined) {
           await this.synchronizeSuppliers(
@@ -299,13 +337,22 @@ export class MaterialsService {
             userId,
           );
         }
+        if (draft) {
+          committedDraftImage = draft.imagePath;
+          committedOutputDraftImage = typeof draft.data.outputImagePath === 'string' ? draft.data.outputImagePath : null;
+          await manager.getRepository(MaterialDraft).remove(draft);
+        }
         return this.findOneUsing(materialRepository, material.id);
       });
     } catch (error) {
       await this.compensatePromotedImage(promotedImagePath);
+      await this.compensatePromotedImage(outputImage.promoted);
       throw error;
     }
 
+    await this.drafts?.discardImage(committedDraftImage);
+    await this.drafts?.discardImage(committedOutputDraftImage);
+    if (outputImage.previous) await this.discardCommittedImage(outputImage.previous);
     if (
       imageChanged &&
       previousImagePath &&
@@ -318,6 +365,73 @@ export class MaterialsService {
 
   async deactivate(id: string, userId: string): Promise<MaterialWithSuppliers> {
     return this.setActive(id, false, userId);
+  }
+
+  async deletionCheck(id: string) {
+    if (!/^[1-9]\d*$/.test(id)) throw new BadRequestException('Material ID ไม่ถูกต้อง');
+    return this.getDataSource().transaction(async (manager) => {
+      const material = await manager.getRepository(Material).findOne({ where: { id } });
+      if (!material) throw new NotFoundException('Material not found');
+      const blockers = await this.materialDeletionBlockers(manager, id);
+      return { material: { id: material.id, code: material.code, name: material.name, locationType: material.locationType }, canDelete: blockers.length === 0, blockers };
+    });
+  }
+
+  private async materialDeletionBlockers(manager: EntityManager, id: string): Promise<string[]> {
+    // Inspect every incoming FK, including CASCADE/SET NULL links, to protect
+    // historical records and new modules without maintaining a partial list.
+    const references: { tableName: string; relation: string; columnName: string }[] = await manager.query(`
+      SELECT c.relname AS "tableName", quote_ident(n.nspname) || '.' || quote_ident(c.relname) AS relation,
+             quote_ident(a.attname) AS "columnName"
+      FROM pg_constraint fk
+      JOIN pg_class c ON c.oid = fk.conrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(fk.conkey)
+      WHERE fk.contype = 'f' AND fk.confrelid = 'master.materials'::regclass
+        AND NOT (n.nspname = 'master' AND c.relname = 'supplier_materials')
+    `);
+    const labels: Record<string, string> = {
+      materials: 'วัสดุที่เชื่อมโยงปลายทางแปรรูป', stock_balances: 'ยอดสต็อก',
+      stock_movements: 'ประวัติเคลื่อนไหวสต็อก', material_receivings: 'รายการรับเข้า',
+      stock_transactions: 'ประวัติเคลื่อนไหวสต็อก', material_reservations: 'การจองวัสดุ',
+      material_disbursement_items: 'รายการจ่ายออก', product_bom_items: 'BOM สินค้า',
+      material_bom_items: 'ส่วนประกอบ BOM วัสดุ', material_boms: 'BOM วัสดุ',
+      material_workflows: 'Workflow วัสดุ', material_processings: 'ประวัติแปรรูป',
+      material_drafts: 'ร่างวัสดุ',
+    };
+    const blockers = new Set<string>();
+    // Drafts store a material id without an entity relation/FK.
+    if (await manager.getRepository(MaterialDraft).count({ where: { materialId: id } })) blockers.add('ร่างวัสดุ');
+    for (const reference of references) {
+      // Identifiers are quoted by PostgreSQL; the user-provided id stays bound.
+      const rows = await manager.query(`SELECT 1 FROM ${reference.relation} WHERE ${reference.columnName} = $1 LIMIT 1`, [id]);
+      if (rows.length) blockers.add(labels[reference.tableName] ?? 'ข้อมูลที่เชื่อมโยงวัสดุ');
+    }
+    return [...blockers];
+  }
+
+  async deletePermanently(id: string, confirmationCode: string, userId: string) {
+    if (!/^[1-9]\d*$/.test(id)) throw new BadRequestException('Material ID ไม่ถูกต้อง');
+    try {
+      return await this.getDataSource().transaction(async (manager) => {
+        const repository = manager.getRepository(Material);
+        const material = await repository.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+        if (!material) throw new NotFoundException('Material not found');
+        if (confirmationCode !== material.code) throw new BadRequestException('กรุณาพิมพ์รหัสวัสดุให้ตรงกับรายการที่ต้องการลบ');
+        const blockers = await this.materialDeletionBlockers(manager, id);
+        if (blockers.length) throw new ConflictException(`ลบไม่ได้: มี${blockers.join(', ')} กรุณาปิดใช้งานแทน`);
+        const before = { id, code: material.code, name: material.name, locationType: material.locationType };
+        await manager.getRepository(SupplierMaterial).delete({ materialId: id });
+        await repository.delete(id);
+        await recordAuditEvent(manager, { traceId: createTraceId(), action: 'DELETE', eventName: 'material.permanently_deleted', targetType: 'MATERIAL', targetId: id, performedBy: userId, before });
+        return before;
+      });
+    } catch (error) {
+      if ((error as { driverError?: { code?: string } }).driverError?.code === '23503') {
+        throw new ConflictException('วัสดุมีข้อมูลอ้างอิงเพิ่มเติม กรุณาตรวจสอบอีกครั้งหรือปิดใช้งานแทน');
+      }
+      throw error;
+    }
   }
 
   async restore(id: string, userId: string): Promise<MaterialWithSuppliers> {
@@ -416,6 +530,19 @@ export class MaterialsService {
     return this.findOneUsing(this.materialRepository, id);
   }
 
+  async checkCodeAvailability(code: string, excludeId?: string) {
+    const query = this.materialRepository.createQueryBuilder('material')
+      .where('LOWER(material.code) = LOWER(:code)', { code: this.normalizeCode(code) });
+    if (excludeId) query.andWhere('material.id <> :excludeId', { excludeId });
+    // Inactive codes are still reserved by the master table's unique index.
+    return { available: (await query.getCount()) === 0 };
+  }
+
+  private requireDrafts(): MaterialDraftsService {
+    if (!this.drafts) throw new BadRequestException('ระบบบันทึกร่างไม่พร้อมใช้งาน');
+    return this.drafts;
+  }
+
   private async findOneUsing(
     repository: Repository<Material>,
     id: string,
@@ -473,6 +600,7 @@ export class MaterialsService {
   ): SelectQueryBuilder<Material> {
     return repository
       .createQueryBuilder('material')
+      .leftJoinAndSelect('material.processingMaterial', 'processingMaterial')
       .leftJoinAndSelect('material.unit', 'unit')
       .leftJoinAndSelect('material.model', 'model')
       .leftJoinAndSelect('material.deliveryType', 'deliveryType')
@@ -510,6 +638,8 @@ export class MaterialsService {
       'type',
       'materialType',
       'ratio',
+      'processingMaterialId',
+      'locationType',
       'unitId',
       'deliveryTypeId',
       'materialTypeId',
@@ -546,7 +676,84 @@ export class MaterialsService {
       }
     }
     result.suppliers = suppliers;
+    result.processingMaterial = material.processingMaterial ?? null;
     return result as MaterialWithSuppliers;
+  }
+
+  /** Save both datasets in the parent's transaction; existing stock/receipts are untouched. */
+  private async saveProcessingOutput(
+    manager: EntityManager,
+    source: Material,
+    dto: MaterialProcessingOutputDto | undefined,
+    userId: string,
+    imageChanges: { promoted?: string; previous?: string | null },
+    draft: MaterialDraft | null,
+  ): Promise<void> {
+    if (source.materialType === MaterialShape.PCS) {
+      if (dto) throw new BadRequestException('ข้อมูลหลังแปรรูปใช้ได้เฉพาะ PIPE, SHEET และ COIL');
+      source.processingMaterialId = null;
+      return;
+    }
+    if (!dto) return; // Compatible with existing callers and historical masters.
+    if (source.materialType !== MaterialShape.PIPE && source.materialType !== MaterialShape.SHEET && source.materialType !== MaterialShape.COIL) {
+      throw new BadRequestException('ข้อมูลหลังแปรรูปใช้ได้เฉพาะ PIPE, SHEET และ COIL');
+    }
+    if (!Number.isInteger(source.ratio) || Number(source.ratio) < 1 || Number(source.ratio) > 1000000) {
+      throw new BadRequestException('จำนวนชิ้นต่อหน่วยต้นทางต้องเป็นจำนวนเต็ม 1–1,000,000');
+    }
+    const repository = manager.getRepository(Material);
+    const code = this.normalizeCode(dto.code);
+    if (code.toLowerCase() === source.code.toLowerCase()) {
+      throw new BadRequestException('รหัสวัสดุหลังแปรรูปต้องต่างจากต้นทาง');
+    }
+    await this.assertActiveReference(manager.getRepository(Unit), dto.unitId, 'Unit');
+    if (dto.modelId) await this.assertActiveReference(manager.getRepository(MaterialModel), dto.modelId, 'Material model');
+    if (dto.loadingPointId) await this.assertActiveReference(manager.getRepository(LoadingPoint), dto.loadingPointId, 'Loading point');
+    let output: Material;
+    if (source.processingMaterialId) {
+      const existing = await repository.findOne({
+        where: { id: source.processingMaterialId }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!existing) throw new NotFoundException('Material ปลายทางไม่พบ');
+      if (!dto.updatedAt || new Date(dto.updatedAt).getTime() !== existing.updatedAt.getTime()) {
+        throw new ConflictException('Material ปลายทางถูกแก้ไขแล้ว กรุณารีเฟรช');
+      }
+      if (existing.materialType !== MaterialShape.PCS || !existing.isActive) {
+        throw new BadRequestException('Material ปลายทางต้องเป็น PCS และเปิดใช้งาน');
+      }
+      output = existing;
+    } else {
+      output = repository.create({
+        materialType: MaterialShape.PCS, ratio: null, minimumStock: '0',
+        type: source.type, materialTypeId: source.materialTypeId, modelId: source.modelId,
+        deliveryTypeId: source.deliveryTypeId, loadingPointId: source.loadingPointId,
+        processLineName: source.processLineName,
+        isActive: true, createdBy: userId,
+      });
+    }
+    await this.assertCodeAvailable(repository, code, output.id);
+    Object.assign(output, {
+      code, name: dto.name, unitId: dto.unitId,
+      locationType: dto.locationType ?? output.locationType ?? MaterialLocationType.EXTERNAL,
+      ...(dto.modelId !== undefined ? { modelId: dto.modelId } : {}),
+      ...(dto.loadingPointId !== undefined ? { loadingPointId: dto.loadingPointId } : {}),
+      ...(dto.processLineName !== undefined ? { processLineName: dto.processLineName } : {}),
+      ...(dto.scale !== undefined ? { scale: dto.scale } : {}),
+      packingQuantity: dto.packingQuantity, specification: dto.specification ?? null,
+      updatedBy: userId,
+    });
+    if (dto.imagePath !== undefined && dto.imagePath !== output.imagePath) {
+      imageChanges.previous = output.imagePath;
+      if (dto.imagePath) {
+        const incoming = draft?.data.outputImagePath === dto.imagePath
+          ? await this.getImageStorage().copyDraftToTemporary(dto.imagePath) : dto.imagePath;
+        imageChanges.promoted = await this.getImageStorage().promote(incoming);
+        output.imagePath = imageChanges.promoted;
+      } else {
+        output.imagePath = null;
+      }
+    }
+    source.processingMaterialId = (await this.saveMaterial(repository, output)).id;
   }
 
   private mapLookup(entity: MasterLookupEntity): MaterialLookupResponse {
@@ -821,6 +1028,7 @@ export class MaterialsService {
     userId: string,
   ): void {
     if (dto.code !== undefined) material.code = normalizedCode;
+    if (dto.locationType !== undefined) material.locationType = dto.locationType;
     for (const field of [
       'name',
       'type',

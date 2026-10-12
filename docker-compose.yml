@@ -25,6 +25,9 @@ services:
     environment:
       # Reach the Postgres running on the host rather than a container.
       DB_HOST: host.docker.internal
+      # Windows bind mounts do not reliably forward file-change events.
+      TSC_WATCHFILE: DynamicPriorityPolling
+      TSC_WATCHDIRECTORY: RecursiveDirectoryUsingDynamicPriorityPolling
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

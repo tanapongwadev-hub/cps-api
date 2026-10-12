@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -8,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Product } from '../../entities/master/product.entity';
+import { ProductStockMovement } from '../../entities/inventory/product-stock-movement.entity';
 import { ProductModel } from '../../entities/master/product-model.entity';
 import { Customer } from '../../entities/master/customer.entity';
 import { Location } from '../../entities/master/location.entity';
@@ -398,11 +400,15 @@ export class ProductsService {
     try {
       result = await this.getDataSource().transaction(async (manager) => {
         const repo = manager.getRepository(Product);
-        const product = await repo.findOne({ where: { id } });
+        const product = await repo.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
         if (!product) {
           throw new NotFoundException(`Product with id ${id} not found`);
         }
 
+        if (dto.unitId !== undefined && dto.unitId !== product.unitId &&
+          await manager.getRepository(ProductStockMovement).existsBy({ productId: id })) {
+          throw new BadRequestException('ไม่สามารถเปลี่ยนหน่วยสินค้าที่มีประวัติรับเข้า–จ่ายออกแล้ว');
+        }
         previousImagePath = product.productImagePath;
         let nextImagePath = product.productImagePath;
         if (dto.productImagePath !== undefined) {

@@ -28,6 +28,8 @@ import {
   ProductImageStorageService,
 } from './product-image-storage.service';
 import { ProductsService } from './products.service';
+import { ProductStockService } from './product-stock.service';
+import { CreateProductStockMovementDto } from './dto/create-product-stock-movement.dto';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard, ActiveAssignmentGuard, PermissionGuard)
@@ -35,6 +37,7 @@ export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
     private readonly imageStorage: ProductImageStorageService,
+    private readonly productStock: ProductStockService,
   ) {}
 
   @Get()
@@ -61,6 +64,24 @@ export class ProductsController {
   )
   stageImage(@UploadedFile() file: ProductImageFile) {
     return this.imageStorage.stage(file);
+  }
+
+  @Get('stock-balances')
+  @RequirePermissions(PRODUCTS_PERMISSIONS.VIEW)
+  stockBalances() {
+    return this.productStock.balances();
+  }
+
+  @Get(':id/stock')
+  @RequirePermissions(PRODUCTS_PERMISSIONS.VIEW)
+  stock(@Param('id') id: string) {
+    return this.productStock.getStock(id);
+  }
+
+  @Post(':id/stock-movements')
+  @RequirePermissions(PRODUCTS_PERMISSIONS.UPDATE)
+  recordStock(@Param('id') id: string, @Body() dto: CreateProductStockMovementDto, @CurrentUser('id') userId: string) {
+    return this.productStock.record(id, dto, userId);
   }
 
   @Get(':id')

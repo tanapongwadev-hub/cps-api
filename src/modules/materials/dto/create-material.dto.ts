@@ -1,23 +1,29 @@
-import { Transform, TransformFnParams } from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import {
   MaterialShape,
+  MaterialLocationType,
   MaterialType,
 } from '../../../entities/master/material.entity';
+
+import { MaterialProcessingOutputDto } from './material-processing-output.dto';
 
 const POSITIVE_DECIMAL_ID = /^[1-9]\d*$/;
 
@@ -53,6 +59,16 @@ function trimStringArray(params: TransformFnParams): unknown {
 }
 
 export class CreateMaterialDto {
+  @IsOptional() @IsString() @Matches(POSITIVE_DECIMAL_ID)
+  draftId?: string;
+  @IsOptional() @IsISO8601({ strict: true })
+  draftUpdatedAt?: string;
+  @ValidateIf((value: CreateMaterialDto) => value.processingOutput !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => MaterialProcessingOutputDto)
+  processingOutput?: MaterialProcessingOutputDto;
+
   @Transform(trimString)
   @IsString()
   @IsNotEmpty()
@@ -76,6 +92,10 @@ export class CreateMaterialDto {
   @IsNotEmpty()
   @IsIn(['PCS', 'PIPE', 'SHEET', 'COIL'])
   materialType: MaterialShape;
+
+  @ValidateIf((dto: CreateMaterialDto) => dto.locationType !== undefined)
+  @IsIn(Object.values(MaterialLocationType))
+  locationType?: MaterialLocationType;
 
   /**
    * `ratio` is required when `materialType` is PIPE / SHEET / COIL.

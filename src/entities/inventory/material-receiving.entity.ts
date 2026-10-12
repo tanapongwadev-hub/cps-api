@@ -78,6 +78,14 @@ export class MaterialReceiving {
   @Column({ name: 'material_id', type: 'bigint' })
   materialId: string;
 
+  /** Receiving lot consumed to produce this lot; null for supplier receipts. */
+  @Index()
+  @Column({ name: 'source_receiving_id', type: 'bigint', nullable: true })
+  sourceReceivingId: string | null;
+
+  @Column({ name: 'processed_quantity', type: 'numeric', precision: 18, scale: 4, default: 0 })
+  processedQuantity: string;
+
   @Column({ name: 'unit_id', type: 'bigint' })
   unitId: string;
 

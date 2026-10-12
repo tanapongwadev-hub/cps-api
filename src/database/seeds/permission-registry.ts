@@ -119,6 +119,10 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     POST: MATERIALS_RECEIVING_PERMISSIONS.CONFIRM,
     CANCEL: MATERIALS_RECEIVING_PERMISSIONS.CANCEL,
   },
+  MATERIAL_PROCESSING: {
+    READ: 'MATERIAL_PROCESSING_VIEW',
+    CREATE: 'MATERIAL_PROCESSING_CREATE',
+  },
   MATERIALS_DISBURSEMENT: {
     ...fromCrud(MATERIALS_DISBURSEMENT_PERMISSIONS),
     POST: MATERIALS_DISBURSEMENT_PERMISSIONS.CONFIRM,
@@ -182,6 +186,11 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
 
 /** เมนูที่ต้องการ action นอกเหนือจากชุดเริ่มต้น */
 export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
+  BOM_WORKFLOW: [],
+  MATERIAL_ENGINEERING: ['READ', 'CREATE', 'UPDATE'],
+  MATERIAL_WORKFLOW_ACTIONS: ['READ', 'CREATE', 'UPDATE'],
+  PRODUCT_WORKFLOW_ACTIONS: ['READ', 'CREATE', 'UPDATE'],
+  MATERIAL_PROCESSING: ['READ', 'CREATE'],
   MATERIALS_PC_OVERVIEW: ['READ'],
   PRODUCT_PROCESS_ORDERS: ['READ', 'CREATE', 'UPDATE', 'REVERSE'],
   PRODUCTION_TRACEABILITY: ['READ'],
@@ -205,6 +214,8 @@ export function resolvePermissionCode(
   menuCode: string,
   actionCode: string,
 ): string {
+  const engineeringPrefixes: Record<string, string> = { MATERIAL_ENGINEERING: 'MATERIAL_BOMS', MATERIAL_WORKFLOW_ACTIONS: 'MATERIAL_WORKFLOWS', PRODUCT_WORKFLOW_ACTIONS: 'PRODUCT_WORKFLOWS' };
+  if (engineeringPrefixes[menuCode]) return `${engineeringPrefixes[menuCode]}_${actionCode === 'READ' ? 'VIEW' : actionCode}`;
   return (
     MENU_PERMISSION_REGISTRY[menuCode]?.[actionCode] ??
     `${menuCode}_${actionCode}`

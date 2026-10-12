@@ -19,6 +19,7 @@ import {
   ProductImageStorageService,
 } from './product-image-storage.service';
 import { ProductsService } from './products.service';
+import { ProductStockService } from './product-stock.service';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { ProductsService } from './products.service';
   controllers: [ProductsController],
   providers: [
     ProductsService,
+    ProductStockService,
     {
       provide: PRODUCT_IMAGE_ROOT,
       inject: [ConfigService],

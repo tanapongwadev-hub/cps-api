@@ -518,7 +518,7 @@ describe('MaterialsReceivingService', () => {
 
     it('computes piecesQuantity for PIPE materials', async () => {
       const { service, repos } = setup();
-      // receiveQuantity = 1000, ratio = 4 -> piecesQuantity = 4000
+      // receiveQuantity = 1000 remains 1000 regardless of ratio
       repos.materialRepo.findOne.mockResolvedValue(
         makeMaterial({ materialType: MaterialShape.PIPE, ratio: 4 }),
       );
@@ -531,11 +531,13 @@ describe('MaterialsReceivingService', () => {
       repos.organizationRepo.findOne.mockResolvedValue(makeOrganization());
       await service.create({ ...baseDto }, '9');
       const receivingSaved = repos.receivingRepo.save.mock.calls[0][0];
-      expect(receivingSaved.piecesQuantity).toBe('4000.0000');
+      expect(receivingSaved.piecesQuantity).toBe('1000.0000');
+      expect(receivingSaved.packageCount).toBe(1);
+      expect(repos.packageRepo.save.mock.calls[0][0].map((pkg: MaterialReceivingPackage) => pkg.quantity)).toEqual(['1000.0000']);
       expect(receivingSaved.piecesQrCode).toBeTruthy();
       expect(receivingSaved.piecesQrPayload).toBeTruthy();
       expect(receivingSaved.piecesQrPayload.version).toBe('2.0');
-      expect(receivingSaved.piecesQrPayload.piecesQuantity).toBe('4000.0000');
+      expect(receivingSaved.piecesQrPayload.piecesQuantity).toBe('1000.0000');
       expect(receivingSaved.piecesQrPayload.materialType).toBe('PIPE');
     });
 
@@ -674,25 +676,25 @@ describe('MaterialsReceivingService', () => {
         materialReceivingId: string;
         quantity: string;
       }>;
-      expect(savedPackages).toHaveLength(2);
+      expect(savedPackages).toHaveLength(1);
       expect(
         savedPackages.every((pkg) => pkg.materialReceivingId === '10'),
       ).toBe(true);
       expect(savedPackages.map((pkg) => Number(pkg.quantity))).toEqual([
-        20, 20,
+        2,
       ]);
       expect(repos.stockBalanceRepo.save.mock.calls[0][0].quantity).toBe(
-        '40.0000',
+        '2.0000',
       );
-      // One RECEIVE movement per SUB QR (2 packages), summing to the
-      // converted stock quantity — not one aggregate movement.
-      expect(repos.stockTransactionRepo.save).toHaveBeenCalledTimes(2);
+      // One RECEIVE movement per SUB QR (1 package), summing to the
+      // entered stock quantity — not one aggregate movement.
+      expect(repos.stockTransactionRepo.save).toHaveBeenCalledTimes(1);
       const movementTotal = repos.stockTransactionRepo.save.mock.calls.reduce(
         (sum: number, call: unknown[]) =>
           sum + Number((call[0] as { quantityIn: string }).quantityIn),
         0,
       );
-      expect(movementTotal).toBe(40);
+      expect(movementTotal).toBe(2);
     });
 
     it('does not update stock when SUB QR creation fails', async () => {
@@ -827,7 +829,7 @@ describe('MaterialsReceivingService', () => {
       );
     });
 
-    it('adds converted quantity to stock for ratio-based materials', async () => {
+    it('preserves stored quantities when confirming historical converted receivings', async () => {
       const { service, repos } = setup();
       repos.receivingRepo.findOne.mockResolvedValue(
         makeReceiving({
@@ -979,7 +981,7 @@ describe('MaterialsReceivingService', () => {
 
   describe('package count math', () => {
     it.each([MaterialShape.PIPE, MaterialShape.SHEET, MaterialShape.COIL])(
-      'uses converted quantity for %s package breakdown',
+      'uses entered quantity for %s package breakdown',
       (materialType) => {
         const { service } = setup();
         const calculator = service as unknown as {
@@ -1000,7 +1002,7 @@ describe('MaterialsReceivingService', () => {
         };
 
         const stockQuantity = calculator.computeStockQuantity(
-          materialType === MaterialShape.PIPE ? '3' : '2',
+          materialType === MaterialShape.PIPE ? '60' : '40',
           materialType,
           20,
         );
@@ -1043,7 +1045,7 @@ describe('MaterialsReceivingService', () => {
       ).toBe('3.0000');
     });
 
-    it.each([0, null])('rejects invalid ratio %s for PIPE', (ratio) => {
+    it.each([0, null])('receives PIPE directly without depending on ratio %s', (ratio) => {
       const { service } = setup();
       const calculator = service as unknown as {
         computeStockQuantity: (
@@ -1053,9 +1055,7 @@ describe('MaterialsReceivingService', () => {
         ) => string;
       };
 
-      expect(() =>
-        calculator.computeStockQuantity('2', MaterialShape.PIPE, ratio),
-      ).toThrow(BadRequestException);
+      expect(calculator.computeStockQuantity('2', MaterialShape.PIPE, ratio)).toBe('2.0000');
     });
 
     it('rejects zero packing quantity', () => {

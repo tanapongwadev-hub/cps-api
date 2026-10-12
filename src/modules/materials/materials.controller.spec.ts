@@ -39,6 +39,7 @@ describe('MaterialsController', () => {
   const controller = new MaterialsController(
     service as unknown as MaterialsService,
     imageStorage as unknown as MaterialImageStorageService,
+    { list: jest.fn(), get: jest.fn(), save: jest.fn(), remove: jest.fn() } as unknown as ConstructorParameters<typeof MaterialsController>[2],
   );
 
   beforeEach(() => {

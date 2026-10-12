@@ -290,12 +290,23 @@ They are returned by `GET /products/lookups` and populated through migrations/se
 
 ## 6. Materials — `/materials`
 
+2026-10-08: Optional `processingOutput.modelId`, `loadingPointId`, `processLineName`, and `scale` persist the destination Material's own operational fields. IDs reference active Material models/loading points; text is trimmed and limited to 255 characters. Explicit null clears fields; omission preserves existing output values and older-client defaults on create. Draft data retains `outputModelId`, `outputLoadingPointId`, `outputProcessLineName`, `outputScale`. Reuses existing Material columns, with no migration or stock changes.
+
+2026-10-08: POST/PATCH accepts `locationType: "internal" | "external"` on the source and independently on nested `processingOutput`. Create defaults to `external`; omission on update preserves the current value. Explicit null/other values are rejected. List/detail include the field, including the linked processing Material. Draft `data` retains `locationType` and `outputLocationType`. Migration `1790600000022-AddMaterialLocationType` adds the non-null column and value check, backfilling existing Materials to `internal`; follow-up `1790600000023-DefaultMaterialLocationExternal` changes the default to `external` without updating existing rows. This classification does not move stock or select a Location master.
+
+2026-10-07: PIPE/SHEET/COIL create/edit supports two datasets via optional `processingOutput: { code, name, unitId, specification?, packingQuantity, updatedAt? }`. The source `ratio` sets pieces per raw unit. Both datasets save atomically: output is a distinct PCS Material linked by `processingMaterialId`, and list/detail/inventory responses include `processingMaterial`. Edits to an existing output require its current `updatedAt` as well as the parent's timestamp. Output codes must differ from the source and be unique case-insensitively; output units must be active. Saving master data changes no stock. Historical callers may omit the nested object. Migration `1790600000017-AddMaterialProcessingOutput` adds the nullable, unique foreign key. See `../admin-dashboard/docs/material-processing.md` for lifecycle rules.
+
 All routes use active-assignment permission checks.
 
 | Method   | Path                     | Permission                                  | Input/behavior                                               |
 | -------- | ------------------------ | ------------------------------------------- | ------------------------------------------------------------ |
 | `GET`    | `/materials`             | `MATERIAL_VIEW`                             | Paginated list; filters below                                |
 | `GET`    | `/materials/lookups`     | `MATERIAL_VIEW`                             | `{ units, suppliers, models, deliveryTypes, loadingPoints }` |
+| `GET`    | `/materials/code-availability` | any of `MATERIAL_VIEW`, `MATERIAL_CREATE`, `MATERIAL_UPDATE` | `code` (trimmed, 1–50 chars), optional positive numeric `excludeId`; returns `{ available }`, exact case-insensitive check including inactive masters |
+| `GET`    | `/materials/drafts` | any of `MATERIAL_CREATE`, `MATERIAL_UPDATE` | Current owner's draft summaries, latest first |
+| `GET`    | `/materials/drafts/:id` | any of `MATERIAL_CREATE`, `MATERIAL_UPDATE` | Owned draft fields, step, suppliers, retained image and original master versions |
+| `POST`   | `/materials/drafts` | any of `MATERIAL_CREATE`, `MATERIAL_UPDATE` | Save incomplete data; optional id + required updatedAt for existing drafts; never creates Material/stock |
+| `DELETE` | `/materials/drafts/:id` | any of `MATERIAL_CREATE`, `MATERIAL_UPDATE` | Delete owned draft and retained image; no change to live Material/stock |
 | `GET`    | `/materials/:id`         | `MATERIAL_VIEW`                             | Material with active suppliers and relations                 |
 | `POST`   | `/materials`             | `MATERIAL_CREATE`                           | Create material and supplier mappings                        |
 | `PATCH`  | `/materials/:id`         | `MATERIAL_UPDATE`                           | Update with required `updatedAt`                             |
@@ -304,6 +315,8 @@ All routes use active-assignment permission checks.
 | `POST`   | `/materials/images`      | any of `MATERIAL_CREATE`, `MATERIAL_UPDATE` | `multipart/form-data`, field `file`; stage image             |
 
 List query:
+
+Draft save fields: `id?`, `updatedAt?`, `materialId?`, `materialUpdatedAt?`, `outputUpdatedAt?`, `step` (0–2), `data` (known form fields; incomplete string/number values allowed), `supplierIds`, `imagePath?` and `outputImagePath?` (validated staged uploads or the same existing draft images). Payload data is capped at 128,000 JSON characters. Other owners' ids return 404; stale drafts return 409. Final create/update accepts `draftId` and `draftUpdatedAt` and consumes the owned matching draft atomically after full validation. Draft images are retained outside temporary cleanup and copied for safe final promotion. The output draft image is stored in data.outputImagePath. Nested processingOutput.imagePath on final create/update saves the independent destination Material image; omission preserves an existing image and null removes it. Failed transactions compensate both promoted images and retain the original draft files. Migration `1790600000018-CreateMaterialDrafts`; see `../admin-dashboard/docs/material-processing.md`.
 
 | Field                                                                                   | Rules                       |
 | --------------------------------------------------------------------------------------- | --------------------------- |
@@ -689,6 +702,8 @@ Permission codes (`PROCESS_STEP_VIEW/CREATE/UPDATE/DELETE`) are not seeded into 
 
 ## 17. Material Traceability — `/material-traceability`
 
+Processing lineage (2026-10-08): MAIN QR/receiving and SUB QR details include additive `processingHistory` from committed `inventory.material_processings`. Entries contain both receiving ids/lots/Materials/units, consumed source quantity, yield, scrap, good output, packing/count, exact source SUB QR quantities, operator/date/remark. MAIN receiving metadata also exposes `materialShape`, `processedQuantity` and `sourceReceivingId`. SUB source history is restricted to records consuming that package; output SUBs retain their parent output's provenance. FIFO allocations in disbursement details expose `receivingId` for direct cross-lot navigation. Existing receiving-view OR disbursement-view permission applies; no stock writes or new endpoints/migrations. See `../admin-dashboard/docs/material-processing.md` § Report traceability across processing.
+
 Read-only reporting module added 2026-09-20 for end-to-end Receiving ↔ Disbursement traceability. Uses `inventory.stock_transactions` as the single source of truth (never re-derives a running balance from receiving/disbursement rows directly) — see `docs/material-traceability.md` for the full design writeup and the data model this module reads.
 
 | Method | Path                                | Permission                                    | Behavior                                                                              |
@@ -817,3 +832,39 @@ Excel row columns are exactly `Product Code`, `Quantity`, `Need-by Date`, and `R
 Approval uses `plan quantity × BOM item quantity`, excludes `isScrap=true`, and never applies `wastagePercent`. If any material is short, no Reservation is created and the API returns `409` with `shortfalls[]` containing `materialId`, `materialCode`, `materialName`, `required`, `available`, and `shortage`.
 
 Lifecycle is `DRAFT → APPROVED → ISSUED`, with terminal `CANCELLED` and `EXPIRED`. APPROVED plans are immutable. The hourly scheduler expires plans strictly older than three days after approval and releases every active Reservation. ISSUED plans cannot be cancelled through this API; cancel their linked Materials Disbursement instead.
+
+
+## BOM & Workflow workspace — 2026-10-08
+
+Main `/bom-workflow`, child `/bom-workflow/materials` and `/bom-workflow/products`. Product workspace uses existing `/boms` and `/product-workflows`; legacy BOMS menu id and grants are retained under the new main menu.
+
+- `GET /material-engineering/materials/:id/boms` — MATERIAL_BOMS_VIEW; all versions and components.
+- `GET /material-engineering/materials/:id/workflows` — MATERIAL_WORKFLOWS_VIEW; all versions and ordered steps.
+- `POST /material-engineering/boms` — MATERIAL_BOMS_CREATE; materialId, items (materialId, unitId, positive four-decimal quantity up to 1 billion, optional isScrap/wastagePercent/remark), specification?, remark?. Creates DRAFT.
+- `POST /material-engineering/workflows` — MATERIAL_WORKFLOWS_CREATE; materialId, ordered steps (processStepId, description?), remark?. Creates DRAFT.
+- `PATCH /material-engineering/boms/:id/activate` — MATERIAL_BOMS_UPDATE; validates references/units and prevents active BOM cycles.
+- `PATCH /material-engineering/workflows/:id/activate` — MATERIAL_WORKFLOWS_UPDATE; validates active process steps.
+
+Material versions lock their owner and retain a single ACTIVE version per kind. Migration `1790600000021-CreateMaterialEngineeringAndMenus` adds four Material definition tables, main/submenus, Workflow action BUTTON nodes/permissions and aligns legacy menu CHECK with the existing entity enum. Applied locally. No stock movement or production execution is triggered by definitions. New role permissions are not auto-granted. See `../admin-dashboard/docs/bom-workflow.md`; safeguard specs prepared, not run (R0).
+
+## Finished Product Stock — 2026-10-08
+
+- `GET /products/stock-balances` — PRODUCTS_VIEW; `{ productId, quantity }[]`, products without ledger entries have zero stock.
+- `GET /products/:id/stock` — PRODUCTS_VIEW; quantity, receivedQuantity, issuedQuantity and latest 50 movements (quantity, balanceAfter, referenceNo, remark, actorName, createdAt).
+- `POST /products/:id/stock-movements` — PRODUCTS_UPDATE; requestId UUIDv4, type receive/issue, quantity > 0 (max 1 billion, four decimal places), required trimmed referenceNo (100 chars), optional remark (1000 chars). Returns the stock snapshot.
+
+Migration `1790600000020-CreateProductStockMovements` adds `inventory.product_stock_movements`; applied locally. No historical backfill or automatic production receipt. Product row locks serialize stock writes; PostgreSQL NUMERIC arithmetic prevents floating-point drift. Insufficient stock and inactive products reject new movements. Same request key/payload/actor is idempotent, changed payload/actor returns 409. Existing history prevents changing the Product unit. See `../admin-dashboard/docs/product-stock.md` for usage and rollout. Safeguard specs added but not run (AGENTS R0).
+
+## Material Processing — 2026-10-07
+
+Main menu: แปรรูปวัตถุดิบ, /material-processing (MATERIAL_PROCESSING). See ../admin-dashboard/docs/material-processing.md for the full process and stock rules.
+
+- GET /material-processing?page=1&limit=20&search=&status= — MATERIAL_PROCESSING_VIEW; queue of confirmed raw PIPE/SHEET/COIL receiving lots, statuses WAITING/PARTIAL/PROCESSED, filtered before pagination, available quantity excludes active reservations.
+- GET /material-processing/lookups — MATERIAL_PROCESSING_VIEW; active destination Materials and units.
+- GET /material-processing/receivings/:id/history — MATERIAL_PROCESSING_VIEW; source package consumption and linked output receipts.
+- GET /material-processing/outputs/:id — MATERIAL_PROCESSING_VIEW; output receipt and QR packages with source lot provenance.
+- POST /material-processing — MATERIAL_PROCESSING_CREATE; requestKey (UUID), sourceReceivingId, targetMaterialId (distinct active Material), sourceQuantity, piecesPerUnit, scrapQuantity, packingQuantity, optional remark.
+
+The command consumes raw source quantity and creates/confirms destination stock in one transaction, including stock movements, package QR codes, source progress and material_processing.completed Audit Event. Good output = sourceQuantity * piecesPerUnit - scrapQuantity; output packing supports a final remainder, capped at 5,000 boxes. Whole raw units are consumed. Idempotency keys prevent duplicate consumption; changed payloads with a used key are rejected.
+
+Migration 1790600000016 adds inventory.material_processings, material_receivings.source_receiving_id and processed_quantity, and the MAIN menu/READ/CREATE permissions. Applied locally on 2026-10-07 through a runner scoped to this migration alone. Historical converted lots require unit reconciliation; they are not rewritten. Ordinary cancellation of a processed output receipt is blocked.

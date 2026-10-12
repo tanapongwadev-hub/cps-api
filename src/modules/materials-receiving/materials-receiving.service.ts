@@ -15,6 +15,7 @@ import {
   SelectQueryBuilder,
 } from 'typeorm';
 import { getAppConfig } from '../../config/app.config';
+import { getBangkokDate } from '../../common/business-date';
 import {
   createTraceId,
   recordAuditEvent,
@@ -151,10 +152,11 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     manager: EntityManager,
     dto: CreateMaterialsReceivingDto,
     userId: string,
+    source?: MaterialReceiving,
   ): Promise<MaterialReceiving> {
     // 1) Validate active material + derive or validate supplier
     const material = await this.assertActiveMaterial(manager, dto.materialId);
-    const supplierId = await this.resolveSupplier(
+    const supplierId = source?.supplierId ?? await this.resolveSupplier(
       manager,
       dto.materialId,
       dto.supplierId,
@@ -163,15 +165,13 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     // 2) Snapshot material shape + ratio (override-able per receive)
     const materialType = material.materialType ?? null;
     const ratio = dto.ratioOverride ?? material.ratio ?? null;
-    if (this.requiresRatio(materialType) && (ratio === null || ratio < 1)) {
-      throw new BadRequestException(
-        `Material ${material.code} requires a valid ratio for ${materialType} receiving.`,
-      );
-    }
+
 
     // 3) Snapshot packing quantity (override หรือจาก master)
     const packingQuantity =
-      dto.packingQuantityOverride ?? material.packingQuantity;
+      !source && this.requiresRatio(materialType)
+        ? 1 // Raw units stay in one lot; packing starts after processing.
+        : dto.packingQuantityOverride ?? material.packingQuantity;
     if (
       packingQuantity === null ||
       packingQuantity === undefined ||
@@ -182,8 +182,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       );
     }
 
-    // 4) Convert the user-entered quantity into the inventory unit for
-    // PIPE/SHEET/COIL. Other shapes keep the historical 1:1 behaviour.
+    // 4) Receive entered sheets/units directly without ratio conversion.
     const receiveQuantity = dto.receiveQuantity;
     const stockQuantity = this.computeStockQuantity(
       receiveQuantity,
@@ -193,6 +192,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     const packageCount = this.computePackageCount(
       stockQuantity,
       packingQuantity,
+      !source && this.requiresRatio(materialType),
     );
     const packages = this.buildPackageBreakdown(
       stockQuantity,
@@ -215,7 +215,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     const runNo = await this.allocateRunNo(manager, dto.receiveDate);
 
     // 7) Generate supplier lot no
-    const supplierLotNo = this.buildSupplierLotNo(dto.supplierProductionDate);
+    const supplierLotNo = source?.supplierLotNo ?? this.buildSupplierLotNo(dto.supplierProductionDate);
 
     // 8) Generate QR payload + base64 PNG (using internalLotNo as primary key)
     const qrPayload: QrPayload = {
@@ -249,7 +249,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     );
 
     // 10) Snapshot material code/name (เผื่ออนาคต master เปลี่ยน)
-    const organizationId = await this.resolveOrganizationId(manager);
+    const organizationId = source?.organizationId ?? await this.resolveOrganizationId(manager);
 
     // 11) Save receiving
     const receivingRepository = manager.getRepository(MaterialReceiving);
@@ -260,6 +260,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       organizationId,
       supplierId,
       materialId: dto.materialId,
+      sourceReceivingId: source?.id ?? null,
+      processedQuantity: '0.0000',
       unitId: material.unitId,
       receiveQuantity,
       packingQuantity,
@@ -317,6 +319,20 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     });
 
     return saved;
+  }
+
+  /** Internal manufacturing receipt, sharing the caller's stock transaction. */
+  async receiveProcessedWithManager(
+    manager: EntityManager,
+    source: MaterialReceiving,
+    dto: CreateMaterialsReceivingDto,
+    userId: string,
+  ): Promise<MaterialReceiving> {
+    this.assertPositiveQuantity(dto.receiveQuantity);
+    this.assertReceiveDateNotFuture(dto.receiveDate);
+    const receiving = await this.createDraft(manager, dto, userId, source);
+    await this.confirmWithManager(manager, receiving.id, userId);
+    return receiving;
   }
 
   async update(
@@ -384,14 +400,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         dto.ratioOverride !== undefined
           ? dto.ratioOverride
           : (receiving.ratio ?? material.ratio ?? null);
-      if (
-        this.requiresRatio(newMaterialType) &&
-        (newRatio === null || newRatio < 1)
-      ) {
-        throw new BadRequestException(
-          `Material ${material.code} requires a valid ratio for ${newMaterialType} receiving.`,
-        );
-      }
+
       const stockQuantity = this.computeStockQuantity(
         newReceiveQuantity,
         newMaterialType,
@@ -400,6 +409,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       const packageCount = this.computePackageCount(
         stockQuantity,
         packingQuantity,
+        !receiving.sourceReceivingId && this.requiresRatio(newMaterialType),
       );
       const newPiecesQuantity = this.requiresRatio(newMaterialType)
         ? stockQuantity
@@ -716,6 +726,9 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       }
       if (receiving.status === 'cancelled') {
         throw new ConflictException('Material receiving already cancelled');
+      }
+      if (receiving.sourceReceivingId) {
+        throw new ConflictException('ไม่สามารถยกเลิกรับเข้าที่เกิดจากการแปรรูปแยกจากใบแปรรูปได้');
       }
       const previousStatus = receiving.status;
       const packageRepository = manager.getRepository(MaterialReceivingPackage);
@@ -1159,7 +1172,12 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       where: { materialReceivingId: id },
       order: { packageNo: 'ASC' },
     });
+    const source = receiving.sourceReceivingId
+      ? await receivingRepo.findOne({ where: { id: receiving.sourceReceivingId }, select: ['internalLotNo'] })
+      : null;
     return Object.assign(receiving, {
+      processingStatus: this.getProcessingStatus(receiving),
+      sourceLotNo: source?.internalLotNo ?? null,
       qrLevel: 'MAIN' as const,
       convertedQuantity: receiving.piecesQuantity ?? receiving.receiveQuantity,
       packages: packages.map((pkg) =>
@@ -1298,6 +1316,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         packingQuantity: m.packingQuantity,
         materialType: m.materialType ?? null,
         ratio: m.ratio ?? null,
+        processingMaterialId: m.processingMaterialId ?? null,
         unitId: m.unitId,
         unit:
           unitsById.get(m.unitId)?.symbol ??
@@ -1504,10 +1523,12 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   private computePackageCount(
     stockQuantity: string,
     packingQuantity: number,
+    rawMaterial = false,
   ): number {
     if (packingQuantity < 1) {
       throw new BadRequestException('packingQuantity must be >= 1');
     }
+    if (rawMaterial) return this.toScaled(stockQuantity) > 0n ? 1 : 0;
     const qty = this.toScaled(stockQuantity);
     const scaledPacking =
       BigInt(packingQuantity) * 10n ** BigInt(DECIMAL_SCALE);
@@ -1523,27 +1544,13 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     );
   }
 
-  /**
-   * Resolve the quantity used by packaging and inventory.
-   *   - other shapes → receiveQuantity (existing 1:1 behaviour)
-   *   - PIPE / SHEET / COIL → receiveQuantity × ratio
-   * Returns a DECIMAL_SCALE string; callers only persist it to
-   * piecesQuantity for ratio-based shapes.
-   */
+  /** Receive sheets/units directly; ratio is reserved for downstream cutting. */
   private computeStockQuantity(
     receiveQuantity: string,
-    materialType: string | null,
-    ratio: number | null,
+    _materialType: string | null,
+    _ratio: number | null,
   ): string {
-    if (!this.requiresRatio(materialType)) {
-      return this.fromScaled(this.toScaled(receiveQuantity));
-    }
-    if (ratio === null || ratio < 1) {
-      throw new BadRequestException(
-        `Material shape ${materialType} requires a valid ratio for receiving.`,
-      );
-    }
-    return this.fromScaled(this.toScaled(receiveQuantity) * BigInt(ratio));
+    return this.fromScaled(this.toScaled(receiveQuantity));
   }
 
   /**
@@ -1643,7 +1650,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   private assertReceiveDateNotFuture(receiveDate: string): void {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getBangkokDate();
     if (receiveDate > today) {
       throw new BadRequestException('receiveDate cannot be in the future');
     }
@@ -1761,6 +1768,13 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     return this.fromScaled(this.toScaled(a) - this.toScaled(b));
   }
 
+  private getProcessingStatus(receiving: MaterialReceiving): 'WAITING' | 'PARTIAL' | 'PROCESSED' | null {
+    if (receiving.status !== 'confirmed' || receiving.sourceReceivingId || !this.requiresRatio(receiving.materialType)) return null;
+    const processed = this.toScaled(receiving.processedQuantity ?? '0');
+    if (processed === 0n) return 'WAITING';
+    return processed >= this.toScaled(receiving.receiveQuantity) ? 'PROCESSED' : 'PARTIAL';
+  }
+
   private toListResponse(receiving: MaterialReceiving) {
     return {
       id: receiving.id,
@@ -1770,6 +1784,9 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       organizationId: receiving.organizationId,
       supplierId: receiving.supplierId,
       materialId: receiving.materialId,
+      sourceReceivingId: receiving.sourceReceivingId ?? null,
+      processedQuantity: receiving.processedQuantity ?? '0.0000',
+      processingStatus: this.getProcessingStatus(receiving),
       unitId: receiving.unitId,
       receiveQuantity: receiving.receiveQuantity,
       convertedQuantity: receiving.piecesQuantity ?? receiving.receiveQuantity,

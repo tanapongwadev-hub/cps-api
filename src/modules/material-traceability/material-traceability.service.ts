@@ -379,6 +379,7 @@ export class MaterialTraceabilityService {
 
     return {
       qrLevel: 'MAIN' as const,
+      processingHistory: await this.processingHistory(receivingId),
       receiving: {
         id: receiving.id,
         traceId: receiving.traceId,
@@ -389,6 +390,9 @@ export class MaterialTraceabilityService {
         convertedQuantity:
           receiving.piecesQuantity ?? receiving.receiveQuantity,
         status: receiving.status,
+        materialShape: receiving.materialType,
+        processedQuantity: receiving.processedQuantity ?? '0.0000',
+        sourceReceivingId: receiving.sourceReceivingId ?? null,
         material: receiving.material
           ? {
               id: receiving.material.id,
@@ -403,7 +407,7 @@ export class MaterialTraceabilityService {
               nameEn: receiving.supplier.nameEn,
             }
           : null,
-        unitSymbol: receiving.unit?.symbol ?? null,
+        unitSymbol: receiving.unit?.symbol ?? receiving.unit?.code ?? null,
         confirmedBy: receiving.confirmedBy,
         confirmedAt: receiving.confirmedAt,
         createdBy: receiving.createdBy,
@@ -457,6 +461,7 @@ export class MaterialTraceabilityService {
 
     return {
       qrLevel: 'SUB' as const,
+      processingHistory: await this.processingHistory(pkg.materialReceivingId, packageId),
       package: {
         id: pkg.id,
         packageNo: pkg.packageNo,
@@ -594,6 +599,7 @@ export class MaterialTraceabilityService {
             packageId: a.packageId,
             lotDetailNo: a.package?.lotDetailNo ?? null,
             internalLotNo: a.package?.materialReceiving?.internalLotNo ?? null,
+            receivingId: a.package?.materialReceiving?.id ?? null,
             receiveDate: a.package?.materialReceiving?.receiveDate ?? null,
             fifoOrder: a.fifoOrder,
             disbursedQuantity: a.disbursedQuantity,
@@ -606,6 +612,36 @@ export class MaterialTraceabilityService {
   }
 
   // ---------------------------------------------------------------- helpers
+
+  /** Cross-lot lineage is read from committed manufacturing records, never inferred from remarks. */
+  private processingHistory(receivingId: string, packageId?: string) {
+    return this.dataSource.query(`SELECT p.id, p.code,
+      p.source_receiving_id AS "sourceReceivingId", s.internal_lot_no AS "sourceLotNo",
+      sm.code AS "sourceMaterialCode", sm.name AS "sourceMaterialName", s.material_type AS "sourceShape",
+      COALESCE(su.symbol, su.code) AS "sourceUnit",
+      p.output_receiving_id AS "outputReceivingId", o.internal_lot_no AS "outputLotNo",
+      tm.code AS "targetMaterialCode", tm.name AS "targetMaterialName",
+      COALESCE(ou.symbol, ou.code) AS "outputUnit",
+      p.source_quantity AS "sourceQuantity", p.pieces_per_unit AS "piecesPerUnit",
+      p.scrap_quantity AS "scrapQuantity", p.output_quantity AS "outputQuantity",
+      p.packing_quantity AS "packingQuantity", o.package_count AS "packageCount",
+      p.source_packages AS "sourcePackages", p.remark,
+      p.created_at AS "createdAt", COALESCE(actor.username, p.created_by::text) AS "performedBy"
+      FROM inventory.material_processings p
+      JOIN inventory.material_receivings s ON s.id = p.source_receiving_id
+      JOIN inventory.material_receivings o ON o.id = p.output_receiving_id
+      JOIN master.materials sm ON sm.id = p.source_material_id
+      JOIN master.materials tm ON tm.id = p.target_material_id
+      LEFT JOIN master.units su ON su.id = s.unit_id
+      LEFT JOIN master.units ou ON ou.id = o.unit_id
+      LEFT JOIN iam.users actor ON actor.id = p.created_by
+      WHERE p.output_receiving_id = $1 OR (p.source_receiving_id = $1
+        AND ($2::text IS NULL OR EXISTS (
+          SELECT 1 FROM jsonb_array_elements(p.source_packages) entry
+          WHERE entry->>'packageId' = $2::text
+        )))
+      ORDER BY p.created_at, p.id`, [receivingId, packageId ?? null]);
+  }
 
   private buildBaseQuery(
     query: QueryMaterialTraceabilityDto,

@@ -6,7 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, opendir, rename, rm, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, opendir, rename, rm, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 export const MATERIAL_IMAGE_MAX_SIZE = 5 * 1024 * 1024;
@@ -22,6 +22,7 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/png': 'png',
   'image/webp': 'webp',
 };
+const DRAFT_MATERIAL_PATH = /^\/uploads\/materials\/drafts\/([0-9a-f-]{36}\.(?:jpg|png|webp))$/;
 const PNG_SIGNATURE = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
@@ -109,6 +110,28 @@ export class MaterialImageStorageService {
 
   async discard(imagePath: string): Promise<void> {
     await rm(this.resolveMaterialPath(imagePath), { force: true });
+  }
+
+  async retainDraftImage(imagePath: string): Promise<string> {
+    const match = TEMPORARY_MATERIAL_PATH.exec(imagePath);
+    if (!match) throw new BadRequestException('Invalid temporary Material image path');
+    await mkdir(resolve(this.rootDirectory, 'drafts'), { recursive: true });
+    await rename(this.resolveMaterialPath(imagePath), resolve(this.rootDirectory, 'drafts', match[1]));
+    return `${PUBLIC_MATERIAL_PREFIX}drafts/${match[1]}`;
+  }
+
+  async copyDraftToTemporary(imagePath: string): Promise<string> {
+    const match = DRAFT_MATERIAL_PATH.exec(imagePath);
+    if (!match) throw new BadRequestException('Invalid draft Material image path');
+    const filename = `${randomUUID()}.${match[1].split('.').pop()}`;
+    await mkdir(resolve(this.rootDirectory, '.tmp'), { recursive: true });
+    try {
+      await copyFile(this.resolveMaterialPath(imagePath), resolve(this.rootDirectory, '.tmp', filename));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new BadRequestException('ไม่พบรูปภาพของร่าง กรุณาเลือกรูปใหม่');
+      throw error;
+    }
+    return `${PUBLIC_MATERIAL_PREFIX}.tmp/${filename}`;
   }
 
   async cleanupStaleTemporaryFiles(): Promise<void> {

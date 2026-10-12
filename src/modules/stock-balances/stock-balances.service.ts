@@ -113,6 +113,7 @@ export class StockBalancesService {
       ? await this.materialRepository.find({
           where: { id: In(ids) },
           relations: [
+            'processingMaterial',
             'unit',
             'model',
             'deliveryType',

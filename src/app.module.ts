@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { MaterialEngineeringModule } from './modules/material-engineering/material-engineering.module';
 import { appConfig } from './config/app.config';
 import { databaseConfig } from './config/database.config';
 import { AuthModule } from './modules/auth/auth.module';
@@ -27,6 +28,7 @@ import { StatusItemsModule } from './modules/status-items/status-items.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { RejectReasonsModule } from './modules/reject-reasons/reject-reasons.module';
 import { MaterialsReceivingModule } from './modules/materials-receiving/materials-receiving.module';
+import { MaterialProcessingModule } from './modules/material-processing/material-processing.module';
 import { MaterialsDisbursementModule } from './modules/materials-disbursement/materials-disbursement.module';
 import { StockBalancesModule } from './modules/stock-balances/stock-balances.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -81,10 +83,12 @@ import { RequestContextService } from './common/request-context.service';
     OrganizationsModule,
     RejectReasonsModule,
     MaterialsReceivingModule,
+    MaterialProcessingModule,
     MaterialsDisbursementModule,
     StockBalancesModule,
     ProductsModule,
     BomsModule,
+    MaterialEngineeringModule,
     ProductWorkflowsModule,
     ProcessStepsModule,
     MaterialTraceabilityModule,

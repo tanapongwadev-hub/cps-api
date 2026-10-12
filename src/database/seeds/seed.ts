@@ -233,6 +233,14 @@ export async function seed(dataSource: DataSource) {
     console.log('Seeding menus...');
     const menus = [
       {
+        code: 'MATERIAL_PROCESSING',
+        name_th: 'แปรรูปวัตถุดิบ',
+        name_en: 'Material Processing',
+        path: '/material-processing',
+        icon: 'scissors',
+        sort_order: 14,
+      },
+      {
         code: 'DASHBOARD',
         name_th: 'แดชบอร์ด',
         name_en: 'Dashboard',
@@ -320,15 +328,19 @@ export async function seed(dataSource: DataSource) {
         icon: 'clipboard-list',
         sort_order: 97,
       },
+      { code: 'BOM_WORKFLOW', name_th: 'BOM & Workflow', name_en: 'BOM & Workflow', path: '/bom-workflow', icon: 'git-branch', sort_order: 98 },
       {
         code: 'BOMS',
-        name_th: 'สูตรการประกอบ (BOM)',
-        name_en: 'Bill of Materials',
-        path: '/products',
+        name_th: 'BOM & Workflow Products',
+        name_en: 'BOM & Workflow Products',
+        path: '/bom-workflow/products',
         icon: 'git-branch',
-        sort_order: 96,
-        parentCode: 'PRODUCTS_LIST',
+        sort_order: 2,
+        parentCode: 'BOM_WORKFLOW',
       },
+      { code: 'MATERIAL_ENGINEERING', name_th: 'BOM & Workflow Materials', name_en: 'BOM & Workflow Materials', path: '/bom-workflow/materials', icon: 'git-branch', sort_order: 1, parentCode: 'BOM_WORKFLOW' },
+      { code: 'MATERIAL_WORKFLOW_ACTIONS', name_th: 'Workflow', name_en: 'Workflow', path: null, icon: 'git-branch', sort_order: 1, parentCode: 'MATERIAL_ENGINEERING', menuType: 'BUTTON' },
+      { code: 'PRODUCT_WORKFLOW_ACTIONS', name_th: 'Workflow', name_en: 'Workflow', path: null, icon: 'git-branch', sort_order: 1, parentCode: 'BOMS', menuType: 'BUTTON' },
       {
         code: 'UNIT_MANAGEMENT',
         name_th: 'จัดการหน่วยนับ',
@@ -516,7 +528,7 @@ export async function seed(dataSource: DataSource) {
 
       // Resolve parent_id from parentCode if specified
       const parentId = menu.parentCode ? menuIdMap[menu.parentCode] : null;
-      const menuType = parentId ? 'SUB' : 'MAIN';
+      const menuType = 'menuType' in menu ? menu.menuType : parentId ? 'SUB' : 'MAIN';
 
       if (existing.length === 0) {
         const result = await queryRunner.query(

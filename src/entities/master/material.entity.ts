@@ -42,6 +42,11 @@ export enum MaterialShape {
   COIL = 'COIL',
 }
 
+export enum MaterialLocationType {
+  INTERNAL = 'internal',
+  EXTERNAL = 'external',
+}
+
 @Entity('materials', { schema: 'master' })
 @Index(['code'], { unique: true })
 export class Material {
@@ -75,6 +80,9 @@ export class Material {
   })
   materialType: MaterialShape | null;
 
+  @Column({ name: 'location_type', type: 'varchar', length: 20, default: MaterialLocationType.EXTERNAL })
+  locationType: MaterialLocationType;
+
   /**
    * Number of pieces a single physical unit (e.g. one bar / pipe) can be cut into.
    * Used together with `materialType = PIPE` (or other divisible shapes).
@@ -82,6 +90,13 @@ export class Material {
    */
   @Column({ type: 'integer', nullable: true, default: null })
   ratio: number | null;
+
+  @Column({ name: 'processing_material_id', type: 'bigint', nullable: true })
+  processingMaterialId: string | null;
+
+  @ManyToOne(() => Material, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'processing_material_id' })
+  processingMaterial: Material | null;
 
   @Index()
   @Column({ name: 'unit_id', type: 'bigint' })

@@ -8,6 +8,7 @@ import { MaterialTypeMaster } from '../../entities/master/material-type.entity';
 import { LoadingPoint } from '../../entities/master/loading-point.entity';
 import { MaterialModel } from '../../entities/master/material-model.entity';
 import { Material } from '../../entities/master/material.entity';
+import { MaterialDraft } from '../../entities/master/material-draft.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
 import { Unit } from '../../entities/master/unit.entity';
@@ -18,12 +19,14 @@ import {
 } from './material-image-storage.service';
 import { MaterialsController } from './materials.controller';
 import { MaterialsService } from './materials.service';
+import { MaterialDraftsService } from './material-drafts.service';
 
 @Module({
   imports: [
     AccessControlModule,
     TypeOrmModule.forFeature([
       Material,
+      MaterialDraft,
       SupplierMaterial,
       Unit,
       DeliveryType,
@@ -36,6 +39,7 @@ import { MaterialsService } from './materials.service';
   controllers: [MaterialsController],
   providers: [
     MaterialsService,
+    MaterialDraftsService,
     {
       provide: MATERIAL_IMAGE_ROOT,
       inject: [ConfigService],
