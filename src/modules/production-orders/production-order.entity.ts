@@ -9,6 +9,8 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { Material } from '../../entities/master/material.entity';
+import { MaterialWorkflow } from '../../entities/master/material-engineering.entity';
 import { Product } from '../../entities/master/product.entity';
 import { ProductWorkflow } from '../../entities/master/product-workflow.entity';
 import { ProductionPlan } from '../production-plans/production-plan.entity';
@@ -86,12 +88,18 @@ export class ProductionOrderLine {
   @Column({ name: 'line_no', type: 'integer' })
   lineNo: number;
 
-  @Column({ name: 'product_id', type: 'bigint' })
-  productId: string;
+  @Column({ name: 'product_id', type: 'bigint', nullable: true })
+  productId: string | null;
+
+  @Column({ name: 'material_id', type: 'bigint', nullable: true })
+  materialId: string | null;
 
   /** The product ACTIVE workflow at the moment the order was created. */
-  @Column({ name: 'workflow_id', type: 'bigint' })
-  workflowId: string;
+  @Column({ name: 'workflow_id', type: 'bigint', nullable: true })
+  workflowId: string | null;
+
+  @Column({ name: 'material_workflow_id', type: 'bigint', nullable: true })
+  materialWorkflowId: string | null;
 
   @Column({ type: 'integer' })
   quantity: number;
@@ -135,11 +143,19 @@ export class ProductionOrderLine {
 
   @ManyToOne(() => Product)
   @JoinColumn({ name: 'product_id' })
-  product: Product;
+  product: Product | null;
+
+  @ManyToOne(() => Material)
+  @JoinColumn({ name: 'material_id' })
+  material: Material | null;
 
   @ManyToOne(() => ProductWorkflow)
   @JoinColumn({ name: 'workflow_id' })
-  workflow: ProductWorkflow;
+  workflow: ProductWorkflow | null;
+
+  @ManyToOne(() => MaterialWorkflow)
+  @JoinColumn({ name: 'material_workflow_id' })
+  materialWorkflow: MaterialWorkflow | null;
 
   @OneToMany(() => ProductionOrderPacket, (packet) => packet.line)
   packets: ProductionOrderPacket[];

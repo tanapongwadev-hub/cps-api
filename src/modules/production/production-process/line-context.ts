@@ -38,7 +38,7 @@ export async function lockLotModelLine(
   if (order.status === 'COMPLETED' && !allowCompleted) {
     throw new ConflictException('ใบสั่งผลิตนี้เสร็จสิ้นแล้ว');
   }
-  const steps = await loadWorkflowSteps(manager, line.workflowId);
+  const steps = await loadWorkflowSteps(manager, line.workflowId, line.materialWorkflowId);
   return { line, order, steps };
 }
 

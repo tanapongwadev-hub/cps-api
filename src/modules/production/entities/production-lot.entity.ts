@@ -44,8 +44,11 @@ export class ProductionLot {
   @Column({ name: 'production_order_line_id', type: 'bigint' })
   productionOrderLineId: string;
 
-  @Column({ name: 'product_id', type: 'bigint' })
-  productId: string;
+  @Column({ name: 'product_id', type: 'bigint', nullable: true })
+  productId: string | null;
+
+  @Column({ name: 'material_id', type: 'bigint', nullable: true })
+  materialId: string | null;
 
   /** 0-based index into the line's pinned workflow steps. */
   @Column({ name: 'step_index', type: 'integer' })

@@ -8,12 +8,20 @@ import {
   IsString,
   MaxLength,
   Min,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 
 export class CreateProductionPlanLineDto {
+  @IsOptional()
   @IsString()
-  productId: string;
+  @Matches(/^[1-9]\d*$/)
+  productId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[1-9]\d*$/)
+  materialId?: string;
 
   @IsInt()
   @Min(1)

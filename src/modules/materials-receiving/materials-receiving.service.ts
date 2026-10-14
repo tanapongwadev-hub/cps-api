@@ -153,10 +153,11 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     dto: CreateMaterialsReceivingDto,
     userId: string,
     source?: MaterialReceiving,
+    productionOrderLineId?: string,
   ): Promise<MaterialReceiving> {
     // 1) Validate active material + derive or validate supplier
     const material = await this.assertActiveMaterial(manager, dto.materialId);
-    const supplierId = source?.supplierId ?? await this.resolveSupplier(
+    const supplierId = productionOrderLineId ? null : source?.supplierId ?? await this.resolveSupplier(
       manager,
       dto.materialId,
       dto.supplierId,
@@ -215,7 +216,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     const runNo = await this.allocateRunNo(manager, dto.receiveDate);
 
     // 7) Generate supplier lot no
-    const supplierLotNo = source?.supplierLotNo ?? this.buildSupplierLotNo(dto.supplierProductionDate);
+    const supplierLotNo = productionOrderLineId ? null : source?.supplierLotNo ?? this.buildSupplierLotNo(dto.supplierProductionDate);
 
     // 8) Generate QR payload + base64 PNG (using internalLotNo as primary key)
     const qrPayload: QrPayload = {
@@ -261,6 +262,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       supplierId,
       materialId: dto.materialId,
       sourceReceivingId: source?.id ?? null,
+      productionOrderLineId: productionOrderLineId ?? null,
       processedQuantity: '0.0000',
       unitId: material.unitId,
       receiveQuantity,
@@ -332,6 +334,21 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     this.assertReceiveDateNotFuture(dto.receiveDate);
     const receiving = await this.createDraft(manager, dto, userId, source);
     await this.confirmWithManager(manager, receiving.id, userId);
+    return receiving;
+  }
+
+  /** Completed manufactured box; supplierless and inseparable from its production history. */
+  async receiveProductionWithManager(
+    manager: EntityManager,
+    productionOrderLineId: string,
+    dto: CreateMaterialsReceivingDto,
+    userId: string,
+    productionOrderCode: string,
+  ): Promise<MaterialReceiving> {
+    this.assertPositiveQuantity(dto.receiveQuantity);
+    this.assertReceiveDateNotFuture(dto.receiveDate);
+    const receiving = await this.createDraft(manager, dto, userId, undefined, productionOrderLineId);
+    await this.confirmWithManager(manager, receiving.id, userId, productionOrderCode);
     return receiving;
   }
 
@@ -605,6 +622,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     manager: EntityManager,
     id: string,
     userId: string,
+    productionOrderCode?: string,
   ): Promise<void> {
     const receivingRepository = manager.getRepository(MaterialReceiving);
     const receiving = await receivingRepository.findOne({
@@ -683,6 +701,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         subQrId: pkg.id,
         unitId: receiving.unitId,
         referenceNo: receiving.poNo,
+        productionOrder: productionOrderCode,
         quantityBefore: this.fromScaled(before),
         quantityIn: this.fromScaled(packageQuantity),
         quantityOut: this.fromScaled(0n),
@@ -727,8 +746,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       if (receiving.status === 'cancelled') {
         throw new ConflictException('Material receiving already cancelled');
       }
-      if (receiving.sourceReceivingId) {
-        throw new ConflictException('ไม่สามารถยกเลิกรับเข้าที่เกิดจากการแปรรูปแยกจากใบแปรรูปได้');
+      if (receiving.sourceReceivingId || receiving.productionOrderLineId) {
+        throw new ConflictException('ไม่สามารถยกเลิกรับเข้าที่เกิดจากการแปรรูปหรือการผลิตแยกจากรายการต้นทางได้');
       }
       const previousStatus = receiving.status;
       const packageRepository = manager.getRepository(MaterialReceivingPackage);
@@ -1785,6 +1804,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
       supplierId: receiving.supplierId,
       materialId: receiving.materialId,
       sourceReceivingId: receiving.sourceReceivingId ?? null,
+      productionOrderLineId: receiving.productionOrderLineId ?? null,
       processedQuantity: receiving.processedQuantity ?? '0.0000',
       processingStatus: this.getProcessingStatus(receiving),
       unitId: receiving.unitId,

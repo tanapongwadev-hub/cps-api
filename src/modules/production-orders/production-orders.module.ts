@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { MaterialWorkflow, MaterialWorkflowStep } from '../../entities/master/material-engineering.entity';
+import { Material } from '../../entities/master/material.entity';
 import { ProductWorkflow } from '../../entities/master/product-workflow.entity';
 import { Product } from '../../entities/master/product.entity';
 import { AccessControlModule } from '../access-control/access-control.module';
@@ -30,6 +32,9 @@ import { ProductionOrdersService } from './production-orders.service';
       MaterialJobOrder,
       Product,
       ProductWorkflow,
+      Material,
+      MaterialWorkflow,
+      MaterialWorkflowStep,
     ]),
   ],
   controllers: [ProductionOrdersController],

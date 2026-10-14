@@ -1,7 +1,11 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class ListProductionOrdersQueryDto {
+  @IsOptional()
+  @IsIn(['product', 'material'])
+  targetType?: 'product' | 'material';
+
   @IsOptional()
   @IsInt()
   @Min(1)

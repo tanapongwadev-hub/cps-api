@@ -12,6 +12,10 @@ import {
   ProductWorkflowStatus,
 } from '../../entities/master/product-workflow.entity';
 import { Product } from '../../entities/master/product.entity';
+import { Material, MaterialLocationType, MaterialShape } from '../../entities/master/material.entity';
+import { MaterialWorkflow } from '../../entities/master/material-engineering.entity';
+import { MaterialProductionReceiptService } from '../production/material-production-receipt.service';
+import { loadWorkflowSteps } from '../production/workflow-steps';
 import { MaterialJobOrder } from '../material-job-orders/material-job-order.entity';
 import { ProductionPlan } from '../production-plans/production-plan.entity';
 import { WipService } from '../production/production-wip/wip.service';
@@ -71,6 +75,7 @@ export class ProductionOrdersService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly wip: WipService,
+    private readonly materialReceipts: MaterialProductionReceiptService,
   ) {}
 
   // ----------------------------------------------------------------- create
@@ -103,6 +108,9 @@ export class ProductionOrdersService {
         );
       }
 
+      if (!plan.lines.length || (plan.lines.some((line) => !!line.materialId) && plan.lines.some((line) => !!line.productId))) {
+        throw new ConflictException('ใบสั่งผลิตต้องมีรายการและเป็นสินค้าหรือวัตถุดิบภายในประเภทเดียวกันทั้งแผน');
+      }
       const code = await this.allocateCode(manager, new Date());
       const orderRepo = manager.getRepository(ProductionOrder);
       const order = await orderRepo.save(
@@ -120,29 +128,44 @@ export class ProductionOrdersService {
       let totalQuantity = 0;
       for (const planLine of lines) {
         lineNo += 1;
-        const product = await manager
-          .getRepository(Product)
-          .findOne({ where: { id: planLine.productId } });
-        if (!product) {
-          throw new NotFoundException(`ไม่พบสินค้า id ${planLine.productId}`);
+        if (!!planLine.productId === !!planLine.materialId) {
+          throw new ConflictException('รายการแผนต้องระบุสินค้าหรือวัตถุดิบภายในอย่างใดอย่างหนึ่ง');
         }
-        const workflow = await manager.getRepository(ProductWorkflow).findOne({
-          where: {
-            productId: product.id,
-            status: ProductWorkflowStatus.ACTIVE,
-          },
-          relations: ['steps'],
-        });
-        if (!workflow || workflow.steps.length === 0) {
+        const product = planLine.productId
+          ? await manager.getRepository(Product).findOne({ where: { id: planLine.productId } })
+          : null;
+        const material = planLine.materialId
+          ? await manager.getRepository(Material).findOne({ where: { id: planLine.materialId } })
+          : null;
+        const target = product ?? material;
+        if (!target) throw new NotFoundException('ไม่พบปลายทางของรายการแผนผลิต');
+        if (material && (!material.isActive || material.locationType !== MaterialLocationType.INTERNAL ||
+          [MaterialShape.PIPE, MaterialShape.SHEET, MaterialShape.COIL].includes(material.materialType!))) {
+          throw new ConflictException('สั่งผลิตได้เฉพาะวัตถุดิบภายในที่เปิดใช้งานและไม่ใช่วัตถุดิบดิบ');
+        }
+        const workflow = material
+          ? await manager.getRepository(MaterialWorkflow).findOne({
+              where: { materialId: material.id, status: 'ACTIVE' }, relations: ['steps', 'steps.processStep'],
+            })
+          : await manager.getRepository(ProductWorkflow).findOne({
+              where: { productId: product!.id, status: ProductWorkflowStatus.ACTIVE }, relations: ['steps', 'steps.processStep'],
+            });
+        if (!workflow?.steps.length) {
           throw new ConflictException(
-            `สินค้า ${product.code} ยังไม่มีกระบวนการผลิตที่เปิดใช้งาน กรุณาตั้งค่าและเปิดใช้งานก่อนสั่งผลิต`,
+            `${target.code} ยังไม่มีกระบวนการผลิตที่เปิดใช้งาน กรุณาตั้งค่าและเปิดใช้งานก่อนสั่งผลิต`,
           );
         }
-
-        const packing =
-          Number(product.packing) > 0
-            ? Math.floor(Number(product.packing))
-            : planLine.quantity;
+        // Material receipts occur at the terminal receiving step, then packing.
+        if (material && order.trackingModel === 'LOT') {
+          const orderedSteps = [...workflow.steps].sort((a, b) => a.sortOrder - b.sortOrder);
+          if (orderedSteps.length < 2 || orderedSteps.slice(0, -1).some((step) => step.processStep.receivingType !== 'NONE') ||
+            !['FG', 'STORE'].includes(orderedSteps.at(-1)!.processStep.receivingType ?? 'NONE')) {
+            throw new ConflictException('Workflow วัตถุดิบภายในแบบ Lot ต้องมีอย่างน้อย 2 ขั้นตอน และมีขั้นตอนรับเข้า FG/STORE เพียงขั้นตอนสุดท้าย');
+          }
+        }
+        const configuredPacking = material ? material.packingQuantity : product!.packing;
+        const packing = Number(configuredPacking) > 0
+          ? Math.floor(Number(configuredPacking)) : planLine.quantity;
         // No boxes / QR yet: the whole line quantity is on hold at the first
         // workflow step until real output is reported (recordOutput).
         const lineRepo = manager.getRepository(ProductionOrderLine);
@@ -150,8 +173,10 @@ export class ProductionOrdersService {
           lineRepo.create({
             productionOrderId: order.id,
             lineNo,
-            productId: product.id,
-            workflowId: workflow.id,
+            productId: product?.id ?? null,
+            materialId: material?.id ?? null,
+            workflowId: product ? workflow.id : null,
+            materialWorkflowId: material ? workflow.id : null,
             quantity: planLine.quantity,
             packingQuantity: packing,
           }),
@@ -223,7 +248,7 @@ export class ProductionOrdersService {
       const line = await manager
         .getRepository(ProductionOrderLine)
         .findOneOrFail({ where: { id: packet.productionOrderLineId } });
-      const steps = await this.loadSteps(manager, line.workflowId);
+      const steps = await this.loadSteps(manager, line.workflowId, line.materialWorkflowId);
       const total = steps.length;
       const now = new Date();
       const from = packet.currentStepIndex;
@@ -296,6 +321,15 @@ export class ProductionOrdersService {
           // timeline never mixes DB-session-local and UTC wall clocks.
           performedAt: now,
         });
+      }
+
+      if (done && line.materialId) {
+        const completedBox = child ?? packet;
+        const output = completedBox.productionOrderOutputId
+          ? await manager.getRepository(ProductionOrderOutput).findOne({ where: { id: completedBox.productionOrderOutputId } })
+          : null;
+        await this.materialReceipts.receiveBox(manager, line, 'PACKET', completedBox.id, completedBox.qrCode,
+          completedBox.quantity, output?.workDate ?? bangkokToday(), userId);
       }
 
       const { order, packetCount, completedPacketCount } =
@@ -378,7 +412,7 @@ export class ProductionOrdersService {
     }
     return this.dataSource.transaction(async (manager) => {
       const line = await this.lockOpenLine(manager, lineId);
-      const steps = await this.loadSteps(manager, line.workflowId);
+      const steps = await this.loadSteps(manager, line.workflowId, line.materialWorkflowId);
       const produced = await this.producedQuantity(manager, line.id);
       const remaining = line.quantity - produced - line.shortClosedQuantity;
       if (dto.quantity > remaining) {
@@ -461,6 +495,12 @@ export class ProductionOrdersService {
         ]),
       );
 
+      if (done && line.materialId) {
+        for (const packet of packets) {
+          await this.materialReceipts.receiveBox(manager, line, 'PACKET', packet.id, packet.qrCode,
+            packet.quantity, workDate, userId);
+        }
+      }
       const status = await this.refreshOrderStatus(manager, order.id);
       await recordAuditEvent(manager, {
         traceId: order.code,
@@ -587,19 +627,10 @@ export class ProductionOrdersService {
 
   private async loadSteps(
     manager: EntityManager,
-    workflowId: string,
+    workflowId: string | null,
+    materialWorkflowId?: string | null,
   ): Promise<StepView[]> {
-    const workflow = await manager.getRepository(ProductWorkflow).findOne({
-      where: { id: workflowId },
-      relations: ['steps', 'steps.processStep'],
-    });
-    return [...(workflow?.steps ?? [])]
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map((step, index) => ({
-        index,
-        code: step.processStep.code,
-        name: step.processStep.nameTh,
-      }));
+    return loadWorkflowSteps(manager, workflowId, materialWorkflowId);
   }
 
   /**
@@ -763,12 +794,17 @@ export class ProductionOrdersService {
       .leftJoinAndSelect('o.productionPlan', 'plan')
       .leftJoinAndSelect('o.lines', 'line')
       .leftJoinAndSelect('line.product', 'product')
+      .leftJoinAndSelect('line.material', 'material')
       .leftJoinAndSelect('line.packets', 'packet')
       .orderBy('o.id', 'DESC');
 
+    if (query.targetType) {
+      const column = query.targetType === 'material' ? 'material_id' : 'product_id';
+      qb.andWhere(`EXISTS (SELECT 1 FROM inventory.production_order_lines target_line WHERE target_line.production_order_id=o.id AND target_line.${column} IS NOT NULL)`);
+    }
     if (query.search?.trim()) {
       qb.andWhere(
-        `(o.code ILIKE :q OR plan.code ILIKE :q OR product.code ILIKE :q)`,
+        `(o.code ILIKE :q OR plan.code ILIKE :q OR product.code ILIKE :q OR material.code ILIKE :q OR material.name ILIKE :q)`,
         { q: `%${query.search.trim()}%` },
       );
     }
@@ -811,6 +847,7 @@ export class ProductionOrdersService {
         'productionPlan',
         'lines',
         'lines.product',
+        'lines.material',
         'lines.packets',
         'lines.workflow',
         'lines.workflow.steps',
@@ -840,13 +877,8 @@ export class ProductionOrdersService {
       [...order.lines]
         .sort((a, b) => a.lineNo - b.lineNo)
         .map(async (line) => {
-          const steps: StepView[] = [...line.workflow.steps]
-            .sort((a, b) => a.sortOrder - b.sortOrder)
-            .map((step, index) => ({
-              index,
-              code: step.processStep.code,
-              name: step.processStep.nameTh,
-            }));
+          const steps = await this.loadSteps(this.dataSource.manager, line.workflowId, line.materialWorkflowId);
+          const target = line.product ?? line.material;
           const packets = await Promise.all(
             [...line.packets]
               .sort((a, b) => a.packetNo - b.packetNo)
@@ -858,15 +890,13 @@ export class ProductionOrdersService {
                 ),
               ),
           );
-          const produced = line.packets.reduce((sum, p) => sum + p.quantity, 0);
+          const produced = order.trackingModel === 'LOT' ? line.producedQty : line.packets.reduce((sum, p) => sum + p.quantity, 0);
           return {
             id: line.id,
             lineNo: line.lineNo,
-            product: {
-              id: line.product.id,
-              code: line.product.code,
-              name: line.product.name,
-            },
+            targetType: line.materialId ? 'material' : 'product',
+            materialId: line.materialId,
+            product: target ? { id: target.id, code: target.code, name: target.name } : null,
             quantity: line.quantity,
             packingQuantity: line.packingQuantity,
             producedQuantity: produced,
@@ -900,6 +930,7 @@ export class ProductionOrdersService {
       planCode: order.productionPlan?.code ?? null,
       status: order.status,
       trackingModel: order.trackingModel,
+      targetType: lines.some((line) => !!line.materialId) ? 'material' : 'product',
       createdAt: order.createdAt,
       completedAt: order.completedAt,
       packetCount: packets.length,
@@ -908,11 +939,13 @@ export class ProductionOrdersService {
       lines: lines.map((line) => ({
         id: line.id,
         lineNo: line.lineNo,
-        product: line.product
+        targetType: line.materialId ? 'material' : 'product',
+        materialId: line.materialId,
+        product: (line.product ?? line.material)
           ? {
-              id: line.product.id,
-              code: line.product.code,
-              name: line.product.name,
+              id: (line.product ?? line.material)!.id,
+              code: (line.product ?? line.material)!.code,
+              name: (line.product ?? line.material)!.name,
             }
           : null,
         quantity: line.quantity,
@@ -920,7 +953,7 @@ export class ProductionOrdersService {
         packetCount: line.packets?.length ?? 0,
         completedPacketCount:
           line.packets?.filter((p) => p.status === 'COMPLETED').length ?? 0,
-        producedQuantity: (line.packets ?? []).reduce(
+        producedQuantity: order.trackingModel === 'LOT' ? line.producedQty : (line.packets ?? []).reduce(
           (sum, p) => sum + p.quantity,
           0,
         ),

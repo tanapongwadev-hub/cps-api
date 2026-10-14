@@ -10,7 +10,8 @@ import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { recordAuditEvent } from '../../common/stock-ledger';
 import { fromScaled, toScaled } from '../../common/decimal';
 import { MaterialReceivingPackage } from '../../entities/inventory/material-receiving-package.entity';
-import { Material } from '../../entities/master/material.entity';
+import { Material, MaterialLocationType, MaterialShape } from '../../entities/master/material.entity';
+import { MaterialBom, MaterialBomItem } from '../../entities/master/material-engineering.entity';
 import {
   BomStatus,
   ProductBom,
@@ -492,10 +493,16 @@ export class ProductionPlansService {
     const qb = this.planRepository
       .createQueryBuilder('plan')
       .leftJoinAndSelect('plan.lines', 'line')
-      .leftJoinAndSelect('line.product', 'product');
+      .leftJoinAndSelect('line.product', 'product')
+      .leftJoinAndSelect('line.material', 'targetMaterial');
+    if (query.targetType) {
+      const column = query.targetType === 'material' ? 'material_id' : 'product_id';
+      // Filter headers without dropping other lines from historical mixed plans.
+      qb.andWhere(`EXISTS (SELECT 1 FROM inventory.production_plan_lines target_line WHERE target_line.production_plan_id = plan.id AND target_line.${column} IS NOT NULL)`);
+    }
     if (query.search) {
       qb.andWhere(
-        '(plan.code ILIKE :search OR plan.title ILIKE :search OR product.code ILIKE :search)',
+        '(plan.code ILIKE :search OR plan.title ILIKE :search OR product.code ILIKE :search OR targetMaterial.code ILIKE :search OR targetMaterial.name ILIKE :search)',
         { search: `%${query.search}%` },
       );
     }
@@ -542,6 +549,10 @@ export class ProductionPlansService {
       relations: [
         'lines',
         'lines.product',
+        'lines.material',
+        'lines.materialBom',
+        'lines.materialBom.items',
+        'lines.materialBom.items.material',
         'lines.bom',
         'lines.bom.items',
         'lines.bom.items.material',
@@ -565,7 +576,16 @@ export class ProductionPlansService {
       .where('product.isActive = true')
       .orderBy('product.code', 'ASC')
       .getMany();
+    const materialBoms = await this.dataSource.getRepository(MaterialBom).find({ where: { status: 'ACTIVE' } });
+    const materials = materialBoms.length ? await this.dataSource.getRepository(Material).find({
+      where: { id: In(materialBoms.map((bom) => bom.materialId)), isActive: true, locationType: MaterialLocationType.INTERNAL },
+      order: { code: 'ASC' },
+    }) : [];
     return {
+      materials: materials.filter((material) => ![MaterialShape.PIPE, MaterialShape.SHEET, MaterialShape.COIL].includes(material.materialType ?? MaterialShape.PCS)).map((material) => {
+        const bom = materialBoms.find((entry) => entry.materialId === material.id)!;
+        return { id: material.id, code: material.code, name: material.name, activeBomId: bom.id, activeBomVersion: bom.version };
+      }),
       products: products.map((product) => ({
         id: product.id,
         code: product.code,
@@ -586,8 +606,24 @@ export class ProductionPlansService {
     const lineRepo = manager.getRepository(ProductionPlanLine);
     await lineRepo.delete({ productionPlanId: planId });
     for (const input of inputs) {
+      if (!!input.productId === !!input.materialId) throw new BadRequestException('Choose exactly one Product or internal Material per line');
+      if (input.materialId) {
+        const material = await manager.getRepository(Material).findOne({
+          where: { id: input.materialId, isActive: true, locationType: MaterialLocationType.INTERNAL },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!material || [MaterialShape.PIPE, MaterialShape.SHEET, MaterialShape.COIL].includes(material.materialType ?? MaterialShape.PCS)) {
+          throw new BadRequestException('Production destination must be an active internal non-raw Material');
+        }
+        const bom = await manager.getRepository(MaterialBom).findOne({ where: { materialId: material.id, status: 'ACTIVE' } });
+        if (!bom) throw new BadRequestException('Material has no ACTIVE BOM');
+        await lineRepo.save(lineRepo.create({ productionPlanId: planId, productId: null, bomId: null,
+          materialId: material.id, materialBomId: bom.id, quantity: input.quantity, needByDate: input.needByDate,
+          remark: input.remark?.trim() || null, createdBy: userId, updatedBy: userId }));
+        continue;
+      }
       const product = await manager.getRepository(Product).findOne({
-        where: { id: input.productId, isActive: true },
+        where: { id: input.productId!, isActive: true },
       });
       if (!product) {
         throw new BadRequestException(
@@ -608,6 +644,8 @@ export class ProductionPlansService {
           productionPlanId: planId,
           productId: product.id,
           bomId: bom.id,
+          materialId: null,
+          materialBomId: null,
           quantity: input.quantity,
           needByDate: input.needByDate,
           remark: input.remark?.trim() || null,
@@ -624,10 +662,9 @@ export class ProductionPlansService {
   ): Promise<MaterialDemand[]> {
     const demands: MaterialDemand[] = [];
     for (const line of lines) {
-      const items = await manager.getRepository(ProductBomItem).find({
-        where: { bomId: line.bomId, isScrap: false },
-        order: { sortOrder: 'ASC', id: 'ASC' },
-      });
+      const items = line.materialBomId
+        ? await manager.getRepository(MaterialBomItem).find({ where: { bomId: line.materialBomId, isScrap: false }, order: { sortOrder: 'ASC', id: 'ASC' } })
+        : await manager.getRepository(ProductBomItem).find({ where: { bomId: line.bomId!, isScrap: false }, order: { sortOrder: 'ASC', id: 'ASC' } });
       if (items.length === 0) {
         throw new BadRequestException(
           `ACTIVE BOM ${line.bomId} has no reservable material inputs`,

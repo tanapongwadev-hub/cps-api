@@ -1,5 +1,9 @@
+import { MaterialsReceivingModule } from '../materials-receiving/materials-receiving.module';
+import { MaterialProductionReceiptService } from './material-production-receipt.service';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { MaterialWorkflow, MaterialWorkflowStep } from '../../entities/master/material-engineering.entity';
+import { Material } from '../../entities/master/material.entity';
 import { ProductWorkflow } from '../../entities/master/product-workflow.entity';
 import { AccessControlModule } from '../access-control/access-control.module';
 import {
@@ -59,15 +63,20 @@ export const PRODUCTION_TRACE_ENTITIES = [
 @Module({
   imports: [
     AccessControlModule,
+    MaterialsReceivingModule,
     TypeOrmModule.forFeature([
       ...PRODUCTION_TRACE_ENTITIES,
       ProductionOrder,
       ProductionOrderLine,
       ProductWorkflow,
+      Material,
+      MaterialWorkflow,
+      MaterialWorkflowStep,
     ]),
   ],
   controllers: [ProcessController, PackageController, TraceabilityController],
   providers: [
+    MaterialProductionReceiptService,
     LedgerService,
     WipService,
     LotService,
@@ -81,6 +90,6 @@ export const PRODUCTION_TRACE_ENTITIES = [
     PackageService,
     TraceabilityService,
   ],
-  exports: [TypeOrmModule, LedgerService, WipService, LotService],
+  exports: [TypeOrmModule, LedgerService, WipService, LotService, MaterialProductionReceiptService],
 })
 export class ProductionModule {}

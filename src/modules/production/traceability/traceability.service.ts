@@ -482,12 +482,13 @@ export class TraceabilityService {
       }>
     >(
       `SELECT l.line_no, l.quantity, o.id AS order_id, o.code AS order_code,
-              p.code AS plan_code, pr.id AS product_id, pr.code AS product_code,
-              pr.name AS product_name
+              p.code AS plan_code, COALESCE(pr.id, m.id) AS product_id,
+              COALESCE(pr.code, m.code) AS product_code, COALESCE(pr.name, m.name) AS product_name
        FROM inventory.production_order_lines l
        JOIN inventory.production_orders o ON o.id = l.production_order_id
        LEFT JOIN inventory.production_plans p ON p.id = o.production_plan_id
-       JOIN master.products pr ON pr.id = l.product_id
+       LEFT JOIN master.products pr ON pr.id = l.product_id
+       LEFT JOIN master.materials m ON m.id = l.material_id
        WHERE l.id = $1`,
       [lineId],
     );

@@ -4,6 +4,10 @@ import { PRODUCTION_PLAN_STATUSES } from '../production-plan.entity';
 
 export class ListProductionPlansQueryDto {
   @IsOptional()
+  @IsIn(['product', 'material'])
+  targetType?: 'product' | 'material';
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Transform(({ value }) => Number.parseInt(String(value), 10))

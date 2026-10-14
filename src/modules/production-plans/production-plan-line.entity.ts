@@ -11,6 +11,8 @@ import {
 } from 'typeorm';
 import { ProductBom } from '../../entities/master/product-bom.entity';
 import { Product } from '../../entities/master/product.entity';
+import { Material } from '../../entities/master/material.entity';
+import { MaterialBom } from '../../entities/master/material-engineering.entity';
 import { ProductionPlan } from './production-plan.entity';
 import { ProductionPlanReservation } from './production-plan-reservation.entity';
 
@@ -24,12 +26,19 @@ export class ProductionPlanLine {
   productionPlanId: string;
 
   @Index()
-  @Column({ name: 'product_id', type: 'bigint' })
-  productId: string;
+  @Column({ name: 'product_id', type: 'bigint', nullable: true })
+  productId: string | null;
 
   @Index()
-  @Column({ name: 'bom_id', type: 'bigint' })
-  bomId: string;
+  @Column({ name: 'bom_id', type: 'bigint', nullable: true })
+  bomId: string | null;
+
+  @Index()
+  @Column({ name: 'material_id', type: 'bigint', nullable: true })
+  materialId: string | null;
+
+  @Column({ name: 'material_bom_id', type: 'bigint', nullable: true })
+  materialBomId: string | null;
 
   @Column({ type: 'integer' })
   quantity: number;
@@ -61,11 +70,19 @@ export class ProductionPlanLine {
 
   @ManyToOne(() => Product, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'product_id' })
-  product: Product;
+  product: Product | null;
 
   @ManyToOne(() => ProductBom, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'bom_id' })
-  bom: ProductBom;
+  bom: ProductBom | null;
+
+  @ManyToOne(() => Material, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'material_id' })
+  material: Material | null;
+
+  @ManyToOne(() => MaterialBom, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'material_bom_id' })
+  materialBom: MaterialBom | null;
 
   @OneToMany(
     () => ProductionPlanReservation,

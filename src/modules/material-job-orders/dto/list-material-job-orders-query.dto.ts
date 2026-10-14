@@ -1,8 +1,12 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { MATERIAL_JOB_ORDER_STATUSES } from '../material-job-order.entity';
 
 export class ListMaterialJobOrdersQueryDto {
+  @IsOptional()
+  @IsIn(['product', 'material'])
+  targetType?: 'product' | 'material';
+
   @IsOptional()
   @IsInt()
   @Min(1)

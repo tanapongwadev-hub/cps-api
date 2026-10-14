@@ -113,11 +113,12 @@ export class BoardService {
   async board(lineId: string) {
     const line = await this.dataSource
       .getRepository(ProductionOrderLine)
-      .findOne({ where: { id: lineId }, relations: ['product', 'order'] });
+      .findOne({ where: { id: lineId }, relations: ['product', 'material', 'order'] });
     if (!line) throw new NotFoundException(`ไม่พบรายการสั่งผลิต id ${lineId}`);
     const steps = await loadWorkflowSteps(
       this.dataSource.manager,
       line.workflowId,
+      line.materialWorkflowId,
     );
 
     type Agg = Record<string, number | string>;
@@ -205,11 +206,12 @@ export class BoardService {
         orderId: line.productionOrderId,
         orderCode: line.order?.code ?? null,
         orderStatus: line.order?.status ?? null,
-        product: line.product
+        targetType: line.materialId ? 'material' : 'product',
+        product: (line.product ?? line.material)
           ? {
-              id: line.product.id,
-              code: line.product.code,
-              name: line.product.name,
+              id: (line.product ?? line.material)!.id,
+              code: (line.product ?? line.material)!.code,
+              name: (line.product ?? line.material)!.name,
             }
           : null,
         plannedQty: line.quantity,

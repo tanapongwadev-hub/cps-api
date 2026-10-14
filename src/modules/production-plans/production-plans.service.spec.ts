@@ -5,6 +5,7 @@ import { MaterialReceivingPackage } from '../../entities/inventory/material-rece
 import { MaterialsDisbursementCounter } from '../../entities/inventory/materials-disbursement-counter.entity';
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
 import { StockTransaction } from '../../entities/inventory/stock-transaction.entity';
+import { MaterialBom, MaterialBomItem } from '../../entities/master/material-engineering.entity';
 import { Material } from '../../entities/master/material.entity';
 import { ProductBomItem } from '../../entities/master/product-bom.entity';
 import { ProductBom } from '../../entities/master/product-bom.entity';
@@ -90,6 +91,8 @@ function setup() {
     Product,
     ProductBom,
     ProductBomItem,
+    MaterialBom,
+    MaterialBomItem,
     Material,
     MaterialReceivingPackage,
     MaterialsDisbursementCounter,
@@ -123,6 +126,31 @@ function setup() {
 }
 
 describe('ProductionPlansService', () => {
+  it('pins internal Material BOM without creating a Product line', async () => {
+    const { service, repos, manager } = setup();
+    repos[Material.name].findOne.mockResolvedValue({ id: '12', code: 'INT-12', isActive: true, locationType: 'internal', materialType: 'PCS' });
+    repos[MaterialBom.name].findOne.mockResolvedValue({ id: '24', materialId: '12', version: '1', status: 'ACTIVE' });
+    await (service as any).replaceLines(manager, '1', [{ materialId: '12', quantity: 3, needByDate: '2026-10-15' }], '2');
+    expect(repos[ProductionPlanLine.name].save).toHaveBeenCalledWith(expect.objectContaining({ materialId: '12', materialBomId: '24', productId: null, bomId: null }));
+    expect(repos[Product.name].findOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects ambiguous destinations and raw Material production destinations', async () => {
+    const { service, repos, manager } = setup();
+    await expect((service as any).replaceLines(manager, '1', [{ materialId: '12', productId: '4' }], '2')).rejects.toThrow('exactly one');
+    repos[Material.name].findOne.mockResolvedValue({ id: '12', materialType: 'PIPE' });
+    await expect((service as any).replaceLines(manager, '1', [{ materialId: '12' }], '2')).rejects.toThrow('non-raw');
+    expect(repos[ProductionPlanLine.name].save).not.toHaveBeenCalled();
+  });
+
+  it('uses pinned Material BOM inputs for exact reservation demand', async () => {
+    const { service, repos, manager } = setup();
+    repos[MaterialBomItem.name].find.mockResolvedValue([{ materialId: '5', quantity: '0.2500', isScrap: false, wastagePercent: '20' }]);
+    const result = await (service as any).buildMaterialDemands(manager, [{ id: '1', materialBomId: '24', quantity: 3 }]);
+    expect(result).toEqual([{ lineId: '1', materialId: '5', required: 7500n }]);
+    expect(repos[ProductBomItem.name].find).not.toHaveBeenCalled();
+  });
+
   it('pins the ACTIVE BOM and blocks a product that has no ACTIVE BOM', async () => {
     const { service, repos, manager } = setup();
     manager.query

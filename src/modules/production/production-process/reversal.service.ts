@@ -308,6 +308,11 @@ export class ReversalService {
       .where('p.id IN (:...ids)', { ids: originals.map((t) => t.packageId) })
       .orderBy('p.id', 'ASC')
       .getMany();
+    const received = packages.length ? await manager.query(
+      "SELECT id FROM inventory.production_material_receipts WHERE source_kind='LOT_PACKAGE' AND source_id=ANY($1::bigint[]) LIMIT 1",
+      [packages.map((pkg) => pkg.id)],
+    ) : [];
+    if (received.length) throw new ConflictException('กล่องวัตถุดิบภายในนี้รับเข้าสต็อกแล้ว ไม่สามารถย้อนกลับการแพ็กแยกจากรายการสต็อกได้');
     const blocked = packages.find(
       (p) => p.status !== 'PACKED' || p.currentQty !== p.initialQty,
     );

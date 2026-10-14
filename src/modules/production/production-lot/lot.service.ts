@@ -81,6 +81,7 @@ export class LotService {
         productionOrderId: bucket.order.id,
         productionOrderLineId: bucket.line.id,
         productId: bucket.line.productId,
+        materialId: bucket.line.materialId,
         stepIndex: bucket.step.index,
         processStepId: bucket.step.processStepId,
         processCode: bucket.step.code,

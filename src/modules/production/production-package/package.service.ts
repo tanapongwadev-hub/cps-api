@@ -19,6 +19,7 @@ import { completeLotOrderIfDone } from '../production-process/completion';
 import { lockLotModelLine } from '../production-process/line-context';
 import { LotService } from '../production-lot/lot.service';
 import { LedgerService } from '../production-transaction/ledger.service';
+import { MaterialProductionReceiptService } from '../material-production-receipt.service';
 import { GeneratePackagesDto } from './dto/generate-packages.dto';
 
 export interface PackageView {
@@ -51,6 +52,7 @@ export class PackageService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly lots: LotService,
     private readonly ledger: LedgerService,
+    private readonly materialReceipts: MaterialProductionReceiptService,
   ) {}
 
   /**
@@ -130,6 +132,7 @@ export class PackageService {
             productionOrderId: order.id,
             productionOrderLineId: line.id,
             productId: lot.productId,
+            materialId: lot.materialId,
             fgLotId: lot.id,
             boxNo,
             unitType: boxQty < packSize ? 'PARTIAL' : 'FULL',
@@ -164,6 +167,7 @@ export class PackageService {
           },
           origins,
         );
+        await this.materialReceipts.receiveBox(manager, line, 'LOT_PACKAGE', pkg.id, pkg.qrCode, boxQty, lot.productionDate, userId);
         created.push(pkg.id);
       }
 

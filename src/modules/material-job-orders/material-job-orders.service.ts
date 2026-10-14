@@ -597,11 +597,19 @@ export class MaterialJobOrdersService {
       .createQueryBuilder('jo')
       .leftJoinAndSelect('jo.productionPlan', 'plan')
       .leftJoinAndSelect('plan.lines', 'line')
-      .leftJoinAndSelect('line.product', 'product');
+      .leftJoinAndSelect('line.product', 'product')
+      .leftJoinAndSelect('line.material', 'targetMaterial');
+
+    if (query.targetType) {
+      const targetColumn = query.targetType === 'material' ? 'material_id' : 'product_id';
+      qb.andWhere(
+        `EXISTS (SELECT 1 FROM inventory.production_plan_lines target_line WHERE target_line.production_plan_id = plan.id AND target_line.${targetColumn} IS NOT NULL)`,
+      );
+    }
 
     if (query.search) {
       qb.andWhere(
-        '(jo.code ILIKE :search OR plan.code ILIKE :search OR product.code ILIKE :search)',
+        '(jo.code ILIKE :search OR plan.code ILIKE :search OR product.code ILIKE :search OR targetMaterial.code ILIKE :search OR targetMaterial.name ILIKE :search)',
         { search: `%${query.search}%` },
       );
     }
@@ -643,8 +651,8 @@ export class MaterialJobOrdersService {
           approvedBy: jo.productionPlan.approvedBy,
         },
         products: jo.productionPlan.lines.map((line) => ({
-          productCode: line.product.code,
-          productName: line.product.name,
+          productCode: (line.product ?? line.material)?.code ?? '—',
+          productName: (line.product ?? line.material)?.name ?? '—',
           quantity: line.quantity,
           needByDate: line.needByDate,
         })),
@@ -675,7 +683,7 @@ export class MaterialJobOrdersService {
   private async buildDetail(jobOrder: MaterialJobOrder) {
     const plan = await this.dataSource.getRepository(ProductionPlan).findOne({
       where: { id: jobOrder.productionPlanId },
-      relations: ['lines', 'lines.product', 'lines.bom'],
+      relations: ['lines', 'lines.product', 'lines.bom', 'lines.material', 'lines.materialBom'],
       order: { lines: { id: 'ASC' } },
     });
     if (!plan) throw new NotFoundException('Production Plan not found');
@@ -751,11 +759,13 @@ export class MaterialJobOrdersService {
         lines: plan.lines.map((line) => ({
           id: line.id,
           productId: line.productId,
-          productCode: line.product.code,
-          productName: line.product.name,
+          materialId: line.materialId,
+          targetType: line.materialId ? 'material' : 'product',
+          productCode: (line.product ?? line.material)?.code ?? '—',
+          productName: (line.product ?? line.material)?.name ?? '—',
           quantity: line.quantity,
           needByDate: line.needByDate,
-          bomVersion: line.bom?.version ?? null,
+          bomVersion: (line.bom ?? line.materialBom)?.version ?? null,
         })),
       },
       materials: [...materialTotals.values()].map((entry) => ({

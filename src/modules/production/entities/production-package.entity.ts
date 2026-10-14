@@ -40,8 +40,11 @@ export class ProductionPackage {
   @Column({ name: 'production_order_line_id', type: 'bigint' })
   productionOrderLineId: string;
 
-  @Column({ name: 'product_id', type: 'bigint' })
-  productId: string;
+  @Column({ name: 'product_id', type: 'bigint', nullable: true })
+  productId: string | null;
+
+  @Column({ name: 'material_id', type: 'bigint', nullable: true })
+  materialId: string | null;
 
   @Column({ name: 'fg_lot_id', type: 'bigint' })
   fgLotId: string;

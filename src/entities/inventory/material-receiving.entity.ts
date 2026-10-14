@@ -71,8 +71,11 @@ export class MaterialReceiving {
   organizationId: string;
 
   @Index()
-  @Column({ name: 'supplier_id', type: 'bigint' })
-  supplierId: string;
+  @Column({ name: 'supplier_id', type: 'bigint', nullable: true })
+  supplierId: string | null;
+
+  @Column({ name: 'production_order_line_id', type: 'bigint', nullable: true })
+  productionOrderLineId: string | null;
 
   @Index()
   @Column({ name: 'material_id', type: 'bigint' })
