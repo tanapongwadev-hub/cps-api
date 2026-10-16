@@ -249,6 +249,14 @@ export async function seed(dataSource: DataSource) {
         sort_order: 1,
       },
       {
+        code: 'USER_MANUALS',
+        name_th: 'คู่มือการใช้งาน',
+        name_en: 'User Manuals',
+        path: '/manuals',
+        icon: 'book-open',
+        sort_order: 999,
+      },
+      {
         code: 'USER_MANAGEMENT',
         name_th: 'จัดการผู้ใช้งาน',
         name_en: 'User Management',
