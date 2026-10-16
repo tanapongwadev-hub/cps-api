@@ -7,6 +7,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { qrSvgDataUrl } from '../../../common/qr-svg';
 import { recordAuditEvent } from '../../../common/stock-ledger';
+import { postProductStockMovement } from '../../../common/product-stock-ledger';
 import { productionDayOf } from '../domain/production-day';
 import { packageQrCode, splitIntoBoxes } from '../domain/packing';
 import { ProductionLot } from '../entities/production-lot.entity';
@@ -167,6 +168,17 @@ export class PackageService {
           },
           origins,
         );
+        if (lot.productId) {
+          // Packed FG boxes are finished-product stock (sold via sales job orders).
+          await postProductStockMovement(manager, {
+            productId: lot.productId,
+            type: 'receive',
+            quantity: boxQty,
+            referenceNo: pkg.qrCode,
+            remark: `แพ็กกล่อง FG ${order.code}`,
+            userId,
+          });
+        }
         await this.materialReceipts.receiveBox(manager, line, 'LOT_PACKAGE', pkg.id, pkg.qrCode, boxQty, lot.productionDate, userId);
         created.push(pkg.id);
       }

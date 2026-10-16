@@ -1,3 +1,4 @@
+import { postProductStockMovement } from '../../../common/product-stock-ledger';
 import {
   ConflictException,
   Injectable,
@@ -313,6 +314,17 @@ export class ReversalService {
       [packages.map((pkg) => pkg.id)],
     ) : [];
     if (received.length) throw new ConflictException('กล่องวัตถุดิบภายในนี้รับเข้าสต็อกแล้ว ไม่สามารถย้อนกลับการแพ็กแยกจากรายการสต็อกได้');
+    const reserved = packages.length ? (await manager.query(
+      `SELECT p.qr_code FROM inventory.sales_job_order_reservations r
+       JOIN inventory.production_packages p ON p.id = r.package_id
+       WHERE r.released_at IS NULL AND r.package_id = ANY($1::bigint[]) LIMIT 1`,
+      [packages.map((pkg) => pkg.id)],
+    )) as Array<{ qr_code: string }> : [];
+    if (reserved.length) {
+      throw new ConflictException(
+        `ยกเลิกกล่องไม่ได้ เพราะกล่อง ${reserved[0].qr_code} ถูกจองในใบจัดงานขายแล้ว`,
+      );
+    }
     const blocked = packages.find(
       (p) => p.status !== 'PACKED' || p.currentQty !== p.initialQty,
     );
@@ -328,6 +340,16 @@ export class ReversalService {
       const origins = originsByTx.get(tx.id) ?? [];
       pkg.status = 'VOID';
       pkg.currentQty = 0;
+      if (pkg.productId) {
+        await postProductStockMovement(manager, {
+          productId: pkg.productId,
+          type: 'issue',
+          quantity: tx.qty,
+          referenceNo: `VOID-${pkg.qrCode}`,
+          remark: `ยกเลิกการแพ็ก: ${dto.reason.trim()}`.slice(0, 1000),
+          userId,
+        });
+      }
       lot.remainingQty += tx.qty;
       for (const o of origins) {
         await manager.query(

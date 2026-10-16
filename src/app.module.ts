@@ -45,6 +45,7 @@ import { ProductionPlansModule } from './modules/production-plans/production-pla
 import { ProductionOrdersModule } from './modules/production-orders/production-orders.module';
 import { ProductionModule } from './modules/production/production.module';
 import { MaterialJobOrdersModule } from './modules/material-job-orders/material-job-orders.module';
+import { SalesModule } from './modules/sales/sales.module';
 import { RequestContextService } from './common/request-context.service';
 
 @Module({
@@ -101,6 +102,7 @@ import { RequestContextService } from './common/request-context.service';
     ProductionOrdersModule,
     ProductionModule,
     MaterialJobOrdersModule,
+    SalesModule,
   ],
   controllers: [AppController],
   providers: [AppService, RequestContextService],
