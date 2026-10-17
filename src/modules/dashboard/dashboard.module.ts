@@ -4,10 +4,11 @@ import { StockBalancesModule } from '../stock-balances/stock-balances.module';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 import { MaterialsDashboardService } from './materials-dashboard.service';
+import { ProductsDashboardService } from './products-dashboard.service';
 
 @Module({
   imports: [AccessControlModule, StockBalancesModule],
   controllers: [DashboardController],
-  providers: [DashboardService, MaterialsDashboardService],
+  providers: [DashboardService, MaterialsDashboardService, ProductsDashboardService],
 })
 export class DashboardModule {}
