@@ -2,9 +2,16 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, In, Repository } from 'typeorm';
+import {
+  EntityManager,
+  In,
+  IsNull,
+  QueryFailedError,
+  Repository,
+} from 'typeorm';
 import * as argon2 from 'argon2';
 import { User } from '../../entities/iam/user.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
@@ -21,6 +28,83 @@ import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
 import { replaceAssignmentOverrides } from './user-permission-overrides.service';
+import { createTraceId, recordAuditEvent } from '../../common/stock-ledger';
+
+export type UserStatusFilter = 'active' | 'inactive';
+
+export interface UserListAssignment {
+  id: string;
+  departmentId: string | null;
+  roleId: string;
+  isActive: boolean;
+  department: { id: string; code: string; nameTh: string } | null;
+  role: {
+    id: string;
+    code: string;
+    nameTh: string;
+    scopeType: 'SYSTEM' | 'DEPARTMENT';
+  } | null;
+}
+
+/** Audit snapshot of a user — never includes the password hash. */
+interface UserAuditSnapshot {
+  username: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  telephone: string | null;
+  isActive: boolean;
+  assignments?: Array<{ departmentId: string | null; roleId: string }>;
+}
+
+function userSnapshot(
+  user: User,
+  assignments?: Array<{ departmentId: string | null; roleId: string }>,
+): UserAuditSnapshot {
+  return {
+    username: user.username,
+    firstName: user.firstName ?? null,
+    lastName: user.lastName ?? null,
+    email: user.email ?? null,
+    telephone: user.telephone ?? null,
+    isActive: user.isActive,
+    ...(assignments
+      ? {
+          assignments: assignments
+            .map((item) => ({
+              departmentId: item.departmentId ?? null,
+              roleId: item.roleId,
+            }))
+            .sort((a, b) =>
+              `${a.departmentId}:${a.roleId}`.localeCompare(
+                `${b.departmentId}:${b.roleId}`,
+              ),
+            ),
+        }
+      : {}),
+  };
+}
+
+async function recordUserEvent(
+  manager: EntityManager,
+  eventName: string,
+  action: string,
+  userId: string,
+  actorId: string | null,
+  before: UserAuditSnapshot | null,
+  after: UserAuditSnapshot | null,
+) {
+  await recordAuditEvent(manager, {
+    traceId: createTraceId(),
+    action,
+    eventName,
+    targetType: 'USER',
+    targetId: userId,
+    performedBy: actorId,
+    before,
+    after,
+  });
+}
 
 @Injectable()
 export class UsersService {
@@ -33,7 +117,12 @@ export class UsersService {
     private userDepartmentPermissionRepository: Repository<UserDepartmentPermission>,
   ) {}
 
-  async findAll(page: number = 1, limit: number = 20, search?: string) {
+  async findAll(
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    status?: UserStatusFilter,
+  ) {
     const queryBuilder = this.userRepository
       .createQueryBuilder('user')
       .select([
@@ -42,8 +131,10 @@ export class UsersService {
         'user.email',
         'user.firstName',
         'user.lastName',
+        'user.telephone',
         'user.isActive',
         'user.isLocked',
+        'user.lastLoginAt',
         'user.createdAt',
       ]);
 
@@ -53,15 +144,63 @@ export class UsersService {
         { search: `%${search}%` },
       );
     }
+    if (status === 'active' || status === 'inactive') {
+      queryBuilder.andWhere('user.isActive = :isActive', {
+        isActive: status === 'active',
+      });
+    }
 
-    const [items, totalItems] = await queryBuilder
+    const [users, totalItems] = await queryBuilder
       .skip((page - 1) * limit)
       .take(limit)
       .orderBy('user.createdAt', 'DESC')
       .getManyAndCount();
 
+    // One extra query for the page's assignments so the list can show each
+    // person's departments/roles without a request per row.
+    const assignmentsByUser = new Map<string, UserListAssignment[]>();
+    if (users.length > 0) {
+      const rows = await this.userDepartmentRoleRepository
+        .createQueryBuilder('udr')
+        .leftJoinAndSelect('udr.department', 'department')
+        .leftJoinAndSelect('udr.role', 'role')
+        .where('udr.userId IN (:...userIds)', {
+          userIds: users.map((user) => user.id),
+        })
+        .orderBy('udr.createdAt', 'ASC')
+        .getMany();
+      for (const row of rows) {
+        const list = assignmentsByUser.get(row.userId) ?? [];
+        list.push({
+          id: row.id,
+          departmentId: row.departmentId ?? null,
+          roleId: row.roleId,
+          isActive: row.isActive,
+          department: row.department
+            ? {
+                id: row.department.id,
+                code: row.department.code,
+                nameTh: row.department.nameTh,
+              }
+            : null,
+          role: row.role
+            ? {
+                id: row.role.id,
+                code: row.role.code,
+                nameTh: row.role.nameTh,
+                scopeType: row.role.scopeType,
+              }
+            : null,
+        });
+        assignmentsByUser.set(row.userId, list);
+      }
+    }
+
     return {
-      items,
+      items: users.map((user) => ({
+        ...user,
+        assignments: assignmentsByUser.get(user.id) ?? [],
+      })),
       meta: {
         page,
         limit,
@@ -99,30 +238,16 @@ export class UsersService {
     return user;
   }
 
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto, actorId: string | null = null) {
     const { username, password, assignments, ...userData } = createUserDto;
+    const requested: UpdateUserAssignmentInputDto[] = assignments.map(
+      (assignment) => ({
+        departmentId: assignment.departmentId ?? null,
+        roleId: assignment.roleId,
+      }),
+    );
 
-    // Check if username already exists
-    const existingUser = await this.userRepository.findOne({
-      where: { username: username.toLowerCase() },
-    });
-
-    if (existingUser) {
-      throw new DuplicateResourceException('Username');
-    }
-
-    // Check if email already exists
-    if (userData.email) {
-      const existingEmail = await this.userRepository.findOne({
-        where: { email: userData.email.toLowerCase() },
-      });
-
-      if (existingEmail) {
-        throw new DuplicateResourceException('Email');
-      }
-    }
-
-    // Hash password
+    // Hash outside the transaction: argon2 is slow and holds no DB state.
     const passwordHash = await argon2.hash(password, {
       type: argon2.argon2id,
       memoryCost: 65536,
@@ -130,78 +255,94 @@ export class UsersService {
       parallelism: 4,
     });
 
-    // Create user with transaction
-    const user = this.userRepository.create({
-      username: username.toLowerCase(),
-      passwordHash,
-      firstName: userData.firstName,
-      lastName: userData.lastName,
-      email: userData.email?.toLowerCase(),
-      telephone: userData.telephone,
-      isActive: true,
-      isLocked: false,
-      failedLoginAttempts: 0,
-      permissionVersion: 1,
-    });
+    const userId = await this.userRepository.manager.transaction(
+      async (manager) => {
+        const userRepository = manager.getRepository(User);
+        const assignmentRepository = manager.getRepository(UserDepartmentRole);
+        const permissionRepository = manager.getRepository(
+          UserDepartmentPermission,
+        );
 
-    const savedUser = await this.userRepository.save(user);
-
-    // Create assignments
-    for (const assignment of assignments) {
-      const userDepartmentRole = this.userDepartmentRoleRepository.create({
-        userId: savedUser.id,
-        departmentId: assignment.departmentId,
-        roleId: assignment.roleId,
-        isActive: true,
-        assignedAt: new Date(),
-      });
-
-      const savedAssignment =
-        await this.userDepartmentRoleRepository.save(userDepartmentRole);
-
-      // Create permissions if provided
-      if (assignment.permissionIds && assignment.permissionIds.length > 0) {
-        for (const permissionId of assignment.permissionIds) {
-          const userDepartmentPermission =
-            this.userDepartmentPermissionRepository.create({
-              userDepartmentRoleId: savedAssignment.id,
-              permissionId,
-              isActive: true,
-              grantedAt: new Date(),
-            });
-
-          await this.userDepartmentPermissionRepository.save(
-            userDepartmentPermission,
-          );
+        const existingUser = await userRepository.findOne({
+          where: { username: username.toLowerCase() },
+        });
+        if (existingUser) {
+          throw new DuplicateResourceException('Username');
         }
-      }
-    }
+        if (userData.email) {
+          const existingEmail = await userRepository.findOne({
+            where: { email: userData.email.toLowerCase() },
+          });
+          if (existingEmail) {
+            throw new DuplicateResourceException('Email');
+          }
+        }
 
-    return this.findOne(savedUser.id);
+        // Same role/department rules as the aggregate update.
+        await this.validateAggregateAssignments(manager, [], requested);
+
+        const savedUser = await userRepository.save(
+          userRepository.create({
+            username: username.toLowerCase(),
+            passwordHash,
+            firstName: userData.firstName,
+            lastName: userData.lastName,
+            email: userData.email?.toLowerCase(),
+            telephone: userData.telephone,
+            isActive: true,
+            isLocked: false,
+            failedLoginAttempts: 0,
+            permissionVersion: 1,
+          }),
+        );
+
+        for (const [index, assignment] of assignments.entries()) {
+          const savedAssignment = await assignmentRepository.save(
+            assignmentRepository.create({
+              userId: savedUser.id,
+              departmentId: requested[index].departmentId,
+              roleId: assignment.roleId,
+              isActive: true,
+              assignedAt: new Date(),
+              assignedBy: actorId ?? undefined,
+            }),
+          );
+          for (const permissionId of assignment.permissionIds ?? []) {
+            await permissionRepository.save(
+              permissionRepository.create({
+                userDepartmentRoleId: savedAssignment.id,
+                permissionId,
+                isActive: true,
+                grantedAt: new Date(),
+              }),
+            );
+          }
+        }
+
+        await recordUserEvent(
+          manager,
+          'iam.user.created',
+          'CREATE',
+          savedUser.id,
+          actorId,
+          null,
+          userSnapshot(savedUser, requested),
+        );
+        return savedUser.id;
+      },
+    );
+
+    return this.findOne(userId);
   }
 
-  async update(id: string, updateUserDto: UpdateUserDto) {
+  async update(
+    id: string,
+    updateUserDto: UpdateUserDto,
+    actorId: string | null = null,
+  ) {
     const { assignments, ...profileData } = updateUserDto;
 
-    if (assignments === undefined) {
-      const user = await this.findOne(id);
-      if (profileData.email) {
-        const existingEmail = await this.userRepository.findOne({
-          where: { email: profileData.email.toLowerCase() },
-        });
-        if (existingEmail && existingEmail.id !== id) {
-          throw new DuplicateResourceException('Email');
-        }
-      }
-      Object.assign(user, profileData);
-      if (profileData.email) {
-        user.email = profileData.email.toLowerCase();
-      }
-      await this.userRepository.save(user);
-      return this.findOne(id);
-    }
-
-    return this.userRepository.manager.transaction(async (manager) => {
+    await this.userRepository.manager.transaction(async (manager) => {
       const userRepository = manager.getRepository(User);
       const assignmentRepository = manager.getRepository(UserDepartmentRole);
       const user = await userRepository.findOne({
@@ -224,6 +365,30 @@ export class UsersService {
       const current = await assignmentRepository.find({
         where: { userId: id },
       });
+      const before = userSnapshot(user, current);
+
+      if (assignments === undefined) {
+        // Profile-only edit: assignments and sessions stay as they are.
+        Object.assign(user, profileData);
+        if (profileData.email) {
+          user.email = profileData.email.toLowerCase();
+        }
+        await userRepository.save(user);
+        const after = userSnapshot(user, current);
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          await recordUserEvent(
+            manager,
+            'iam.user.updated',
+            'UPDATE',
+            id,
+            actorId,
+            before,
+            after,
+          );
+        }
+        return;
+      }
+
       const roleMap = await this.validateAggregateAssignments(
         manager,
         current,
@@ -279,12 +444,27 @@ export class UsersService {
             roleId: item.roleId,
             isActive: true,
             assignedAt: new Date(),
+            assignedBy: actorId ?? undefined,
           }),
         );
       }
 
-      return user;
+      const after = userSnapshot(user, assignments);
+      if (JSON.stringify(before) !== JSON.stringify(after)) {
+        await recordUserEvent(
+          manager,
+          'iam.user.updated',
+          'UPDATE',
+          id,
+          actorId,
+          before,
+          after,
+        );
+      }
     });
+
+    // findOne's explicit select keeps passwordHash out of the response.
+    return this.findOne(id);
   }
 
   private assignmentKey(departmentId: string | null, roleId: string): string {
@@ -435,41 +615,52 @@ export class UsersService {
     }
   }
 
-  async updateStatus(id: string, updateStatusDto: UpdateStatusDto) {
+  async updateStatus(
+    id: string,
+    updateStatusDto: UpdateStatusDto,
+    actorId: string | null = null,
+  ) {
     const user = await this.findOne(id);
 
     // Prevent disabling the last super admin
     if (!updateStatusDto.isActive) {
-      const superAdminAssignments = await this.userDepartmentRoleRepository
-        .createQueryBuilder('udr')
-        .leftJoin('udr.role', 'role')
-        .where('role.code = :code', { code: 'SUPER_ADMIN' })
-        .andWhere('udr.isActive = :isActive', { isActive: true })
-        .getCount();
-
-      if (superAdminAssignments <= 1) {
-        // Check if this user is a super admin
-        const isSuperAdmin = await this.userDepartmentRoleRepository
-          .createQueryBuilder('udr')
-          .leftJoin('udr.role', 'role')
-          .where('udr.userId = :userId', { userId: id })
-          .andWhere('role.code = :code', { code: 'SUPER_ADMIN' })
-          .andWhere('udr.isActive = :isActive', { isActive: true })
-          .getOne();
-
-        if (isSuperAdmin) {
+      try {
+        await this.assertAssignmentCanStopBeingSuperAdmin(id);
+      } catch (error) {
+        if (error instanceof BadRequestException) {
           throw new BadRequestException('Cannot disable the last super admin');
         }
+        throw error;
       }
     }
 
-    user.isActive = updateStatusDto.isActive;
-    await this.userRepository.save(user);
+    if (user.isActive === updateStatusDto.isActive) {
+      return user;
+    }
+
+    await this.userRepository.manager.transaction(async (manager) => {
+      const before = userSnapshot(user);
+      user.isActive = updateStatusDto.isActive;
+      await manager.getRepository(User).save(user);
+      await recordUserEvent(
+        manager,
+        updateStatusDto.isActive ? 'iam.user.restored' : 'iam.user.deactivated',
+        'UPDATE',
+        id,
+        actorId,
+        before,
+        userSnapshot(user),
+      );
+    });
 
     return this.findOne(id);
   }
 
-  async resetPassword(id: string, newPassword: string) {
+  async resetPassword(
+    id: string,
+    newPassword: string,
+    actorId: string | null = null,
+  ) {
     const user = await this.findOne(id);
 
     const passwordHash = await argon2.hash(newPassword, {
@@ -479,9 +670,21 @@ export class UsersService {
       parallelism: 4,
     });
 
-    user.passwordHash = passwordHash;
-    user.permissionVersion += 1;
-    await this.userRepository.save(user);
+    await this.userRepository.manager.transaction(async (manager) => {
+      user.passwordHash = passwordHash;
+      // Bumping the version revokes the user's existing sessions.
+      user.permissionVersion += 1;
+      await manager.getRepository(User).save(user);
+      await recordUserEvent(
+        manager,
+        'iam.user.password_reset',
+        'UPDATE',
+        id,
+        actorId,
+        null,
+        null,
+      );
+    });
 
     return { message: 'Password reset successfully' };
   }
@@ -539,7 +742,7 @@ export class UsersService {
     const existingAssignment = await this.userDepartmentRoleRepository.findOne({
       where: {
         userId,
-        departmentId: assignmentDto.departmentId,
+        departmentId: assignmentDto.departmentId ?? IsNull(),
       },
     });
 
@@ -668,32 +871,56 @@ export class UsersService {
     return { message: 'User assignment deleted successfully' };
   }
 
-  async remove(id: string) {
+  async remove(id: string, actorId: string | null = null) {
     const user = await this.findOne(id);
 
     await this.assertAssignmentCanStopBeingSuperAdmin(id);
 
-    await this.userRepository.manager.transaction(async (manager) => {
-      const userRepository = manager.getRepository(User);
-      const assignmentRepository = manager.getRepository(UserDepartmentRole);
-      const permissionRepository = manager.getRepository(
-        UserDepartmentPermission,
-      );
-      const assignments = await assignmentRepository.find({
-        where: { userId: id },
-        select: ['id'],
-      });
-      const assignmentIds = assignments.map((assignment) => assignment.id);
-
-      if (assignmentIds.length > 0) {
-        await permissionRepository.delete({
-          userDepartmentRoleId: In(assignmentIds),
+    try {
+      await this.userRepository.manager.transaction(async (manager) => {
+        const userRepository = manager.getRepository(User);
+        const assignmentRepository = manager.getRepository(UserDepartmentRole);
+        const permissionRepository = manager.getRepository(
+          UserDepartmentPermission,
+        );
+        const assignments = await assignmentRepository.find({
+          where: { userId: id },
+          select: ['id', 'departmentId', 'roleId'],
         });
-      }
+        const assignmentIds = assignments.map((assignment) => assignment.id);
 
-      await assignmentRepository.delete({ userId: id });
-      await userRepository.remove(user);
-    });
+        if (assignmentIds.length > 0) {
+          await permissionRepository.delete({
+            userDepartmentRoleId: In(assignmentIds),
+          });
+        }
+
+        const before = userSnapshot(user, assignments);
+        await assignmentRepository.delete({ userId: id });
+        await userRepository.remove(user);
+        await recordUserEvent(
+          manager,
+          'iam.user.deleted',
+          'DELETE',
+          id,
+          actorId,
+          before,
+          null,
+        );
+      });
+    } catch (error) {
+      // 23503 = foreign_key_violation: the account already has history
+      // (sessions, audit rows, documents). Keep it and ask for a deactivate.
+      if (
+        error instanceof QueryFailedError &&
+        (error as QueryFailedError & { code?: string }).code === '23503'
+      ) {
+        throw new ConflictException(
+          'ผู้ใช้นี้มีประวัติการใช้งานในระบบแล้ว ลบไม่ได้ กรุณาใช้การระงับการใช้งานแทน',
+        );
+      }
+      throw error;
+    }
 
     return { message: 'User deleted successfully' };
   }

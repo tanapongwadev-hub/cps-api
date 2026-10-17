@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
+import { AuditLog } from '../../entities/iam/audit-log.entity';
 import { Department } from '../../entities/iam/department.entity';
 import { Role } from '../../entities/iam/role.entity';
 import { User } from '../../entities/iam/user.entity';
@@ -28,6 +29,7 @@ describe('UsersService aggregate assignment update', () => {
   let assignmentPermissions: RepositoryStub<UserDepartmentPermission>;
   let departments: RepositoryStub<Department>;
   let roles: RepositoryStub<Role>;
+  let auditLogs: RepositoryStub<AuditLog>;
   let service: UsersService;
   let transaction: jest.Mock;
   let user: User;
@@ -51,6 +53,9 @@ describe('UsersService aggregate assignment update', () => {
     assignmentPermissions = repositoryStub<UserDepartmentPermission>();
     departments = repositoryStub<Department>();
     roles = repositoryStub<Role>();
+    auditLogs = repositoryStub<AuditLog>();
+    auditLogs.create!.mockImplementation((value: AuditLog) => value);
+    auditLogs.save!.mockImplementation(async (value: AuditLog) => value);
     service = new UsersService(
       users as unknown as Repository<User>,
       assignments as unknown as Repository<UserDepartmentRole>,
@@ -110,6 +115,7 @@ describe('UsersService aggregate assignment update', () => {
         }
         if (entity === Department) return departments;
         if (entity === Role) return roles;
+        if (entity === AuditLog) return auditLogs;
         throw new Error('Unexpected repository');
       },
     };
@@ -140,6 +146,43 @@ describe('UsersService aggregate assignment update', () => {
       departmentId: '3',
       roleId: '5',
     });
+    expect(auditLogs.save).toHaveBeenCalledTimes(1);
+    expect(auditLogs.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: 'iam.user.updated',
+        targetType: 'USER',
+        targetId: '7',
+      }),
+    );
+  });
+
+  it('writes no audit row when nothing changes', async () => {
+    user.firstName = 'Same';
+    await service.update('7', {
+      firstName: 'Same',
+      assignments: [
+        { id: '10', departmentId: '2', roleId: '4' },
+        { id: '11', departmentId: '2', roleId: '6' },
+      ],
+    });
+
+    expect(auditLogs.save).not.toHaveBeenCalled();
+  });
+
+  it('updates the profile alone in a transaction without touching assignments', async () => {
+    await service.update('7', { firstName: 'Only' }, '99');
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(user.firstName).toBe('Only');
+    expect(user.permissionVersion).toBe(4);
+    expect(assignments.save).not.toHaveBeenCalled();
+    expect(assignments.delete).not.toHaveBeenCalled();
+    expect(auditLogs.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: 'iam.user.updated',
+        actorUserId: '99',
+      }),
+    );
   });
 
   it('rejects an empty assignment set before any write', async () => {

@@ -95,12 +95,12 @@ Every route in this section uses `JwtAuthGuard`, `RolesGuard`, and `@Roles(SUPER
 
 | Method   | Path                                   | Input                                 | Behavior                                                                |
 | -------- | -------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------- |
-| `GET`    | `/users`                               | Query `page=1`, `limit=20`, `search?` | Paginated users                                                         |
+| `GET`    | `/users`                               | Query `page=1`, `limit=20`, `search?`, `status?=active\|inactive` | Paginated users; each item has `assignments[{ id, departmentId, roleId, isActive, department{id,code,nameTh}\|null, role{id,code,nameTh,scopeType}\|null }]` |
 | `GET`    | `/users/:id`                           | Path `id`                             | User details with relations                                             |
-| `POST`   | `/users`                               | `CreateUserDto`                       | Create user, hash password, create assignments and permission overrides |
-| `PATCH`  | `/users/:id`                           | `UpdateUserDto`                       | Update profile and optionally replace assignment aggregate              |
-| `PATCH`  | `/users/:id/status`                    | `{ isActive: boolean }`               | Enable/disable account; protects last SUPER_ADMIN                       |
-| `POST`   | `/users/:id/reset-password`            | `{ newPassword: string }`             | Replace Argon2id password hash                                          |
+| `POST`   | `/users`                               | `CreateUserDto` (assignment `departmentId` is `null` for a SYSTEM role) | One transaction: create user + assignments (same role/department rules as PATCH), audited `iam.user.created` |
+| `PATCH`  | `/users/:id`                           | `UpdateUserDto`                       | Update profile and optionally replace assignment aggregate (one transaction); returns `GET /users/:id` shape; audited `iam.user.updated` when something changed |
+| `PATCH`  | `/users/:id/status`                    | `{ isActive: boolean }`               | Enable/disable account; protects last SUPER_ADMIN; audited `iam.user.deactivated` / `iam.user.restored` (no-op skipped) |
+| `POST`   | `/users/:id/reset-password`            | `{ newPassword: string }` (min 6)     | Replace Argon2id password hash, bump `permissionVersion` (revokes sessions); audited `iam.user.password_reset` (no password in payload) |
 | `GET`    | `/users/:id/access-summary`            | none                                  | Effective permissions/menu tree for every assignment                    |
 | `GET`    | `/users/:id/assignments`               | none                                  | Assignments plus explicit permissions                                   |
 | `POST`   | `/users/:id/assignments`               | `CreateAssignmentDto`                 | Add department/role and optional permission IDs                         |
@@ -108,7 +108,7 @@ Every route in this section uses `JwtAuthGuard`, `RolesGuard`, and `@Roles(SUPER
 | `GET`    | `/users/:id/assignments/:assignmentId/permissions` | none | Active overrides `{ assignmentId, departmentId, roleId, items[{ permissionId, permissionCode, effect, expiresAt, expired }] }` |
 | `PUT`    | `/users/:id/assignments/:assignmentId/permissions` | `{ reason, items[{ permissionId, effect: ALLOW|DENY, expiresAt? }] }` | Replaces the whole override set; SUPER_ADMIN assignments, duplicates, inactive permissions and past expiry return 400; audited `iam.user_permission.overrides_changed`; does not bump `permissionVersion` (no session revoke) |
 | `DELETE` | `/users/:id/assignments/:assignmentId` | none                                  | Remove assignment; protects last SUPER_ADMIN                            |
-| `DELETE` | `/users/:id`                           | none                                  | Delete user and assignment/permission rows                              |
+| `DELETE` | `/users/:id`                           | none                                  | Delete user and assignment/permission rows; 409 when the account already has history (foreign key) — deactivate instead; audited `iam.user.deleted` |
 
 Create body:
 

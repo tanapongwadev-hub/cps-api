@@ -1,16 +1,22 @@
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsString,
   IsNotEmpty,
   IsEmail,
   MinLength,
   IsOptional,
   ArrayNotEmpty,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 
 export class CreateAssignmentDto {
+  /** null for a SYSTEM-scope role (e.g. SUPER_ADMIN). */
+  @ValidateIf((_object, value) => value !== null)
   @IsString()
   @IsNotEmpty()
-  departmentId: string;
+  departmentId: string | null;
 
   @IsString()
   @IsNotEmpty()
@@ -46,6 +52,9 @@ export class CreateUserDto {
   @IsOptional()
   telephone?: string;
 
+  @IsArray()
   @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => CreateAssignmentDto)
   assignments: CreateAssignmentDto[];
 }

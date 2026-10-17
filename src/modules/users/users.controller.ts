@@ -20,6 +20,8 @@ import { CreateUserDto, CreateAssignmentDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { UserStatusFilter } from './users.service';
 import { UserAccessSummaryService } from './user-access-summary.service';
 import { UserPermissionOverridesService } from './user-permission-overrides.service';
 import { ReplacePermissionOverridesDto } from './dto/replace-permission-overrides.dto';
@@ -40,11 +42,15 @@ export class UsersController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('status') status?: string,
   ) {
     return this.usersService.findAll(
       page ? parseInt(page) : 1,
       limit ? parseInt(limit) : 20,
       search,
+      status === 'active' || status === 'inactive'
+        ? (status as UserStatusFilter)
+        : undefined,
     );
   }
 
@@ -54,29 +60,38 @@ export class UsersController {
   }
 
   @Post()
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  create(
+    @Body() createUserDto: CreateUserDto,
+    @CurrentUser('id') actorId: string,
+  ) {
+    return this.usersService.create(createUserDto, actorId ?? null);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.update(id, updateUserDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateUserDto: UpdateUserDto,
+    @CurrentUser('id') actorId: string,
+  ) {
+    return this.usersService.update(id, updateUserDto, actorId ?? null);
   }
 
   @Patch(':id/status')
   updateStatus(
     @Param('id') id: string,
     @Body() updateStatusDto: UpdateStatusDto,
+    @CurrentUser('id') actorId: string,
   ) {
-    return this.usersService.updateStatus(id, updateStatusDto);
+    return this.usersService.updateStatus(id, updateStatusDto, actorId ?? null);
   }
 
   @Post(':id/reset-password')
   resetPassword(
     @Param('id') id: string,
-    @Body('newPassword') newPassword: string,
+    @Body() dto: ResetPasswordDto,
+    @CurrentUser('id') actorId: string,
   ) {
-    return this.usersService.resetPassword(id, newPassword);
+    return this.usersService.resetPassword(id, dto.newPassword, actorId ?? null);
   }
 
   @Get(':id/access-summary')
@@ -144,7 +159,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser('id') actorId: string) {
+    return this.usersService.remove(id, actorId ?? null);
   }
 }
