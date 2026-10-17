@@ -62,6 +62,13 @@ export class MaterialTypesController {
     return this.materialTypesService.deactivate(id, userId);
   }
 
+  /** Permanent delete — only for a type no Material uses (otherwise 409). */
+  @Delete(':id/permanent')
+  @RequirePermissions(MATERIAL_TYPE_PERMISSIONS.DELETE)
+  removePermanently(@Param('id') id: string) {
+    return this.materialTypesService.removePermanently(id);
+  }
+
   @Patch(':id/restore')
   @RequirePermissions(MATERIAL_TYPE_PERMISSIONS.UPDATE)
   restore(@Param('id') id: string, @CurrentUser('id') userId: string) {

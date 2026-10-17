@@ -117,6 +117,30 @@ export class MaterialTypesService {
     return this.setActive(id, false, userId);
   }
 
+  /**
+   * Hard delete. Refused while any Material still points at this type (the
+   * FK would reject it anyway; this gives a Thai message instead of a 500).
+   * Use deactivate for the reversible case.
+   */
+  async removePermanently(id: string): Promise<{ id: string; deleted: true }> {
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(MaterialTypeMaster);
+      const materialType = await repository.findOne({ where: { id } });
+      if (!materialType) throw new NotFoundException('ไม่พบประเภทวัสดุ');
+      const [{ count }] = (await manager.query(
+        'SELECT COUNT(*)::int AS count FROM master.materials WHERE material_type_id = $1',
+        [id],
+      )) as Array<{ count: number }>;
+      if (count > 0) {
+        throw new ConflictException(
+          `ลบถาวรไม่ได้: ยังมีวัสดุ ${count} รายการใช้ประเภทนี้อยู่ — เปลี่ยนประเภทของวัสดุเหล่านั้นก่อน หรือใช้ปิดใช้งานแทน`,
+        );
+      }
+      await repository.delete({ id });
+      return { id, deleted: true as const };
+    });
+  }
+
   async restore(id: string, userId: string): Promise<MaterialTypeResponse> {
     return this.setActive(id, true, userId);
   }
