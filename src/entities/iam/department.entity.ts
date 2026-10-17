@@ -18,6 +18,10 @@ export class Department {
   @Column({ type: 'varchar', length: 20, unique: true })
   code: string;
 
+  /** Group department (materials / production / delivery) this one belongs to; null for a group itself. */
+  @Column({ name: 'parent_id', type: 'bigint', nullable: true })
+  parentId: string | null;
+
   @Column({ name: 'name_th', type: 'varchar', length: 100 })
   nameTh: string;
 

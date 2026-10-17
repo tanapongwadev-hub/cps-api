@@ -31,6 +31,7 @@ import { MaterialsReceivingModule } from './modules/materials-receiving/material
 import { MaterialProcessingModule } from './modules/material-processing/material-processing.module';
 import { MaterialsDisbursementModule } from './modules/materials-disbursement/materials-disbursement.module';
 import { StockBalancesModule } from './modules/stock-balances/stock-balances.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ProductsModule } from './modules/products/products.module';
 import { BomsModule } from './modules/boms/boms.module';
 import { ProductWorkflowsModule } from './modules/product-workflows/product-workflows.module';
@@ -87,6 +88,7 @@ import { RequestContextService } from './common/request-context.service';
     MaterialProcessingModule,
     MaterialsDisbursementModule,
     StockBalancesModule,
+    DashboardModule,
     ProductsModule,
     BomsModule,
     MaterialEngineeringModule,

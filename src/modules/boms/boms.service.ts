@@ -16,7 +16,7 @@ import {
 import { Unit } from '../../entities/master/unit.entity';
 import { CreateBomDto } from './dto/create-bom.dto';
 import { UpdateBomDto } from './dto/update-bom.dto';
-import { AddBomItemDto } from './dto/update-bom.dto';
+import { AddBomItemDto, ReplaceBomContentDto } from './dto/update-bom.dto';
 
 export type BomWithItems = Omit<ProductBom, 'items' | 'product'> & {
   product: { id: string; code: string; nameTh: string };
@@ -280,6 +280,56 @@ export class BomsService {
       bom.updatedBy = userId;
 
       await bomRepo.save(bom);
+      return this.reloadInsideTransaction(manager, id);
+    });
+  }
+
+  /** Replace the content of a BOM that is not ACTIVE (DRAFT / INACTIVE). */
+  async replaceContent(
+    id: string,
+    dto: ReplaceBomContentDto,
+    userId: string,
+  ): Promise<BomWithItems> {
+    return this.getDataSource().transaction(async (manager) => {
+      const bomRepo = manager.getRepository(ProductBom);
+      const bom = await bomRepo.findOne({ where: { id } });
+      if (!bom) throw new NotFoundException(`BOM with id ${id} not found`);
+      if (bom.status === BomStatus.ACTIVE) {
+        throw new BadRequestException(
+          'Cannot edit an ACTIVE BOM. Copy it to a new version or deactivate it first.',
+        );
+      }
+      const materialIds = [...new Set(dto.items.map((i) => i.materialId))];
+      const materials = await manager.getRepository(Material).findByIds(materialIds);
+      if (materials.length !== materialIds.length) {
+        throw new ConflictException('One or more material IDs are invalid');
+      }
+      const unitIds = [...new Set(dto.items.map((i) => i.unitId))];
+      const units = await manager.getRepository(Unit).findByIds(unitIds);
+      if (units.length !== unitIds.length) {
+        throw new ConflictException('One or more unit IDs are invalid');
+      }
+      bom.specification = dto.specification ?? null;
+      bom.remark = dto.remark ?? null;
+      bom.updatedBy = userId;
+      await bomRepo.save(bom);
+      const itemRepo = manager.getRepository(ProductBomItem);
+      await itemRepo.delete({ bomId: id });
+      await itemRepo.save(
+        dto.items.map((item, idx) =>
+          itemRepo.create({
+            bomId: id,
+            materialId: item.materialId,
+            sortOrder: idx + 1,
+            quantity: item.quantity,
+            unitId: item.unitId,
+            isScrap: item.isScrap ?? false,
+            wastagePercent: item.wastagePercent ?? null,
+            remark: item.remark ?? null,
+            createdBy: userId,
+          }),
+        ),
+      );
       return this.reloadInsideTransaction(manager, id);
     });
   }

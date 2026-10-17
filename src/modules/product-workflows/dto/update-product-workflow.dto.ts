@@ -1,5 +1,15 @@
-import { Transform, TransformFnParams } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  ValidateNested,
+} from 'class-validator';
+import { CreateProductWorkflowStepDto } from './create-product-workflow.dto';
 
 const POSITIVE_DECIMAL_ID = /^[1-9]\d*$/;
 
@@ -19,6 +29,20 @@ export class UpdateProductWorkflowDto {
   @IsString()
   @IsNotEmpty()
   updatedAt: string;
+}
+
+export class ReplaceProductWorkflowContentDto {
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  remark?: string | null;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductWorkflowStepDto)
+  steps: CreateProductWorkflowStepDto[];
 }
 
 export class AddProductWorkflowStepDto {

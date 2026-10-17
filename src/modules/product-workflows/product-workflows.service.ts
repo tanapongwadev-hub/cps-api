@@ -17,6 +17,7 @@ import { CreateProductWorkflowDto } from './dto/create-product-workflow.dto';
 import {
   UpdateProductWorkflowDto,
   AddProductWorkflowStepDto,
+  ReplaceProductWorkflowContentDto,
 } from './dto/update-product-workflow.dto';
 
 export type ProductWorkflowWithSteps = Omit<
@@ -311,6 +312,46 @@ export class ProductWorkflowsService {
       workflow.updatedBy = userId;
       await workflowRepo.save(workflow);
 
+      return this.reloadInsideTransaction(manager, id);
+    });
+  }
+
+  /** Replace the content of a workflow that is not ACTIVE (DRAFT / INACTIVE). */
+  async replaceContent(
+    id: string,
+    dto: ReplaceProductWorkflowContentDto,
+    userId: string,
+  ): Promise<ProductWorkflowWithSteps> {
+    return this.getDataSource().transaction(async (manager) => {
+      const workflowRepo = manager.getRepository(ProductWorkflow);
+      const workflow = await workflowRepo.findOne({ where: { id } });
+      if (!workflow)
+        throw new NotFoundException(`ProductWorkflow with id ${id} not found`);
+      if (workflow.status === ProductWorkflowStatus.ACTIVE) {
+        throw new BadRequestException(
+          'Cannot edit an ACTIVE workflow. Copy it to a new version or deactivate it first.',
+        );
+      }
+      await this.assertProcessStepsExist(
+        manager,
+        dto.steps.map((step) => step.processStepId),
+      );
+      workflow.remark = dto.remark ?? null;
+      workflow.updatedBy = userId;
+      await workflowRepo.save(workflow);
+      const stepRepo = manager.getRepository(ProductWorkflowStep);
+      await stepRepo.delete({ workflowId: id });
+      await stepRepo.save(
+        dto.steps.map((step, idx) =>
+          stepRepo.create({
+            workflowId: id,
+            sortOrder: idx + 1,
+            processStepId: step.processStepId,
+            description: step.description ?? null,
+            createdBy: userId,
+          }),
+        ),
+      );
       return this.reloadInsideTransaction(manager, id);
     });
   }

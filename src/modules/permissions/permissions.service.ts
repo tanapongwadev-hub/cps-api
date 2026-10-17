@@ -31,7 +31,7 @@ const PERMISSION_ACCESS_LOCK_KEY = 'iam.permission_access';
 export interface PermissionMatrix {
   version: string;
   actions: { id: string; code: string; nameTh: string; nameEn: string; sortOrder: number }[];
-  departments: { id: string; code: string; nameTh: string; nameEn: string; isActive: boolean }[];
+  departments: { id: string; code: string; nameTh: string; nameEn: string; parentId: string | null; isActive: boolean }[];
   menus: {
     id: string;
     parentId: string | null;
@@ -255,6 +255,7 @@ export class PermissionsService {
         code: department.code,
         nameTh: department.nameTh,
         nameEn: department.nameEn,
+        parentId: department.parentId ?? null,
         isActive: department.isActive,
       })),
       menus: menus.map((menu) => ({

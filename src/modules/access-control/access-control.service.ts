@@ -46,6 +46,7 @@ export class AccessControlService {
     const now = new Date();
     const assignmentQuery = this.assignmentRepository
       .createQueryBuilder('assignment')
+      .leftJoinAndSelect('assignment.department', 'department')
       .where('assignment.userId = :userId', { userId })
       .andWhere('assignment.isActive = true')
       .andWhere(
@@ -104,7 +105,13 @@ export class AccessControlService {
 
       for (const permission of rolePermissions) {
         if (!grantedActionIds.has(permission.actionId)) continue;
-        if (!this.isAllowedInDepartment(permission, assignment.departmentId)) {
+        if (
+          !this.isAllowedInDepartment(
+            permission,
+            assignment.departmentId,
+            assignment.department?.parentId ? [assignment.department.parentId] : [],
+          )
+        ) {
           continue;
         }
         rows.push({
@@ -138,6 +145,7 @@ export class AccessControlService {
   private isAllowedInDepartment(
     permission: Permission,
     departmentId: string | null,
+    ancestorIds: readonly string[] = [],
   ): boolean {
     const activeDepartmentIds = (permission.departmentPermissions ?? [])
       .filter((mapping) => mapping.isActive)
@@ -147,6 +155,7 @@ export class AccessControlService {
       permission.accessScope,
       activeDepartmentIds,
       departmentId,
+      ancestorIds,
     );
   }
 

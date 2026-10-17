@@ -58,6 +58,7 @@ describe('AccessControlService department restrictions', () => {
 
     assignments.find!.mockResolvedValue([assignmentA, assignmentB]);
     assignments.createQueryBuilder!.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([assignmentA, assignmentB]),

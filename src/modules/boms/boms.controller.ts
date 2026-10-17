@@ -17,7 +17,7 @@ import { BOMS_PERMISSIONS } from './boms-permissions';
 import { BomsService } from './boms.service';
 import { CreateBomDto } from './dto/create-bom.dto';
 import { UpdateBomDto } from './dto/update-bom.dto';
-import { AddBomItemDto } from './dto/update-bom.dto';
+import { AddBomItemDto, ReplaceBomContentDto } from './dto/update-bom.dto';
 
 @Controller('boms')
 @UseGuards(JwtAuthGuard, ActiveAssignmentGuard, PermissionGuard)
@@ -57,6 +57,16 @@ export class BomsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.bomsService.update(id, dto, userId);
+  }
+
+  @Patch(':id/content')
+  @RequirePermissions(BOMS_PERMISSIONS.UPDATE)
+  replaceContent(
+    @Param('id') id: string,
+    @Body() dto: ReplaceBomContentDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.bomsService.replaceContent(id, dto, userId);
   }
 
   @Post(':id/items')

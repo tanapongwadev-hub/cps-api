@@ -249,6 +249,14 @@ export async function seed(dataSource: DataSource) {
         sort_order: 1,
       },
       {
+        code: 'MENU_HUB',
+        name_th: 'รวมเมนู',
+        name_en: 'All Menus',
+        path: '/menu-hub',
+        icon: 'layout-grid',
+        sort_order: 1,
+      },
+      {
         code: 'USER_MANUALS',
         name_th: 'คู่มือการใช้งาน',
         name_en: 'User Manuals',

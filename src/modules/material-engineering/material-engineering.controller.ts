@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
-import { CreateMaterialBomDto, CreateMaterialWorkflowDto } from './material-engineering.dto';
+import { CreateMaterialBomDto, CreateMaterialWorkflowDto, UpdateMaterialBomDto, UpdateMaterialWorkflowDto } from './material-engineering.dto';
 import { MaterialEngineeringService } from './material-engineering.service';
 
 @Controller('material-engineering')
@@ -27,8 +27,20 @@ export class MaterialEngineeringController {
   @Post('workflows') @RequirePermissions('MATERIAL_WORKFLOWS_CREATE')
   createWorkflow(@Body() dto: CreateMaterialWorkflowDto, @CurrentUser('id') userId: string) { return this.service.createWorkflow(dto, userId); }
 
+  @Patch('boms/:id') @RequirePermissions('MATERIAL_BOMS_UPDATE')
+  updateBom(@Param('id') id: string, @Body() dto: UpdateMaterialBomDto, @CurrentUser('id') userId: string) { return this.service.updateBom(id, dto, userId); }
+
+  @Delete('boms/:id') @RequirePermissions('MATERIAL_BOMS_UPDATE')
+  deleteBom(@Param('id') id: string) { return this.service.deleteBom(id); }
+
   @Patch('boms/:id/activate') @RequirePermissions('MATERIAL_BOMS_UPDATE')
   activateBom(@Param('id') id: string, @CurrentUser('id') userId: string) { return this.service.activate('bom', id, userId); }
+
+  @Patch('workflows/:id') @RequirePermissions('MATERIAL_WORKFLOWS_UPDATE')
+  updateWorkflow(@Param('id') id: string, @Body() dto: UpdateMaterialWorkflowDto, @CurrentUser('id') userId: string) { return this.service.updateWorkflow(id, dto, userId); }
+
+  @Delete('workflows/:id') @RequirePermissions('MATERIAL_WORKFLOWS_UPDATE')
+  deleteWorkflow(@Param('id') id: string) { return this.service.deleteWorkflow(id); }
 
   @Patch('workflows/:id/activate') @RequirePermissions('MATERIAL_WORKFLOWS_UPDATE')
   activateWorkflow(@Param('id') id: string, @CurrentUser('id') userId: string) { return this.service.activate('workflow', id, userId); }

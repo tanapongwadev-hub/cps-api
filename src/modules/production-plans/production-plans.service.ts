@@ -577,14 +577,26 @@ export class ProductionPlansService {
       .orderBy('product.code', 'ASC')
       .getMany();
     const materialBoms = await this.dataSource.getRepository(MaterialBom).find({ where: { status: 'ACTIVE' } });
-    const materials = materialBoms.length ? await this.dataSource.getRepository(Material).find({
-      where: { id: In(materialBoms.map((bom) => bom.materialId)), isActive: true, locationType: MaterialLocationType.INTERNAL },
+    // Every active internal-location Material is listed so planners can see
+    // what exists; only those with an ACTIVE BOM that are not raw stock can be
+    // planned (createPlan still enforces this).
+    const materials = await this.dataSource.getRepository(Material).find({
+      where: { isActive: true, locationType: MaterialLocationType.INTERNAL },
       order: { code: 'ASC' },
-    }) : [];
+    });
     return {
-      materials: materials.filter((material) => ![MaterialShape.PIPE, MaterialShape.SHEET, MaterialShape.COIL].includes(material.materialType ?? MaterialShape.PCS)).map((material) => {
-        const bom = materialBoms.find((entry) => entry.materialId === material.id)!;
-        return { id: material.id, code: material.code, name: material.name, activeBomId: bom.id, activeBomVersion: bom.version };
+      materials: materials.map((material) => {
+        const bom = materialBoms.find((entry) => entry.materialId === material.id);
+        const isRaw = [MaterialShape.PIPE, MaterialShape.SHEET, MaterialShape.COIL].includes(material.materialType ?? MaterialShape.PCS);
+        return {
+          id: material.id,
+          code: material.code,
+          name: material.name,
+          materialType: material.materialType ?? MaterialShape.PCS,
+          isRaw,
+          activeBomId: bom?.id ?? null,
+          activeBomVersion: bom?.version ?? null,
+        };
       }),
       products: products.map((product) => ({
         id: product.id,

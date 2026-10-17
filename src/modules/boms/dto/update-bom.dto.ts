@@ -1,11 +1,16 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsString,
   IsNotEmpty,
   IsDateString,
   IsOptional,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
-import { Transform, TransformFnParams } from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
+import { CreateBomItemDto } from './create-bom.dto';
 
 function nullableTrimmedString(params: TransformFnParams): unknown {
   const value = params.value;
@@ -37,6 +42,26 @@ export class UpdateBomDto {
   @IsString()
   @IsNotEmpty()
   updatedAt: string;
+}
+
+export class ReplaceBomContentDto {
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  specification?: string | null;
+
+  @Transform(nullableTrimmedString)
+  @IsOptional()
+  @IsString()
+  remark?: string | null;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => CreateBomItemDto)
+  items: CreateBomItemDto[];
 }
 
 export class AddBomItemDto {

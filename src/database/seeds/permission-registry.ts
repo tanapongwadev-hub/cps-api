@@ -152,6 +152,10 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   USER_MANUALS: {
     READ: 'USER_MANUAL_VIEW',
   },
+  // /menu-hub — all-menus page, open to every role with READ (see migration 1790600000036).
+  MENU_HUB: {
+    READ: 'MENU_HUB_VIEW',
+  },
   // Report menus — read-only (VIEW only)
   MATERIALS_RECEIVING_REPORT: {
     READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
@@ -201,6 +205,7 @@ export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
   PRODUCT_PROCESS_ORDERS: ['READ', 'CREATE', 'UPDATE', 'REVERSE'],
   PRODUCTION_TRACEABILITY: ['READ'],
   USER_MANUALS: ['READ'],
+  MENU_HUB: ['READ'],
   MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
   MATERIALS_DISBURSEMENT: MATERIALS_DISBURSEMENT_ACTION_CODES,
   // Report menus — read-only

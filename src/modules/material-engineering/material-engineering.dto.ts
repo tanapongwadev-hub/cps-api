@@ -12,6 +12,8 @@ export class CreateMaterialBomDto extends OmitType(CreateBomDto, ['productId', '
   @IsString() @Matches(/^[1-9]\d*$/) materialId: string;
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => MaterialBomItemDto) items: MaterialBomItemDto[];
 }
+export class UpdateMaterialBomDto extends OmitType(CreateMaterialBomDto, ['materialId'] as const) {}
 export class CreateMaterialWorkflowDto extends OmitType(CreateProductWorkflowDto, ['productId'] as const) {
   @IsString() @Matches(/^[1-9]\d*$/) materialId: string;
 }
+export class UpdateMaterialWorkflowDto extends OmitType(CreateMaterialWorkflowDto, ['materialId'] as const) {}

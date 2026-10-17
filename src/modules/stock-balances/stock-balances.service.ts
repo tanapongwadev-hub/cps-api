@@ -87,6 +87,7 @@ export class StockBalancesService {
       name: 'material.name',
       currentStock: CURRENT_STOCK_SQL,
       lastReceivedAt: LAST_RECEIVED_SQL,
+      createdAt: 'material.createdAt',
     } as const;
     const rows = await filtered
       .select('material.id', 'materialId')

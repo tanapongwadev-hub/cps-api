@@ -25,6 +25,7 @@ export const MATERIAL_INVENTORY_SORT_FIELDS = [
   'name',
   'currentStock',
   'lastReceivedAt',
+  'createdAt',
 ] as const;
 export type MaterialInventorySortBy =
   (typeof MATERIAL_INVENTORY_SORT_FIELDS)[number];

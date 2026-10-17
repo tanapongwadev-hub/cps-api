@@ -19,6 +19,7 @@ import { CreateProductWorkflowDto } from './dto/create-product-workflow.dto';
 import {
   UpdateProductWorkflowDto,
   AddProductWorkflowStepDto,
+  ReplaceProductWorkflowContentDto,
 } from './dto/update-product-workflow.dto';
 
 @Controller('product-workflows')
@@ -55,6 +56,16 @@ export class ProductWorkflowsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.workflowsService.update(id, dto, userId);
+  }
+
+  @Patch(':id/content')
+  @RequirePermissions(PRODUCT_WORKFLOWS_PERMISSIONS.UPDATE)
+  replaceContent(
+    @Param('id') id: string,
+    @Body() dto: ReplaceProductWorkflowContentDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.workflowsService.replaceContent(id, dto, userId);
   }
 
   @Post(':id/steps')

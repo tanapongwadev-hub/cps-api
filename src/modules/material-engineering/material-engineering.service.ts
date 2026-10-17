@@ -4,7 +4,7 @@ import { Material } from '../../entities/master/material.entity';
 import { ProcessStep } from '../../entities/master/process-step.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { MaterialBom, MaterialBomItem, MaterialWorkflow, MaterialWorkflowStep, MaterialEngineeringVersion } from '../../entities/master/material-engineering.entity';
-import { CreateMaterialBomDto, CreateMaterialWorkflowDto } from './material-engineering.dto';
+import { CreateMaterialBomDto, CreateMaterialWorkflowDto, UpdateMaterialBomDto, UpdateMaterialWorkflowDto } from './material-engineering.dto';
 
 @Injectable()
 export class MaterialEngineeringService {
@@ -14,6 +14,13 @@ export class MaterialEngineeringService {
     const rows = await this.dataSource.getRepository(MaterialBom).createQueryBuilder('bom')
       .select('bom.materialId', 'materialId').distinct(true).getRawMany<{ materialId: string }>();
     return rows.map((row) => row.materialId);
+  }
+
+  /** Highest existing vN + 1 (not a row count: deleting a version must never reuse a live number). */
+  private async nextVersion(repository: { find(options: { where: { materialId: string }; select: ['version'] }): Promise<Array<{ version: string }>> }, materialId: string) {
+    const rows = await repository.find({ where: { materialId }, select: ['version'] });
+    const highest = rows.reduce((max, row) => Math.max(max, parseInt(row.version.replace(/^v/, ''), 10) || 0), 0);
+    return `v${highest + 1}`;
   }
 
   private assertId(id: string) {
@@ -53,23 +60,100 @@ export class MaterialEngineeringService {
     return versions.map((version) => ({ ...version, steps: steps.filter((step) => step.workflowId === version.id) }));
   }
 
+  private async validateBomItems(manager: EntityManager, ownerId: string, items: CreateMaterialBomDto['items']) {
+    const ids = items.map((item) => item.materialId);
+    if (ids.includes(ownerId) || new Set(ids).size !== ids.length) throw new BadRequestException('BOM ห้ามใช้ Material ปลายทางเป็นส่วนประกอบหรือเลือกซ้ำ');
+    const materials = await manager.getRepository(Material).findBy({ id: In(ids), isActive: true });
+    if (materials.length !== ids.length || items.some((item) => materials.find((m) => m.id === item.materialId)?.unitId !== item.unitId)) {
+      throw new BadRequestException('Material หรือหน่วยส่วนประกอบไม่ถูกต้อง');
+    }
+    const unitIds = [...new Set(items.map((item) => item.unitId))];
+    if (await manager.getRepository(Unit).countBy({ id: In(unitIds), isActive: true }) !== unitIds.length) throw new BadRequestException('หน่วยส่วนประกอบถูกปิดใช้งาน');
+  }
+
+  private bomItemRows(bomId: string, items: CreateMaterialBomDto['items'], manager: EntityManager) {
+    return items.map((item, sortOrder) => manager.getRepository(MaterialBomItem).create({ bomId, materialId: item.materialId, unitId: item.unitId, quantity: item.quantity.toFixed(4), isScrap: item.isScrap ?? false, wastagePercent: item.wastagePercent == null ? null : item.wastagePercent.toFixed(4), remark: item.remark ?? null, sortOrder }));
+  }
+
+  /** Replace the content of a BOM that is not ACTIVE (DRAFT / INACTIVE). */
+  async updateBom(id: string, dto: UpdateMaterialBomDto, userId: string) {
+    this.assertId(id);
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(MaterialBom);
+      const bom = await repository.findOneBy({ id });
+      if (!bom) throw new NotFoundException('BOM not found');
+      await this.lockOwner(manager, bom.materialId);
+      if (bom.status === 'ACTIVE') throw new BadRequestException('แก้ไข BOM ที่เปิดใช้งานอยู่ไม่ได้ ให้ทำสำเนาเป็นเวอร์ชันใหม่หรือปิดใช้งานก่อน');
+      await this.validateBomItems(manager, bom.materialId, dto.items);
+      bom.specification = dto.specification ?? null;
+      bom.remark = dto.remark ?? null;
+      bom.updatedBy = userId;
+      await repository.save(bom);
+      await manager.getRepository(MaterialBomItem).delete({ bomId: id });
+      await manager.getRepository(MaterialBomItem).save(this.bomItemRows(id, dto.items, manager));
+      return bom;
+    });
+  }
+
+  /** Permanently delete a BOM that is not ACTIVE. */
+  async deleteBom(id: string) {
+    this.assertId(id);
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(MaterialBom);
+      const bom = await repository.findOneBy({ id });
+      if (!bom) throw new NotFoundException('BOM not found');
+      await this.lockOwner(manager, bom.materialId);
+      if (bom.status === 'ACTIVE') throw new BadRequestException('ลบ BOM ที่เปิดใช้งานอยู่ไม่ได้ ต้องปิดใช้งานก่อน');
+      await manager.getRepository(MaterialBomItem).delete({ bomId: id });
+      await repository.delete({ id });
+      return { id, deleted: true };
+    });
+  }
+
   async createBom(dto: CreateMaterialBomDto, userId: string) {
     return this.dataSource.transaction(async (manager) => {
       await this.lockOwner(manager, dto.materialId);
-      const ids = dto.items.map((item) => item.materialId);
-      if (ids.includes(dto.materialId) || new Set(ids).size !== ids.length) throw new BadRequestException('BOM ห้ามใช้ Material ปลายทางเป็นส่วนประกอบหรือเลือกซ้ำ');
-      const materials = await manager.getRepository(Material).findBy({ id: In(ids), isActive: true });
-      if (materials.length !== ids.length || dto.items.some((item) => materials.find((m) => m.id === item.materialId)?.unitId !== item.unitId)) {
-        throw new BadRequestException('Material หรือหน่วยส่วนประกอบไม่ถูกต้อง');
-      }
-      const unitIds = [...new Set(dto.items.map((item) => item.unitId))];
-      if (await manager.getRepository(Unit).countBy({ id: In(unitIds), isActive: true }) !== unitIds.length) throw new BadRequestException('หน่วยส่วนประกอบถูกปิดใช้งาน');
+      await this.validateBomItems(manager, dto.materialId, dto.items);
       const repository = manager.getRepository(MaterialBom);
-      const version = `v${await repository.countBy({ materialId: dto.materialId }) + 1}`;
+      const version = await this.nextVersion(repository, dto.materialId);
       const bom = await repository.save(repository.create({ materialId: dto.materialId, version, status: 'DRAFT', specification: dto.specification ?? null, remark: dto.remark ?? null, createdBy: userId, updatedBy: userId }));
-      const items = dto.items.map((item, sortOrder) => manager.getRepository(MaterialBomItem).create({ bomId: bom.id, materialId: item.materialId, unitId: item.unitId, quantity: item.quantity.toFixed(4), isScrap: item.isScrap ?? false, wastagePercent: item.wastagePercent == null ? null : item.wastagePercent.toFixed(4), remark: item.remark ?? null, sortOrder }));
-      await manager.getRepository(MaterialBomItem).save(items);
+      await manager.getRepository(MaterialBomItem).save(this.bomItemRows(bom.id, dto.items, manager));
       return bom;
+    });
+  }
+
+  /** Replace the content of a workflow that is not ACTIVE (DRAFT / INACTIVE). */
+  async updateWorkflow(id: string, dto: UpdateMaterialWorkflowDto, userId: string) {
+    this.assertId(id);
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(MaterialWorkflow);
+      const workflow = await repository.findOneBy({ id });
+      if (!workflow) throw new NotFoundException('Workflow not found');
+      await this.lockOwner(manager, workflow.materialId);
+      if (workflow.status === 'ACTIVE') throw new BadRequestException('แก้ไข Workflow ที่เปิดใช้งานอยู่ไม่ได้ ให้ทำสำเนาเป็นเวอร์ชันใหม่หรือปิดใช้งานก่อน');
+      const ids = [...new Set(dto.steps.map((step) => step.processStepId))];
+      if (await manager.getRepository(ProcessStep).countBy({ id: In(ids), isActive: true }) !== ids.length) throw new BadRequestException('Process step is invalid or inactive');
+      workflow.remark = dto.remark ?? null;
+      workflow.updatedBy = userId;
+      await repository.save(workflow);
+      await manager.getRepository(MaterialWorkflowStep).delete({ workflowId: id });
+      await manager.getRepository(MaterialWorkflowStep).save(dto.steps.map((step, sortOrder) => ({ workflowId: id, processStepId: step.processStepId, description: step.description ?? null, sortOrder })));
+      return workflow;
+    });
+  }
+
+  /** Permanently delete a workflow that is not ACTIVE. */
+  async deleteWorkflow(id: string) {
+    this.assertId(id);
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(MaterialWorkflow);
+      const workflow = await repository.findOneBy({ id });
+      if (!workflow) throw new NotFoundException('Workflow not found');
+      await this.lockOwner(manager, workflow.materialId);
+      if (workflow.status === 'ACTIVE') throw new BadRequestException('ลบ Workflow ที่เปิดใช้งานอยู่ไม่ได้ ต้องปิดใช้งานก่อน');
+      await manager.getRepository(MaterialWorkflowStep).delete({ workflowId: id });
+      await repository.delete({ id });
+      return { id, deleted: true };
     });
   }
 
@@ -79,7 +163,7 @@ export class MaterialEngineeringService {
       const ids = [...new Set(dto.steps.map((step) => step.processStepId))];
       if (await manager.getRepository(ProcessStep).countBy({ id: In(ids), isActive: true }) !== ids.length) throw new BadRequestException('Process step is invalid or inactive');
       const repository = manager.getRepository(MaterialWorkflow);
-      const version = `v${await repository.countBy({ materialId: dto.materialId }) + 1}`;
+      const version = await this.nextVersion(repository, dto.materialId);
       const workflow = await repository.save(repository.create({ materialId: dto.materialId, version, status: 'DRAFT', remark: dto.remark ?? null, createdBy: userId, updatedBy: userId }));
       await manager.getRepository(MaterialWorkflowStep).save(dto.steps.map((step, sortOrder) => ({ workflowId: workflow.id, processStepId: step.processStepId, description: step.description ?? null, sortOrder })));
       return workflow;

@@ -643,6 +643,12 @@ export class AuthService {
       permissionCodes,
       isSuperAdmin,
     );
+    // Group (parent) department of a sub-department such as materials.pc.
+    const parentDepartment = assignment?.department?.parentId
+      ? await this.userDepartmentRoleRepository.manager.findOne(Department, {
+          where: { id: assignment.department.parentId },
+        })
+      : null;
     const currentDepartmentRole = assignment
       ? {
           id: assignment.id,
@@ -650,6 +656,10 @@ export class AuthService {
           departmentId: assignment.departmentId,
           departmentName: assignment.department?.nameTh ?? null,
           departmentCode: assignment.department?.code ?? null,
+          departmentNameEn: assignment.department?.nameEn ?? null,
+          departmentParentId: parentDepartment?.id ?? null,
+          departmentParentName: parentDepartment?.nameTh ?? null,
+          departmentParentNameEn: parentDepartment?.nameEn ?? null,
           roleId: assignment.roleId,
           roleName: assignment.role.nameTh,
           roleCode: assignment.role.code,
