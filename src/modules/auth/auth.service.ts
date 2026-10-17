@@ -299,7 +299,11 @@ export class AuthService {
     };
   }
 
-  async selectDepartment(userId: string, userDepartmentRoleId: string) {
+  async selectDepartment(
+    userId: string,
+    userDepartmentRoleId: string,
+    sessionEndsAt?: Date,
+  ) {
     const assignment = await this.userDepartmentRoleRepository
       .createQueryBuilder('udr')
       .leftJoinAndSelect('udr.department', 'department')
@@ -321,7 +325,7 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
 
-    return await this.generateTokens(user, assignment);
+    return await this.generateTokens(user, assignment, sessionEndsAt);
   }
 
   /** The caller's own selectable assignments (for the in-app department switcher). */
@@ -347,8 +351,26 @@ export class AuthService {
     }));
   }
 
-  async switchDepartment(userId: string, userDepartmentRoleId: string) {
-    return await this.selectDepartment(userId, userDepartmentRoleId);
+  /**
+   * Switching department issues new tokens for the new assignment but keeps
+   * the original session deadline, so the 4-hour window cannot be extended by
+   * switching.
+   */
+  async switchDepartment(
+    userId: string,
+    userDepartmentRoleId: string,
+    currentSessionId?: string,
+  ) {
+    const current = currentSessionId
+      ? await this.authSessionRepository.findOne({
+          where: { id: currentSessionId, userId },
+        })
+      : null;
+    return await this.selectDepartment(
+      userId,
+      userDepartmentRoleId,
+      current?.expiresAt ? new Date(current.expiresAt) : undefined,
+    );
   }
 
   private verifyRefreshToken(token: string): JwtPayload {
@@ -585,6 +607,7 @@ export class AuthService {
   private async generateTokens(
     user: User,
     assignment: UserDepartmentRole | null,
+    sessionEndsAt?: Date,
   ) {
     const payload: JwtPayload = {
       sub: user.id,
@@ -614,7 +637,9 @@ export class AuthService {
 
     const refreshToken = this.jwtService.sign(payload, {
       secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d'),
+      expiresIn: sessionEndsAt
+        ? Math.max(1, Math.floor((sessionEndsAt.getTime() - Date.now()) / 1000))
+        : this.configService.get('JWT_REFRESH_EXPIRES_IN', '4h'),
     });
 
     // Hash refresh token and update session
