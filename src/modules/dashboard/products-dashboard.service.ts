@@ -29,6 +29,7 @@ export class ProductsDashboardService {
       recentIssues,
       stock,
       lowStock,
+      byProduct,
     ] = await Promise.all([
       q(
         `SELECT to_char(${day}, 'YYYY-MM-DD') AS date, m.type,
@@ -115,6 +116,28 @@ export class ProductsDashboardService {
          ORDER BY COALESCE(l.balance_after, 0) ASC, p.code LIMIT 8`,
         [],
       ),
+      q(
+        `SELECT p.code, p.name, u.symbol AS unit, p.min_stock::float8 AS "minStock",
+                COALESCE(l.balance_after, 0)::float8 AS balance,
+                COALESCE(a.rq, 0)::float8 AS "receivedQty", COALESCE(a.rd, 0)::int AS "receivedDocs",
+                COALESCE(a.iq, 0)::float8 AS "issuedQty", COALESCE(a.id, 0)::int AS "issuedDocs"
+         FROM master.products p
+         LEFT JOIN master.units u ON u.id = p.unit_id
+         LEFT JOIN LATERAL (
+           SELECT balance_after FROM inventory.product_stock_movements s
+           WHERE s.product_id = p.id ORDER BY s.id DESC LIMIT 1
+         ) l ON true
+         LEFT JOIN (
+           SELECT m.product_id,
+                  SUM(m.quantity) FILTER (WHERE m.type = 'receive') AS rq,
+                  COUNT(*) FILTER (WHERE m.type = 'receive') AS rd,
+                  SUM(m.quantity) FILTER (WHERE m.type = 'issue') AS iq,
+                  COUNT(*) FILTER (WHERE m.type = 'issue') AS id
+           FROM inventory.product_stock_movements m WHERE ${between} GROUP BY m.product_id
+         ) a ON a.product_id = p.id
+         WHERE p.is_active OR a.product_id IS NOT NULL
+         ORDER BY (COALESCE(a.rq, 0) + COALESCE(a.iq, 0)) DESC, p.code LIMIT 500`,
+      ),
     ]);
 
     // Zero-filled day series so the chart never skips a day.
@@ -163,6 +186,7 @@ export class ProductsDashboardService {
       recentIssues,
       stock: stock[0] ?? { total: 0, outOfStock: 0, lowStock: 0, normal: 0, totalQty: 0 },
       lowStock,
+      byProduct,
     };
   }
 }
