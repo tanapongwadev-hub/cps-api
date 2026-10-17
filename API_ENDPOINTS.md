@@ -104,7 +104,9 @@ Every route in this section uses `JwtAuthGuard`, `RolesGuard`, and `@Roles(SUPER
 | `GET`    | `/users/:id/access-summary`            | none                                  | Effective permissions/menu tree for every assignment                    |
 | `GET`    | `/users/:id/assignments`               | none                                  | Assignments plus explicit permissions                                   |
 | `POST`   | `/users/:id/assignments`               | `CreateAssignmentDto`                 | Add department/role and optional permission IDs                         |
-| `PATCH`  | `/users/:id/assignments/:assignmentId` | `UpdateAssignmentDto`                 | Change department/role and replace explicit permissions                 |
+| `PATCH`  | `/users/:id/assignments/:assignmentId` | `UpdateAssignmentDto`                 | Change department/role and replace explicit permissions only when `permissionIds` is sent (omitted = keep overrides)                 |
+| `GET`    | `/users/:id/assignments/:assignmentId/permissions` | none | Active overrides `{ assignmentId, departmentId, roleId, items[{ permissionId, permissionCode, effect, expiresAt, expired }] }` |
+| `PUT`    | `/users/:id/assignments/:assignmentId/permissions` | `{ reason, items[{ permissionId, effect: ALLOW|DENY, expiresAt? }] }` | Replaces the whole override set; SUPER_ADMIN assignments, duplicates, inactive permissions and past expiry return 400; audited `iam.user_permission.overrides_changed`; does not bump `permissionVersion` (no session revoke) |
 | `DELETE` | `/users/:id/assignments/:assignmentId` | none                                  | Remove assignment; protects last SUPER_ADMIN                            |
 | `DELETE` | `/users/:id`                           | none                                  | Delete user and assignment/permission rows                              |
 
@@ -149,6 +151,9 @@ Update body supports optional `firstName`, `lastName`, `email`, `telephone`, and
 | `POST`   | `/roles`     | `{ code, nameTh, nameEn, scopeType?: SYSTEM      | DEPARTMENT, description?, actionCodes?: string[] }` |
 | `PATCH`  | `/roles/:id` | Same fields optional plus `isActive?`            |
 | `DELETE` | `/roles/:id` | none                                             |
+| `PUT`    | `/roles/actions` | `{ reason, items[{ roleId, actionCodes }] }`; bulk role × action save, returns `{ changed, items }` |
+
+**Role actions (2026-10-17).** `actionCodes` is the complete set (case-insensitive). Unknown or inactive codes return 400 (previously dropped silently). `PUT /roles/actions` runs every item in one transaction under an advisory lock, requires a non-blank `reason`, refuses SUPER_ADMIN (it bypasses permission checks) and duplicate role ids, skips unchanged roles, and writes Audit `iam.role.actions_changed` (before/after `{ code, actionCodes }`) per changed role. `POST`/`PATCH /roles` with `actionCodes` use the same audited path without a reason.
 
 ### 4.4 Menus — `/menus`
 
@@ -221,10 +226,18 @@ The response version is computed from the merged post-save menu set. A valid no-
 | `GET`    | `/permissions`                 | Query `page=1`, `limit=20`, `search?`                  |
 | `GET`    | `/permissions/options`         | Menu/action options                                    |
 | `GET`    | `/permissions/:id`             | none                                                   |
-| `PUT`    | `/permissions/:id/departments` | `{ departmentIds: unique string[] }`; replaces mapping |
+| `GET`    | `/permissions/matrix`          | none; returns `{ version, actions, departments, menus, permissions[{ id, code, menuId, actionId, actionCode, isActive, accessScope, departmentIds }] }` |
+| `PUT`    | `/permissions/access`          | `{ version, reason, items[{ permissionId, accessScope: ALL\|DEPARTMENTS, departmentIds }] }`; bulk save, returns the fresh matrix |
+| `PUT`    | `/permissions/:id/departments` | `{ departmentIds: unique string[] }`; replaces mapping and sets `accessScope = DEPARTMENTS` |
 | `POST`   | `/permissions`                 | `{ menuId, actionId, code, description?, isActive? }`  |
 | `PATCH`  | `/permissions/:id`             | Same fields optional                                   |
 | `DELETE` | `/permissions/:id`             | none                                                   |
+
+**Department scope (migration `1790600000034`, 2026-10-17).** `permissions.access_scope` is `ALL` (every department; mappings ignored) or `DEPARTMENTS` (only active `department_permissions` rows; an empty list means nobody). Existing rows default to `ALL`, so behaviour is unchanged until an admin restricts them.
+
+`PUT /permissions/access` takes a transaction-scoped advisory lock and compares `version` (content hash of every permission's scope and departments): a stale version returns 409 and writes nothing. `ALL` items must send `departmentIds: []`; departments must exist and be active; duplicate or unknown permission ids return 400. A non-blank `reason` is required. For every menu touched by the request, a department that may use any non-READ permission of the menu must also be able to use the menu's READ permission, otherwise 400 with `violations[{ menuId, departmentId, departmentCode, permissionCodes, readPermissionCode }]`. Unchanged items are skipped; each changed permission writes Audit `iam.permission.department_scope_changed` (before/after `{ code, accessScope, departmentIds }`) in the same transaction.
+
+**Effective permissions.** Role grants still require the role's action and the permission's department scope. User overrides (`user_department_permissions`) are per-person exceptions: an active, unexpired `ALLOW` applies even when the assignment's department is outside the scope, and `DENY` always wins. Overrides past `expires_at` are ignored.
 
 ### 4.6 Sessions — `/sessions`
 

@@ -13,6 +13,8 @@ import { Menu } from './menu.entity';
 import { Action } from './action.entity';
 import { DepartmentPermission } from './department-permission.entity';
 
+export type PermissionAccessScope = 'ALL' | 'DEPARTMENTS';
+
 @Entity('permissions', { schema: 'iam' })
 export class Permission {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
@@ -32,6 +34,19 @@ export class Permission {
 
   @Column({ type: 'text', nullable: true })
   description: string;
+
+  /**
+   * ALL = every department may use this permission (department mappings are
+   * ignored). DEPARTMENTS = only the active department_permissions rows; an
+   * empty list means no department.
+   */
+  @Column({
+    name: 'access_scope',
+    type: 'varchar',
+    length: 12,
+    default: 'ALL',
+  })
+  accessScope: PermissionAccessScope;
 
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;

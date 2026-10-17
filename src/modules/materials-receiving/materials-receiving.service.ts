@@ -32,6 +32,7 @@ import { buildLotDatePart } from './lot-code.util';
 /** Package QR Payload — encoded as pipe-delimited string for scan reliability */
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
 import { Material } from '../../entities/master/material.entity';
+import { MaterialBom } from '../../entities/master/material-engineering.entity';
 import { MaterialShape } from '../../entities/master/material.entity';
 import { Organization } from '../../entities/master/organization.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
@@ -122,9 +123,10 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     this.assertPositiveQuantity(dto.receiveQuantity);
     this.assertReceiveDateNotFuture(dto.receiveDate);
 
-    const result = await this.dataSource.transaction((manager) =>
-      this.createDraft(manager, dto, userId),
-    );
+    const result = await this.dataSource.transaction(async (manager) => {
+      await this.assertManuallyReceivable(manager, dto.materialId);
+      return this.createDraft(manager, dto, userId);
+    });
     return this.findOne(result.id);
   }
 
@@ -141,6 +143,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     this.assertReceiveDateNotFuture(dto.receiveDate);
 
     const result = await this.dataSource.transaction(async (manager) => {
+      await this.assertManuallyReceivable(manager, dto.materialId);
       const saved = await this.createDraft(manager, dto, userId);
       await this.confirmWithManager(manager, saved.id, userId);
       return saved;
@@ -612,10 +615,37 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   async confirm(id: string, userId: string): Promise<MaterialReceiving> {
-    await this.dataSource.transaction((manager) =>
-      this.confirmWithManager(manager, id, userId),
-    );
+    await this.dataSource.transaction(async (manager) => {
+      const receiving = await manager
+        .getRepository(MaterialReceiving)
+        .findOne({ where: { id } });
+      // A manual draft (not from production or processing) follows the same
+      // BOM rule as a new manual receipt.
+      if (receiving && !receiving.productionOrderLineId && !receiving.sourceReceivingId) {
+        await this.assertManuallyReceivable(manager, receiving.materialId);
+      }
+      await this.confirmWithManager(manager, id, userId);
+    });
     return this.findOne(id);
+  }
+
+  /**
+   * A Material that owns a Material BOM (any version) is manufactured, so its
+   * stock may only come from closing production (receiveProductionWithManager),
+   * never from a manual warehouse receipt.
+   */
+  private async assertManuallyReceivable(
+    manager: EntityManager,
+    materialId: string,
+  ): Promise<void> {
+    const hasBom = await manager
+      .getRepository(MaterialBom)
+      .exists({ where: { materialId } });
+    if (hasBom) {
+      throw new ConflictException(
+        'วัสดุนี้มี BOM จึงรับเข้าเองไม่ได้ ต้องรับเข้าจากการปิดการผลิตเท่านั้น',
+      );
+    }
   }
 
   private async confirmWithManager(
@@ -1310,7 +1340,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   async getMaterialLookups() {
-    const [suppliers, materials, units] = await Promise.all([
+    const [suppliers, materials, units, bomOwners] = await Promise.all([
       this.supplierRepository.find({
         where: { isActive: true },
         order: { code: 'ASC' },
@@ -1324,7 +1354,14 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         where: { isActive: true },
         order: { code: 'ASC' },
       }),
+      this.dataSource
+        .getRepository(MaterialBom)
+        .createQueryBuilder('bom')
+        .select('bom.materialId', 'materialId')
+        .distinct(true)
+        .getRawMany<{ materialId: string }>(),
     ]);
+    const bomOwnerIds = new Set(bomOwners.map((row) => String(row.materialId)));
     const unitsById = new Map(units.map((unit) => [unit.id, unit]));
     return {
       suppliers: suppliers.map((s) => this.toLookup(s)),
@@ -1336,6 +1373,8 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         materialType: m.materialType ?? null,
         ratio: m.ratio ?? null,
         processingMaterialId: m.processingMaterialId ?? null,
+        // BOM owners are received only from closing production (see assertManuallyReceivable).
+        hasBom: bomOwnerIds.has(String(m.id)),
         unitId: m.unitId,
         unit:
           unitsById.get(m.unitId)?.symbol ??

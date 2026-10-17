@@ -128,14 +128,13 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     POST: MATERIALS_DISBURSEMENT_PERMISSIONS.CONFIRM,
     CANCEL: MATERIALS_DISBURSEMENT_PERMISSIONS.CANCEL,
   },
-  // /materials/pc — the real Materials CRUD page, added as a sidebar
-  // submenu under MATERIALS_MANAGEMENTS (see migration
-  // 1786700000013-AddMaterialsPcOverviewMenu.ts). Same resource/permission
-  // as its own parent menu — reuses MATERIAL_VIEW rather than minting a new
-  // code, same "share a sibling's VIEW permission" pattern as the report
-  // menus below.
+  // /materials/catalog — sidebar entry for the Materials CRUD page. Has its
+  // own navigation permission (migration 1790600000035): permission codes are
+  // unique, so pointing this menu at MATERIAL_VIEW left it without a
+  // permission row and hidden from non-SUPER_ADMIN users. The page itself
+  // still requires MATERIAL_VIEW for data.
   MATERIALS_PC_OVERVIEW: {
-    READ: `${MATERIAL_PERMISSIONS.VIEW}`,
+    READ: 'MATERIALS_PC_OVERVIEW_VIEW',
   },
   // /products/process-orders — production orders (see migration 1790600000001).
   PRODUCT_PROCESS_ORDERS: {
@@ -144,9 +143,10 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
     UPDATE: PRODUCTION_ORDER_PERMISSIONS.ADVANCE,
     REVERSE: PRODUCTION_ORDER_PERMISSIONS.REVERSE,
   },
-  // /production/traceability — lot/box QR trace (see migration 1790600000011).
+  // /reports/production — lot/box QR trace (see migration 1790600000011).
+  // Own navigation permission (1790600000035); data needs PRODUCTION_ORDER_VIEW.
   PRODUCTION_TRACEABILITY: {
-    READ: PRODUCTION_ORDER_PERMISSIONS.VIEW,
+    READ: 'PRODUCTION_TRACEABILITY_VIEW',
   },
   // /manuals — user manuals, open to every role with READ (see migration 1790600000033).
   USER_MANUALS: {
@@ -159,9 +159,11 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   MATERIALS_DISBURSEMENT_REPORT: {
     READ: `${MATERIALS_DISBURSEMENT_PERMISSIONS.VIEW}`,
   },
-  // Unified materials stock report — read-only
+  // Unified materials stock report — read-only. Own navigation permission
+  // (1790600000035); data needs MATERIALS_RECEIVING_VIEW or
+  // MATERIALS_DISBURSEMENT_VIEW.
   MATERIALS_REPORT: {
-    READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
+    READ: 'MATERIALS_REPORT_VIEW',
   },
   // Products (automotive parts) — standard CRUD + RESTORE
   PRODUCTS_LIST: {

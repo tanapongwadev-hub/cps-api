@@ -7,6 +7,7 @@ import { UserDepartmentRole } from '../../entities/iam/user-department-role.enti
 import { UserDepartmentPermission } from '../../entities/iam/user-department-permission.entity';
 import { AccessControlModule } from '../access-control/access-control.module';
 import { UserAccessSummaryService } from './user-access-summary.service';
+import { UserPermissionOverridesService } from './user-permission-overrides.service';
 
 @Module({
   imports: [
@@ -18,7 +19,11 @@ import { UserAccessSummaryService } from './user-access-summary.service';
     ]),
   ],
   controllers: [UsersController],
-  providers: [UsersService, UserAccessSummaryService],
+  providers: [
+    UsersService,
+    UserAccessSummaryService,
+    UserPermissionOverridesService,
+  ],
   exports: [UsersService, UserAccessSummaryService],
 })
 export class UsersModule {}

@@ -1,5 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Repository } from 'typeorm';
+import { AuditLog } from '../../entities/iam/audit-log.entity';
+import { Permission } from '../../entities/iam/permission.entity';
 import { User } from '../../entities/iam/user.entity';
 import { UserDepartmentPermission } from '../../entities/iam/user-department-permission.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
@@ -47,11 +49,26 @@ describe('UsersService assignment lifecycle', () => {
       roleId: '4',
       isActive: true,
     } as UserDepartmentRole;
+    const permissions = repositoryStub<Permission>();
+    const audit = repositoryStub<AuditLog>();
+    permissions.find!.mockResolvedValue([
+      { id: '100', code: 'A_VIEW', isActive: true },
+      { id: '101', code: 'B_VIEW', isActive: true },
+    ]);
+    audit.create!.mockImplementation((value: AuditLog) => value);
+    audit.save!.mockImplementation(async (value: AuditLog) => value);
+    assignmentPermissions.find!.mockResolvedValue([]);
     const transaction = jest.fn(
       async (callback: (manager: unknown) => Promise<unknown>) =>
         callback({
           getRepository: (entity: unknown) =>
-            entity === UserDepartmentRole ? assignments : assignmentPermissions,
+            entity === UserDepartmentRole
+              ? assignments
+              : entity === Permission
+                ? permissions
+                : entity === AuditLog
+                  ? audit
+                  : assignmentPermissions,
         }),
     );
 
@@ -92,7 +109,54 @@ describe('UsersService assignment lifecycle', () => {
     expect(assignmentPermissions.delete).toHaveBeenCalledWith({
       userDepartmentRoleId: '22',
     });
+    expect(audit.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: 'iam.user_permission.overrides_changed',
+        targetId: '22',
+      }),
+    );
     expect(result).toMatchObject({ id: '22', departmentId: '9', roleId: '4' });
+  });
+
+  it('keeps existing overrides when permissionIds is omitted', async () => {
+    const assignment = {
+      id: '22',
+      userId: '7',
+      departmentId: '3',
+      roleId: '4',
+      isActive: true,
+    } as UserDepartmentRole;
+    const transaction = jest.fn(
+      async (callback: (manager: unknown) => Promise<unknown>) =>
+        callback({
+          getRepository: (entity: unknown) =>
+            entity === UserDepartmentRole ? assignments : assignmentPermissions,
+        }),
+    );
+    assignments.findOne!.mockResolvedValue(assignment);
+    assignments.save!.mockImplementation(
+      async (value: UserDepartmentRole) => value,
+    );
+    assignments.createQueryBuilder!.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([assignment]),
+    });
+    assignmentPermissions.createQueryBuilder!.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    });
+    (users as { manager?: { transaction?: jest.Mock } }).manager = {
+      transaction,
+    };
+
+    await service.updateAssignment('7', '22', { departmentId: '9', roleId: '4' });
+
+    expect(assignmentPermissions.delete).not.toHaveBeenCalled();
+    expect(assignmentPermissions.save).not.toHaveBeenCalled();
   });
 
   it('deletes a regular user and dependent assignment records in one transaction', async () => {

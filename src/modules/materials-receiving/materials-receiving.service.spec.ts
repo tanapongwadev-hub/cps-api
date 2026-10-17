@@ -17,6 +17,7 @@ import { MaterialReceiving } from '../../entities/inventory/material-receiving.e
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
 import { StockTransaction } from '../../entities/inventory/stock-transaction.entity';
 import { Material, MaterialShape } from '../../entities/master/material.entity';
+import { MaterialBom } from '../../entities/master/material-engineering.entity';
 import { Organization } from '../../entities/master/organization.entity';
 import { SupplierMaterial } from '../../entities/master/supplier-material.entity';
 import { Supplier } from '../../entities/master/supplier.entity';
@@ -192,6 +193,8 @@ function setup() {
   const supplierMaterialRepo = makeRepo();
   const organizationRepo = makeRepo();
   const auditLogRepo = makeRepo();
+  const materialBomRepo = makeRepo();
+  (materialBomRepo as unknown as { exists: jest.Mock }).exists = jest.fn(() => Promise.resolve(false));
 
   // Default: findOne ด้วย createQueryBuilder ใช้สำหรับ findOne(id)
   const defaultReceiving = makeReceiving();
@@ -218,6 +221,7 @@ function setup() {
     [SupplierMaterial.name]: supplierMaterialRepo,
     [Organization.name]: organizationRepo,
     [AuditLog.name]: auditLogRepo,
+    [MaterialBom.name]: materialBomRepo,
   };
 
   // transaction(callback) — เรียก callback ด้วย manager ที่มี repo map เดียวกัน
@@ -279,6 +283,7 @@ function setup() {
       supplierMaterialRepo,
       organizationRepo,
       auditLogRepo,
+      materialBomRepo: materialBomRepo as RepoMock & { exists: jest.Mock },
     },
   };
 }
@@ -610,6 +615,32 @@ describe('MaterialsReceivingService', () => {
       await expect(
         service.update('99', { updatedAt: new Date().toISOString() }, '9'),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('BOM-managed materials', () => {
+    const dto = {
+      materialId: '3',
+      supplierId: '2',
+      receiveQuantity: '2',
+      supplierProductionDate: '2026-08-01',
+      receiveDate: TODAY,
+    };
+
+    it('refuses a manual receipt or draft for a material that owns a BOM', async () => {
+      const { service, repos } = setup();
+      repos.materialBomRepo.exists.mockResolvedValue(true);
+      await expect(service.receive(dto, 'user')).rejects.toThrow(ConflictException);
+      await expect(service.create(dto, 'user')).rejects.toThrow(ConflictException);
+      expect(repos.receivingRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses to confirm a manual draft once the material owns a BOM', async () => {
+      const { service, repos } = setup();
+      repos.receivingRepo.findOne.mockResolvedValue(makeReceiving({ status: 'draft' } as Partial<MaterialReceiving>));
+      repos.materialBomRepo.exists.mockResolvedValue(true);
+      await expect(service.confirm('10', 'user')).rejects.toThrow(ConflictException);
+      expect(repos.stockBalanceRepo.save).not.toHaveBeenCalled();
     });
   });
 

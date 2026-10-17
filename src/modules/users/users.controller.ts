@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -20,6 +21,9 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { UserAccessSummaryService } from './user-access-summary.service';
+import { UserPermissionOverridesService } from './user-permission-overrides.service';
+import { ReplacePermissionOverridesDto } from './dto/replace-permission-overrides.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,6 +32,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly userAccessSummaryService: UserAccessSummaryService,
+    private readonly userPermissionOverridesService: UserPermissionOverridesService,
   ) {}
 
   @Get()
@@ -102,6 +107,31 @@ export class UsersController {
       id,
       assignmentId,
       updateAssignmentDto,
+    );
+  }
+
+  /** Per-person ALLOW/DENY overrides of one assignment. */
+  @Get(':id/assignments/:assignmentId/permissions')
+  getAssignmentOverrides(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+  ) {
+    return this.userPermissionOverridesService.list(id, assignmentId);
+  }
+
+  /** Replaces the whole override set (reason required, audited). */
+  @Put(':id/assignments/:assignmentId/permissions')
+  replaceAssignmentOverrides(
+    @Param('id') id: string,
+    @Param('assignmentId') assignmentId: string,
+    @Body() dto: ReplacePermissionOverridesDto,
+    @CurrentUser('id') actorId: string,
+  ) {
+    return this.userPermissionOverridesService.replace(
+      id,
+      assignmentId,
+      dto,
+      actorId ?? null,
     );
   }
 

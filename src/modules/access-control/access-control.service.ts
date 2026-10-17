@@ -6,6 +6,7 @@ import { RoleAction } from '../../entities/iam/role-action.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
 import { UserDepartmentPermission } from '../../entities/iam/user-department-permission.entity';
 import { Menu } from '../../entities/iam/menu.entity';
+import { isPermissionOpenToDepartment } from './permission-access';
 
 export interface EffectivePermissionRow {
   assignmentId: string;
@@ -42,13 +43,14 @@ export class AccessControlService {
     userId: string,
     assignmentId?: string,
   ): Promise<EffectivePermissionRow[]> {
+    const now = new Date();
     const assignmentQuery = this.assignmentRepository
       .createQueryBuilder('assignment')
       .where('assignment.userId = :userId', { userId })
       .andWhere('assignment.isActive = true')
       .andWhere(
         '(assignment.expiredAt IS NULL OR assignment.expiredAt > :now)',
-        { now: new Date() },
+        { now },
       );
     if (assignmentId) {
       assignmentQuery.andWhere('assignment.id = :assignmentId', {
@@ -78,7 +80,7 @@ export class AccessControlService {
             userDepartmentRoleId: assignment.id,
             isActive: true,
           })),
-          relations: ['permission', 'permission.departmentPermissions'],
+          relations: ['permission'],
         })
       : [];
 
@@ -115,12 +117,11 @@ export class AccessControlService {
       }
 
       for (const entry of directByAssignment.get(assignment.id) ?? []) {
+        // A user override is a deliberate per-person exception: ALLOW may grant
+        // a permission the assignment's department does not have, and DENY
+        // always wins. Only expired overrides are ignored.
         if (!entry.permission?.isActive) continue;
-        if (
-          !this.isAllowedInDepartment(entry.permission, assignment.departmentId)
-        ) {
-          continue;
-        }
+        if (entry.expiresAt && new Date(entry.expiresAt) <= now) continue;
         rows.push({
           assignmentId: assignment.id,
           departmentId: assignment.departmentId,
@@ -138,13 +139,14 @@ export class AccessControlService {
     permission: Permission,
     departmentId: string | null,
   ): boolean {
-    const restrictedIds = (permission.departmentPermissions ?? [])
+    const activeDepartmentIds = (permission.departmentPermissions ?? [])
       .filter((mapping) => mapping.isActive)
       .map((mapping) => mapping.departmentId);
 
-    return (
-      restrictedIds.length === 0 ||
-      (departmentId !== null && restrictedIds.includes(departmentId))
+    return isPermissionOpenToDepartment(
+      permission.accessScope,
+      activeDepartmentIds,
+      departmentId,
     );
   }
 

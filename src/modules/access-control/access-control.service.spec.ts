@@ -75,6 +75,7 @@ describe('AccessControlService department restrictions', () => {
         actionId: 'approve',
         code: 'order.approve',
         isActive: true,
+        accessScope: 'DEPARTMENTS',
         departmentPermissions: [{ departmentId: '2', isActive: true }],
       },
     ]);
@@ -92,6 +93,7 @@ describe('AccessControlService department restrictions', () => {
         actionId: 'approve',
         code: 'order.approve',
         isActive: true,
+        accessScope: 'DEPARTMENTS',
         departmentPermissions: [{ departmentId: '2', isActive: true }],
       },
     ]);
@@ -107,7 +109,7 @@ describe('AccessControlService department restrictions', () => {
     ]);
   });
 
-  it('treats inactive mappings as unrestricted', async () => {
+  it('ignores department mappings on an ALL scope', async () => {
     roleActions.find!.mockResolvedValue([
       { roleId: 'r1', actionId: 'approve', isActive: true },
     ]);
@@ -117,7 +119,8 @@ describe('AccessControlService department restrictions', () => {
         actionId: 'approve',
         code: 'order.approve',
         isActive: true,
-        departmentPermissions: [{ departmentId: '2', isActive: false }],
+        accessScope: 'ALL',
+        departmentPermissions: [{ departmentId: '2', isActive: true }],
       },
     ]);
 
@@ -130,5 +133,89 @@ describe('AccessControlService department restrictions', () => {
         code: 'order.approve',
       }),
     );
+  });
+
+  it('closes a DEPARTMENTS permission with no active mapping to everybody', async () => {
+    roleActions.find!.mockResolvedValue([
+      { roleId: 'r1', actionId: 'approve', isActive: true },
+      { roleId: 'r2', actionId: 'approve', isActive: true },
+    ]);
+    permissions.find!.mockResolvedValue([
+      {
+        id: 'p1',
+        actionId: 'approve',
+        code: 'order.approve',
+        isActive: true,
+        accessScope: 'DEPARTMENTS',
+        departmentPermissions: [{ departmentId: '1', isActive: false }],
+      },
+    ]);
+
+    await expect(service.getEffectivePermissionRows('u1')).resolves.toEqual([]);
+  });
+
+  describe('user overrides', () => {
+    const closedToDepartmentOne = {
+      id: 'p1',
+      code: 'menu_b.view',
+      isActive: true,
+      accessScope: 'DEPARTMENTS',
+      departmentPermissions: [{ departmentId: '2', isActive: true }],
+    };
+
+    beforeEach(() => {
+      roleActions.find!.mockResolvedValue([]);
+      permissions.find!.mockResolvedValue([]);
+    });
+
+    it('lets an ALLOW override grant a menu the department does not have', async () => {
+      directPermissions.find!.mockResolvedValue([
+        {
+          userDepartmentRoleId: 'a',
+          effect: 'ALLOW',
+          isActive: true,
+          expiresAt: null,
+          permission: closedToDepartmentOne,
+        },
+      ]);
+
+      await expect(service.getEffectivePermissionRows('u1')).resolves.toEqual([
+        {
+          assignmentId: 'a',
+          departmentId: '1',
+          code: 'menu_b.view',
+          effect: 'ALLOW',
+          source: 'USER',
+        },
+      ]);
+    });
+
+    it('ignores an expired override', async () => {
+      directPermissions.find!.mockResolvedValue([
+        {
+          userDepartmentRoleId: 'a',
+          effect: 'ALLOW',
+          isActive: true,
+          expiresAt: new Date(Date.now() - 60_000),
+          permission: closedToDepartmentOne,
+        },
+      ]);
+
+      await expect(service.getEffectivePermissionRows('u1')).resolves.toEqual([]);
+    });
+
+    it('ignores an override on an inactive permission', async () => {
+      directPermissions.find!.mockResolvedValue([
+        {
+          userDepartmentRoleId: 'a',
+          effect: 'ALLOW',
+          isActive: true,
+          expiresAt: null,
+          permission: { ...closedToDepartmentOne, isActive: false },
+        },
+      ]);
+
+      await expect(service.getEffectivePermissionRows('u1')).resolves.toEqual([]);
+    });
   });
 });

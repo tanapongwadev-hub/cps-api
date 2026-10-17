@@ -1,18 +1,62 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
-import { Permission } from '../../entities/iam/permission.entity';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
+import {
+  Permission,
+  PermissionAccessScope,
+} from '../../entities/iam/permission.entity';
 import { Menu } from '../../entities/iam/menu.entity';
 import { Action } from '../../entities/iam/action.entity';
 import { Department } from '../../entities/iam/department.entity';
 import { DepartmentPermission } from '../../entities/iam/department-permission.entity';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
+import { UpdatePermissionAccessDto } from './dto/update-permission-access.dto';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
+import { createTraceId, recordAuditEvent } from '../../common/stock-ledger';
+import {
+  computePermissionAccessVersion,
+  findReadDependencyViolations,
+  PermissionAccessState,
+} from './permission-access-matrix';
+
+/** Serializes every change to permission department scopes. */
+const PERMISSION_ACCESS_LOCK_KEY = 'iam.permission_access';
+
+export interface PermissionMatrix {
+  version: string;
+  actions: { id: string; code: string; nameTh: string; nameEn: string; sortOrder: number }[];
+  departments: { id: string; code: string; nameTh: string; nameEn: string; isActive: boolean }[];
+  menus: {
+    id: string;
+    parentId: string | null;
+    code: string;
+    nameTh: string;
+    nameEn: string;
+    menuType: Menu['menuType'];
+    path: string | null;
+    icon: string | null;
+    sortOrder: number;
+    isActive: boolean;
+    isVisible: boolean;
+  }[];
+  permissions: {
+    id: string;
+    code: string;
+    description: string | null;
+    menuId: string;
+    actionId: string;
+    actionCode: string;
+    isActive: boolean;
+    accessScope: PermissionAccessScope;
+    departmentIds: string[];
+  }[];
+}
 
 export interface DepartmentSummary {
   id: string;
@@ -132,70 +176,378 @@ export class PermissionsService {
     }));
   }
 
-  async updateDepartments(id: string, departmentIds: string[]) {
+  /**
+   * Single-permission department list (legacy endpoint). Always stores the
+   * DEPARTMENTS scope, so an empty list closes the permission to everybody
+   * instead of silently reopening it to every department.
+   */
+  async updateDepartments(
+    id: string,
+    departmentIds: string[],
+    userId: string | null = null,
+  ) {
     await this.dataSource.transaction(async (manager) => {
-      const permissionRepository = manager.getRepository(Permission);
-      const departmentRepository = manager.getRepository(Department);
-      const departmentPermissionRepository =
-        manager.getRepository(DepartmentPermission);
-      const permission = await permissionRepository.findOne({
+      await this.lockPermissionAccess(manager);
+      const permission = await manager.getRepository(Permission).findOne({
         where: { id },
-        lock: { mode: 'pessimistic_write' },
       });
 
       if (!permission) {
         throw new NotFoundException('Permission not found');
       }
 
-      if (departmentIds.length > 0) {
-        const departments = await departmentRepository.find({
-          where: { id: In(departmentIds) },
-          select: ['id'],
-        });
-        const foundIds = new Set(
-          departments.map((department) => department.id),
-        );
-        const missingIds = departmentIds.filter(
-          (departmentId) => !foundIds.has(departmentId),
-        );
+      await this.assertDepartmentsExist(manager, departmentIds, false);
+      const before = await this.loadAccessState(manager, [id]);
+      await this.writeAccess(manager, id, 'DEPARTMENTS', departmentIds);
+      await this.auditAccessChange(manager, before[0], 'DEPARTMENTS', departmentIds, userId);
+    });
 
-        if (missingIds.length > 0) {
+    return this.findOne(id);
+  }
+
+  /** Everything the permission management screen needs, plus a version. */
+  async getMatrix(
+    manager: EntityManager = this.dataSource.manager,
+  ): Promise<PermissionMatrix> {
+    const [actions, departments, menus, permissions, mappings] =
+      await Promise.all([
+        manager.getRepository(Action).find({ order: { sortOrder: 'ASC' } }),
+        manager.getRepository(Department).find({ order: { code: 'ASC' } }),
+        manager
+          .getRepository(Menu)
+          .find({ order: { sortOrder: 'ASC', id: 'ASC' } }),
+        manager.getRepository(Permission).find({ order: { id: 'ASC' } }),
+        manager
+          .getRepository(DepartmentPermission)
+          .find({ where: { isActive: true } }),
+      ]);
+    const actionCodeById = new Map(actions.map((a) => [a.id, a.code]));
+    const departmentIdsByPermission = this.groupDepartmentIds(mappings);
+
+    const permissionRows = permissions.map((permission) => ({
+      id: permission.id,
+      code: permission.code,
+      description: permission.description ?? null,
+      menuId: permission.menuId,
+      actionId: permission.actionId,
+      actionCode: actionCodeById.get(permission.actionId) ?? '',
+      isActive: permission.isActive,
+      accessScope: permission.accessScope ?? 'ALL',
+      departmentIds:
+        (permission.accessScope ?? 'ALL') === 'DEPARTMENTS'
+          ? (departmentIdsByPermission.get(permission.id) ?? [])
+          : [],
+    }));
+
+    return {
+      version: computePermissionAccessVersion(permissionRows),
+      actions: actions
+        .filter((action) => action.isActive)
+        .map((action) => ({
+          id: action.id,
+          code: action.code,
+          nameTh: action.nameTh,
+          nameEn: action.nameEn,
+          sortOrder: action.sortOrder,
+        })),
+      departments: departments.map((department) => ({
+        id: department.id,
+        code: department.code,
+        nameTh: department.nameTh,
+        nameEn: department.nameEn,
+        isActive: department.isActive,
+      })),
+      menus: menus.map((menu) => ({
+        id: menu.id,
+        parentId: menu.parentId ?? null,
+        code: menu.code,
+        nameTh: menu.nameTh,
+        nameEn: menu.nameEn,
+        menuType: menu.menuType,
+        path: menu.path ?? null,
+        icon: menu.icon ?? null,
+        sortOrder: menu.sortOrder,
+        isActive: menu.isActive,
+        isVisible: menu.isVisible,
+      })),
+      permissions: permissionRows,
+    };
+  }
+
+  /**
+   * Bulk save of department scopes from the permission matrix. Runs under one
+   * advisory lock, rejects a stale `version` with 409, keeps the READ
+   * dependency for every touched menu, and audits each changed permission.
+   */
+  async updateAccess(
+    dto: UpdatePermissionAccessDto,
+    userId: string | null,
+  ): Promise<PermissionMatrix> {
+    const reason = dto.reason?.trim();
+    if (!reason) {
+      throw new BadRequestException('กรุณาระบุเหตุผลในการเปลี่ยนสิทธิ์');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockPermissionAccess(manager);
+
+      const current = await this.loadAccessState(manager);
+      if (computePermissionAccessVersion(current) !== dto.version) {
+        throw new ConflictException(
+          'สิทธิ์ถูกแก้ไขจากที่อื่นแล้ว กรุณาโหลดข้อมูลใหม่ก่อนบันทึก',
+        );
+      }
+
+      const seen = new Set<string>();
+      for (const item of dto.items) {
+        if (seen.has(item.permissionId)) {
           throw new BadRequestException({
-            message: 'Departments not found',
-            departmentIds: missingIds,
+            message: 'มีสิทธิ์ซ้ำในรายการที่บันทึก',
+            permissionId: item.permissionId,
+          });
+        }
+        seen.add(item.permissionId);
+        if (item.accessScope === 'ALL' && item.departmentIds.length > 0) {
+          throw new BadRequestException({
+            message: 'สิทธิ์ที่เปิดทุกแผนกต้องไม่ระบุรายการแผนก',
+            permissionId: item.permissionId,
           });
         }
       }
 
-      const existingMappings = await departmentPermissionRepository.find({
-        where: { permissionId: id },
-      });
-      const selectedIds = new Set(departmentIds);
-      const existingByDepartment = new Map(
-        existingMappings.map((mapping) => [mapping.departmentId, mapping]),
+      const byId = new Map(current.map((state) => [state.id, state]));
+      const missing = dto.items
+        .map((item) => item.permissionId)
+        .filter((permissionId) => !byId.has(permissionId));
+      if (missing.length > 0) {
+        throw new BadRequestException({
+          message: 'ไม่พบสิทธิ์ที่ระบุ',
+          permissionIds: missing,
+        });
+      }
+      await this.assertDepartmentsExist(
+        manager,
+        [...new Set(dto.items.flatMap((item) => item.departmentIds))],
+        true,
       );
 
-      for (const mapping of existingMappings) {
-        mapping.isActive = selectedIds.has(mapping.departmentId);
+      const changed = dto.items.filter((item) => {
+        const state = byId.get(item.permissionId)!;
+        return (
+          state.accessScope !== item.accessScope ||
+          !this.sameIds(state.departmentIds, item.departmentIds)
+        );
+      });
+
+      const next = current.map((state) => {
+        const item = changed.find((entry) => entry.permissionId === state.id);
+        return item
+          ? {
+              ...state,
+              accessScope: item.accessScope,
+              departmentIds: [...item.departmentIds],
+            }
+          : state;
+      });
+      const activeDepartments = await manager
+        .getRepository(Department)
+        .find({ where: { isActive: true }, select: ['id', 'code'] });
+      const violations = findReadDependencyViolations(
+        next,
+        changed.map((item) => byId.get(item.permissionId)!.menuId),
+        activeDepartments.map((department) => department.id),
+      );
+      if (violations.length > 0) {
+        const departmentCode = new Map(
+          activeDepartments.map((department) => [department.id, department.code]),
+        );
+        throw new BadRequestException({
+          message:
+            'แผนกที่ได้สิทธิ์อื่นของเมนูต้องได้สิทธิ์ "ดู" ของเมนูนั้นด้วย',
+          violations: violations.map((violation) => ({
+            ...violation,
+            departmentCode: departmentCode.get(violation.departmentId) ?? null,
+          })),
+        });
       }
 
-      for (const departmentId of selectedIds) {
-        if (existingByDepartment.has(departmentId)) continue;
-        existingMappings.push(
-          departmentPermissionRepository.create({
-            permissionId: id,
-            departmentId,
-            isActive: true,
-          }),
+      for (const item of changed) {
+        await this.writeAccess(
+          manager,
+          item.permissionId,
+          item.accessScope,
+          item.departmentIds,
+        );
+        await this.auditAccessChange(
+          manager,
+          byId.get(item.permissionId)!,
+          item.accessScope,
+          item.departmentIds,
+          userId,
+          reason,
         );
       }
 
-      if (existingMappings.length > 0) {
-        await departmentPermissionRepository.save(existingMappings);
-      }
+      return this.getMatrix(manager);
     });
+  }
 
-    return this.findOne(id);
+  private async lockPermissionAccess(manager: EntityManager) {
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      PERMISSION_ACCESS_LOCK_KEY,
+    ]);
+  }
+
+  private groupDepartmentIds(mappings: DepartmentPermission[]) {
+    const byPermission = new Map<string, string[]>();
+    for (const mapping of mappings) {
+      const ids = byPermission.get(mapping.permissionId) ?? [];
+      ids.push(mapping.departmentId);
+      byPermission.set(mapping.permissionId, ids);
+    }
+    for (const ids of byPermission.values()) {
+      ids.sort((a, b) => Number(a) - Number(b));
+    }
+    return byPermission;
+  }
+
+  private async loadAccessState(
+    manager: EntityManager,
+    permissionIds?: string[],
+  ): Promise<PermissionAccessState[]> {
+    const permissions = await manager.getRepository(Permission).find({
+      where: permissionIds ? { id: In(permissionIds) } : {},
+      relations: ['action'],
+    });
+    const mappings = await manager.getRepository(DepartmentPermission).find({
+      where: permissionIds
+        ? { permissionId: In(permissionIds), isActive: true }
+        : { isActive: true },
+    });
+    const departmentIdsByPermission = this.groupDepartmentIds(mappings);
+    return permissions.map((permission) => {
+      const accessScope = permission.accessScope ?? 'ALL';
+      return {
+        id: permission.id,
+        code: permission.code,
+        menuId: permission.menuId,
+        actionCode: permission.action?.code ?? '',
+        isActive: permission.isActive,
+        accessScope,
+        departmentIds:
+          accessScope === 'DEPARTMENTS'
+            ? (departmentIdsByPermission.get(permission.id) ?? [])
+            : [],
+      };
+    });
+  }
+
+  private async assertDepartmentsExist(
+    manager: EntityManager,
+    departmentIds: string[],
+    requireActive: boolean,
+  ) {
+    if (departmentIds.length === 0) return;
+    const departments = await manager.getRepository(Department).find({
+      where: { id: In(departmentIds) },
+      select: ['id', 'isActive'],
+    });
+    const usable = new Set(
+      departments
+        .filter((department) => !requireActive || department.isActive)
+        .map((department) => department.id),
+    );
+    const missingIds = departmentIds.filter((id) => !usable.has(id));
+    if (missingIds.length > 0) {
+      throw new BadRequestException({
+        message: requireActive
+          ? 'ไม่พบแผนกหรือแผนกถูกปิดใช้งาน'
+          : 'Departments not found',
+        departmentIds: missingIds,
+      });
+    }
+  }
+
+  /** Stores the scope and soft-toggles department mappings to match it. */
+  private async writeAccess(
+    manager: EntityManager,
+    permissionId: string,
+    accessScope: PermissionAccessScope,
+    departmentIds: string[],
+  ) {
+    await manager
+      .getRepository(Permission)
+      .update({ id: permissionId }, { accessScope });
+
+    const departmentPermissionRepository =
+      manager.getRepository(DepartmentPermission);
+    const existingMappings = await departmentPermissionRepository.find({
+      where: { permissionId },
+    });
+    const selectedIds = new Set(
+      accessScope === 'DEPARTMENTS' ? departmentIds : [],
+    );
+    const existingByDepartment = new Map(
+      existingMappings.map((mapping) => [mapping.departmentId, mapping]),
+    );
+
+    for (const mapping of existingMappings) {
+      mapping.isActive = selectedIds.has(mapping.departmentId);
+    }
+
+    for (const departmentId of selectedIds) {
+      if (existingByDepartment.has(departmentId)) continue;
+      existingMappings.push(
+        departmentPermissionRepository.create({
+          permissionId,
+          departmentId,
+          isActive: true,
+        }),
+      );
+    }
+
+    if (existingMappings.length > 0) {
+      await departmentPermissionRepository.save(existingMappings);
+    }
+  }
+
+  private async auditAccessChange(
+    manager: EntityManager,
+    before: PermissionAccessState | undefined,
+    accessScope: PermissionAccessScope,
+    departmentIds: string[],
+    userId: string | null,
+    reason: string | null = null,
+  ) {
+    if (!before) return;
+    await recordAuditEvent(manager, {
+      traceId: createTraceId(),
+      action: 'UPDATE',
+      eventName: 'iam.permission.department_scope_changed',
+      targetType: 'PERMISSION',
+      targetId: before.id,
+      performedBy: userId,
+      reason,
+      before: {
+        code: before.code,
+        accessScope: before.accessScope,
+        departmentIds: before.departmentIds,
+      },
+      after: {
+        code: before.code,
+        accessScope,
+        departmentIds:
+          accessScope === 'DEPARTMENTS'
+            ? [...departmentIds].sort((a, b) => Number(a) - Number(b))
+            : [],
+      },
+    });
+  }
+
+  private sameIds(a: readonly string[], b: readonly string[]) {
+    if (a.length !== b.length) return false;
+    const set = new Set(a);
+    return b.every((id) => set.has(id));
   }
 
   /** รายการ menus + actions สำหรับ dropdown ในฟอร์มสร้าง/แก้ไข permission */

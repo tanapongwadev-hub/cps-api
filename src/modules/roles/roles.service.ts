@@ -1,12 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Role } from '../../entities/iam/role.entity';
 import { RoleAction } from '../../entities/iam/role-action.entity';
 import { Action } from '../../entities/iam/action.entity';
 import { UserDepartmentRole } from '../../entities/iam/user-department-role.entity';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { UpdateRoleActionsDto } from './dto/update-role-actions.dto';
+import { RoleCode } from '../../common/enums/role-code.enum';
+import { createTraceId, recordAuditEvent } from '../../common/stock-ledger';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
 
 @Injectable()
@@ -16,10 +23,9 @@ export class RolesService {
     private roleRepository: Repository<Role>,
     @InjectRepository(RoleAction)
     private roleActionRepository: Repository<RoleAction>,
-    @InjectRepository(Action)
-    private actionRepository: Repository<Action>,
     @InjectRepository(UserDepartmentRole)
     private userDepartmentRoleRepository: Repository<UserDepartmentRole>,
+    private dataSource: DataSource,
   ) {}
 
   /** ดึงจำนวนสิทธิ์ (role_actions ที่ active) และจำนวนผู้ใช้งานของแต่ละ role */
@@ -87,30 +93,133 @@ export class RolesService {
     return map;
   }
 
-  /** sync role_actions ตาม action codes ที่ส่งมา (ปิดตัวที่ไม่เลือก, เพิ่ม/เปิดตัวที่เลือก) */
-  private async syncRoleActions(roleId: string, actionCodes: string[]) {
-    const actions = await this.actionRepository.find({
-      where: { code: In(actionCodes.map((c) => c.toUpperCase())) },
-    });
-    const wantedActionIds = new Set(actions.map((a) => String(a.id)));
+  /**
+   * Sets a role's complete action set inside the caller's transaction and
+   * writes `iam.role.actions_changed` when it actually changed. Unknown or
+   * inactive action codes are rejected instead of silently dropped.
+   */
+  private async syncRoleActions(
+    manager: EntityManager,
+    role: Pick<Role, 'id' | 'code'>,
+    actionCodes: string[],
+    userId: string | null,
+    reason: string | null,
+  ): Promise<boolean> {
+    const roleId = String(role.id);
+    const wantedCodes = [
+      ...new Set(actionCodes.map((code) => code.trim().toUpperCase())),
+    ].filter(Boolean);
+    const actions = wantedCodes.length
+      ? await manager
+          .getRepository(Action)
+          .find({ where: { code: In(wantedCodes), isActive: true } })
+      : [];
+    const found = new Set(actions.map((action) => action.code));
+    const unknown = wantedCodes.filter((code) => !found.has(code));
+    if (unknown.length > 0) {
+      throw new BadRequestException({
+        message: 'ไม่พบ action ที่ระบุหรือ action ถูกปิดใช้งาน',
+        actionCodes: unknown,
+      });
+    }
 
-    const existing = await this.roleActionRepository.find({
+    const roleActionRepository = manager.getRepository(RoleAction);
+    const existing = await roleActionRepository.find({
       where: { roleId },
+      relations: ['action'],
     });
+    const before = existing
+      .filter((ra) => ra.isActive && ra.action?.code)
+      .map((ra) => ra.action.code)
+      .sort();
+    const after = [...wantedCodes].sort();
+    if (before.join(',') === after.join(',')) return false;
+
+    const wantedActionIds = new Set(actions.map((a) => String(a.id)));
     for (const ra of existing) {
       const shouldBeActive = wantedActionIds.has(String(ra.actionId));
       if (ra.isActive !== shouldBeActive) {
         ra.isActive = shouldBeActive;
-        await this.roleActionRepository.save(ra);
+        if (userId) ra.updatedBy = userId;
+        await roleActionRepository.save(ra);
       }
       wantedActionIds.delete(String(ra.actionId));
     }
-
     for (const actionId of wantedActionIds) {
-      await this.roleActionRepository.save(
-        this.roleActionRepository.create({ roleId, actionId, isActive: true }),
+      await roleActionRepository.save(
+        roleActionRepository.create({
+          roleId,
+          actionId,
+          isActive: true,
+          ...(userId ? { createdBy: userId } : {}),
+        }),
       );
     }
+
+    await recordAuditEvent(manager, {
+      traceId: createTraceId(),
+      action: 'UPDATE',
+      eventName: 'iam.role.actions_changed',
+      targetType: 'ROLE',
+      targetId: roleId,
+      performedBy: userId,
+      reason,
+      before: { code: role.code, actionCodes: before },
+      after: { code: role.code, actionCodes: after },
+    });
+    return true;
+  }
+
+  /**
+   * Bulk save from the permission screen's Role tab: every role in one
+   * transaction, serialized by an advisory lock. SUPER_ADMIN bypasses
+   * permission checks, so its actions are read-only here.
+   */
+  async updateActions(dto: UpdateRoleActionsDto, userId: string | null) {
+    const reason = dto.reason?.trim();
+    if (!reason) {
+      throw new BadRequestException('กรุณาระบุเหตุผลในการเปลี่ยนสิทธิ์');
+    }
+    const roleIds = dto.items.map((item) => item.roleId);
+    if (new Set(roleIds).size !== roleIds.length) {
+      throw new BadRequestException('มี role ซ้ำในรายการที่บันทึก');
+    }
+
+    let changed = 0;
+    await this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        'iam.role_actions',
+      ]);
+      const roles = await manager
+        .getRepository(Role)
+        .find({ where: { id: In(roleIds) } });
+      const roleById = new Map(roles.map((role) => [String(role.id), role]));
+      const missing = roleIds.filter((id) => !roleById.has(id));
+      if (missing.length > 0) {
+        throw new BadRequestException({
+          message: 'ไม่พบ role ที่ระบุ',
+          roleIds: missing,
+        });
+      }
+      if (roles.some((role) => role.code === RoleCode.SUPER_ADMIN)) {
+        throw new BadRequestException(
+          'SUPER_ADMIN ข้ามการตรวจสิทธิ์ทั้งหมด จึงไม่ต้องกำหนด action',
+        );
+      }
+      for (const item of dto.items) {
+        const didChange = await this.syncRoleActions(
+          manager,
+          roleById.get(item.roleId)!,
+          item.actionCodes,
+          userId,
+          reason,
+        );
+        if (didChange) changed += 1;
+      }
+    });
+
+    const result = await this.findAll(1, 100);
+    return { changed, items: result.items };
   }
 
   async findAll(
@@ -190,7 +299,7 @@ export class RolesService {
     };
   }
 
-  async create(createRoleDto: CreateRoleDto) {
+  async create(createRoleDto: CreateRoleDto, userId: string | null = null) {
     const existing = await this.roleRepository.findOne({
       where: { code: createRoleDto.code },
     });
@@ -205,13 +314,19 @@ export class RolesService {
     );
 
     if (actionCodes?.length) {
-      await this.syncRoleActions(String(role.id), actionCodes);
+      await this.dataSource.transaction((manager) =>
+        this.syncRoleActions(manager, role, actionCodes, userId, null),
+      );
     }
 
     return this.findOne(String(role.id));
   }
 
-  async update(id: string, updateRoleDto: UpdateRoleDto) {
+  async update(
+    id: string,
+    updateRoleDto: UpdateRoleDto,
+    userId: string | null = null,
+  ) {
     const role = await this.findOne(id);
 
     if (updateRoleDto.code && updateRoleDto.code !== role.code) {
@@ -228,7 +343,9 @@ export class RolesService {
     const saved = await this.roleRepository.save(role);
 
     if (actionCodes) {
-      await this.syncRoleActions(String(saved.id), actionCodes);
+      await this.dataSource.transaction((manager) =>
+        this.syncRoleActions(manager, saved, actionCodes, userId, null),
+      );
     }
 
     return this.findOne(String(saved.id));

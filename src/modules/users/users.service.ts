@@ -20,6 +20,7 @@ import {
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { DuplicateResourceException } from '../../common/exceptions/custom-exceptions';
+import { replaceAssignmentOverrides } from './user-permission-overrides.service';
 
 @Injectable()
 export class UsersService {
@@ -594,9 +595,6 @@ export class UsersService {
 
     await this.userRepository.manager.transaction(async (manager) => {
       const assignmentRepository = manager.getRepository(UserDepartmentRole);
-      const permissionRepository = manager.getRepository(
-        UserDepartmentPermission,
-      );
       const duplicateAssignment = await assignmentRepository.findOne({
         where: {
           userId,
@@ -618,18 +616,19 @@ export class UsersService {
       assignment.roleId = updateAssignmentDto.roleId;
       await assignmentRepository.save(assignment);
 
-      await permissionRepository.delete({
-        userDepartmentRoleId: assignmentId,
-      });
-
-      for (const permissionId of updateAssignmentDto.permissionIds ?? []) {
-        await permissionRepository.save(
-          permissionRepository.create({
-            userDepartmentRoleId: assignmentId,
+      // Overrides are only replaced when the caller sends `permissionIds`;
+      // changing department/role alone must keep ALLOW/DENY exceptions.
+      if (updateAssignmentDto.permissionIds !== undefined) {
+        await replaceAssignmentOverrides(
+          manager,
+          assignment,
+          updateAssignmentDto.permissionIds.map((permissionId) => ({
             permissionId,
-            isActive: true,
-            grantedAt: new Date(),
-          }),
+            effect: 'ALLOW' as const,
+            expiresAt: null,
+          })),
+          null,
+          null,
         );
       }
     });
