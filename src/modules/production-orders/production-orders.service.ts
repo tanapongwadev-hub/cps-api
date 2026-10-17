@@ -802,6 +802,14 @@ export class ProductionOrdersService {
       const column = query.targetType === 'material' ? 'material_id' : 'product_id';
       qb.andWhere(`EXISTS (SELECT 1 FROM inventory.production_order_lines target_line WHERE target_line.production_order_id=o.id AND target_line.${column} IS NOT NULL)`);
     }
+    if (query.stepCode?.trim()) {
+      qb.andWhere(
+        `EXISTS (SELECT 1 FROM inventory.production_order_lines step_line WHERE step_line.production_order_id = o.id AND (
+           EXISTS (SELECT 1 FROM master.product_workflow_steps pws JOIN master.process_steps pst ON pst.id = pws.process_step_id WHERE pws.workflow_id = step_line.workflow_id AND pst.code = :stepCode)
+           OR EXISTS (SELECT 1 FROM master.material_workflow_steps mws JOIN master.process_steps mst ON mst.id = mws.process_step_id WHERE mws.workflow_id = step_line.material_workflow_id AND mst.code = :stepCode)))`,
+        { stepCode: query.stepCode.trim() },
+      );
+    }
     if (query.search?.trim()) {
       qb.andWhere(
         `(o.code ILIKE :q OR plan.code ILIKE :q OR product.code ILIKE :q OR material.code ILIKE :q OR material.name ILIKE :q)`,

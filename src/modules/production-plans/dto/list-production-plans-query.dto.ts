@@ -7,6 +7,11 @@ export class ListProductionPlansQueryDto {
   @IsIn(['product', 'material'])
   targetType?: 'product' | 'material';
 
+  /** Only plans with a line whose target's ACTIVE workflow has a step with this process-step code. */
+  @IsOptional()
+  @IsString()
+  workflowStepCode?: string;
+
   @IsOptional()
   @IsInt()
   @Min(1)

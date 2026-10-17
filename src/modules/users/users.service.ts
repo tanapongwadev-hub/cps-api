@@ -60,8 +60,31 @@ export class UsersService {
       .orderBy('user.createdAt', 'DESC')
       .getManyAndCount();
 
+    // One extra query for the whole page (not per user): active assignments with
+    // their department, its group and the role, for the list's "แผนก / role" column.
+    const userIds = items.map((item) => item.id);
+    const rows = userIds.length
+      ? ((await this.userDepartmentRoleRepository.manager.query(
+          `SELECT udr.user_id AS "userId", udr.id, udr.is_active AS "isActive",
+                  d.code AS "departmentCode", d.name_en AS "departmentNameEn", d.name_th AS "departmentNameTh",
+                  p.name_en AS "parentNameEn", p.name_th AS "parentNameTh",
+                  r.code AS "roleCode", r.name_th AS "roleNameTh"
+           FROM iam.user_department_roles udr
+           JOIN iam.roles r ON r.id = udr.role_id
+           LEFT JOIN iam.departments d ON d.id = udr.department_id
+           LEFT JOIN iam.departments p ON p.id = d.parent_id
+           WHERE udr.user_id = ANY($1::bigint[]) AND udr.is_active = true
+           ORDER BY udr.created_at`,
+          [userIds],
+        )) as Array<Record<string, string | boolean | null>>)
+      : [];
+    const withAssignments = items.map((item) => ({
+      ...item,
+      assignments: rows.filter((row) => String(row.userId) === String(item.id)),
+    }));
+
     return {
-      items,
+      items: withAssignments,
       meta: {
         page,
         limit,

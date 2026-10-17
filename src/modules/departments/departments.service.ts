@@ -121,7 +121,24 @@ export class DepartmentsService {
 
   async remove(id: string) {
     const department = await this.findOne(id);
-    await this.departmentRepository.remove(department);
+    const manager = this.departmentRepository.manager;
+    const [children, assignments] = await Promise.all([
+      this.departmentRepository.count({ where: { parentId: id } }),
+      manager.query(
+        'SELECT COUNT(*)::int AS count FROM iam.user_department_roles WHERE department_id = $1',
+        [id],
+      ) as Promise<Array<{ count: number }>>,
+    ]);
+    if (children > 0) {
+      throw new BadRequestException('ลบไม่ได้ เพราะแผนกนี้ยังมีแผนกย่อย ให้ย้ายหรือลบแผนกย่อยก่อน');
+    }
+    if (Number(assignments[0]?.count ?? 0) > 0) {
+      throw new BadRequestException('ลบไม่ได้ เพราะยังมีผู้ใช้อยู่ในแผนกนี้ ให้ย้ายผู้ใช้ออกหรือปิดใช้งานแผนกแทน');
+    }
+    await manager.transaction(async (tx) => {
+      await tx.query('DELETE FROM iam.department_permissions WHERE department_id = $1', [id]);
+      await tx.remove(department);
+    });
     return { message: 'Department deleted successfully' };
   }
 }

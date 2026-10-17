@@ -500,6 +500,14 @@ export class ProductionPlansService {
       // Filter headers without dropping other lines from historical mixed plans.
       qb.andWhere(`EXISTS (SELECT 1 FROM inventory.production_plan_lines target_line WHERE target_line.production_plan_id = plan.id AND target_line.${column} IS NOT NULL)`);
     }
+    if (query.workflowStepCode?.trim()) {
+      qb.andWhere(
+        `EXISTS (SELECT 1 FROM inventory.production_plan_lines step_line WHERE step_line.production_plan_id = plan.id AND (
+           EXISTS (SELECT 1 FROM master.product_workflows pw JOIN master.product_workflow_steps pws ON pws.workflow_id = pw.id JOIN master.process_steps pst ON pst.id = pws.process_step_id WHERE pw.product_id = step_line.product_id AND pw.status = 'ACTIVE' AND pst.code = :workflowStepCode)
+           OR EXISTS (SELECT 1 FROM master.material_workflows mw JOIN master.material_workflow_steps mws ON mws.workflow_id = mw.id JOIN master.process_steps mst ON mst.id = mws.process_step_id WHERE mw.material_id = step_line.material_id AND mw.status = 'ACTIVE' AND mst.code = :workflowStepCode)))`,
+        { workflowStepCode: query.workflowStepCode.trim() },
+      );
+    }
     if (query.search) {
       qb.andWhere(
         '(plan.code ILIKE :search OR plan.title ILIKE :search OR product.code ILIKE :search OR targetMaterial.code ILIKE :search OR targetMaterial.name ILIKE :search)',

@@ -27,6 +27,11 @@ export class ListProductionOrdersQueryDto {
   @IsString()
   status?: string;
 
+  /** Only orders whose pinned workflow has a step with this process-step code (sub-department view). */
+  @IsOptional()
+  @IsString()
+  stepCode?: string;
+
   /** Comma-separated production plan ids (to flag plans already ordered). */
   @IsOptional()
   @IsString()

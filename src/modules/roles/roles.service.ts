@@ -354,8 +354,19 @@ export class RolesService {
   async remove(id: string) {
     const role = await this.findOne(id);
 
-    // Endpoint นี้ถูก guard ให้เฉพาะ SUPER_ADMIN อยู่แล้ว — อนุญาตลบได้ทุก role (full access)
-    await this.roleRepository.remove(role);
+    if (role.isSystem || role.code === (RoleCode.SUPER_ADMIN as string)) {
+      throw new BadRequestException('ลบ role ของระบบไม่ได้');
+    }
+    const userCount = await this.userDepartmentRoleRepository.count({
+      where: { roleId: id },
+    });
+    if (userCount > 0) {
+      throw new BadRequestException(`ลบไม่ได้ เพราะยังมีผู้ใช้ ${userCount} การมอบหมายใช้ role นี้อยู่ ให้ปิดใช้งาน role แทน`);
+    }
+    await this.dataSource.transaction(async (tx) => {
+      await tx.getRepository(RoleAction).delete({ roleId: id });
+      await tx.remove(role);
+    });
     return { message: 'Role deleted successfully' };
   }
 }

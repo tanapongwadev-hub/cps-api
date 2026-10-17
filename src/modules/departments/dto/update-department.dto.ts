@@ -1,4 +1,4 @@
-import { IsString, IsOptional, Matches, ValidateIf } from 'class-validator';
+import { IsBoolean, IsString, IsOptional, Matches, ValidateIf } from 'class-validator';
 
 export class UpdateDepartmentDto {
   @IsString()
@@ -12,6 +12,10 @@ export class UpdateDepartmentDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 
   /** Group department id, or null to make it a top-level group. */
   @ValidateIf((_, value) => value !== null && value !== undefined)

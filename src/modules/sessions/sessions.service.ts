@@ -27,6 +27,7 @@ export class SessionsService {
         'user.username',
         'user.firstName',
         'user.lastName',
+        'udr.id',
         'department.id',
         'department.code',
         'department.nameTh',
