@@ -102,6 +102,19 @@ export class DashboardController {
     );
   }
 
+  /** Movements of one product (by code) in the range, for the detail dialog. */
+  @Get('products/movements')
+  @UseGuards(PermissionGuard)
+  @RequirePermissions('PRODUCTS_VIEW')
+  productMovements(
+    @Query('code') code: string | undefined,
+    @Query('from') fromParam: string | undefined,
+    @Query('to') toParam: string | undefined,
+  ) {
+    if (!code?.trim()) throw new BadRequestException('กรุณาระบุรหัสสินค้า');
+    return this.productsDashboard.getProductMovements(code.trim(), this.resolveRange(fromParam, toParam));
+  }
+
   /** Finished-product receive / issue overview for a date range. */
   @Get('products')
   @UseGuards(PermissionGuard)

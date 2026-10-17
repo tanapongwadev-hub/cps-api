@@ -11,6 +11,37 @@ type Row = Record<string, string | number | null>;
 export class ProductsDashboardService {
   constructor(private readonly dataSource: DataSource) {}
 
+  /** Every receive / issue of one product in the range (newest first, max 500). */
+  async getProductMovements(code: string, range: { from: string; to: string }) {
+    const rows = (await this.dataSource.query(
+      `SELECT m.id::text AS id, m.type, m.quantity::float8 AS qty, m.balance_after::float8 AS "balanceAfter",
+              m.reference_no AS "referenceNo", m.remark,
+              to_char(m.created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI') AS "recordedAt",
+              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS "recordedBy",
+              p.code AS "productCode", p.name AS "productName", un.symbol AS unit
+       FROM inventory.product_stock_movements m
+       JOIN master.products p ON p.id = m.product_id
+       LEFT JOIN master.units un ON un.id = p.unit_id
+       LEFT JOIN iam.users u ON u.id = m.recorded_by
+       WHERE p.code = $1 AND (m.created_at AT TIME ZONE 'Asia/Bangkok')::date BETWEEN $2 AND $3
+       ORDER BY m.id DESC LIMIT 501`,
+      [code, range.from, range.to],
+    )) as Row[];
+    const truncated = rows.length > 500;
+    const items = rows.slice(0, 500).map((r) => ({
+      id: r.id, type: r.type, qty: Number(r.qty), balanceAfter: Number(r.balanceAfter),
+      referenceNo: r.referenceNo, remark: r.remark, recordedAt: r.recordedAt, recordedBy: r.recordedBy,
+    }));
+    const sum = (type: string) => items.filter((i) => i.type === type).reduce((t, i) => t + i.qty, 0);
+    return {
+      product: rows[0] ? { code: rows[0].productCode, name: rows[0].productName, unit: rows[0].unit } : null,
+      range,
+      totals: { receivedQty: sum('receive'), issuedQty: sum('issue'), count: items.length },
+      truncated,
+      items,
+    };
+  }
+
   async getOverview(range: { from: string; to: string }) {
     const { from, to } = range;
     const day = `(m.created_at AT TIME ZONE 'Asia/Bangkok')::date`;
