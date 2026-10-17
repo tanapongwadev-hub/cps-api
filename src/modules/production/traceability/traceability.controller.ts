@@ -59,6 +59,39 @@ export class TraceabilityController {
     });
   }
 
+  /** Finished-product lots with production date, packed/sold quantity and sale dates. */
+  @Get('traceability/product-lots')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  async productLots(
+    @Query() query: Record<string, string | undefined>,
+    @CurrentUser() user: CurrentUserWithAssignment,
+  ) {
+    const isSuperAdmin = user.activeRoleCode === RoleCode.SUPER_ADMIN;
+    const granted = new Set(
+      await this.effectivePermissions.getEffectivePermissionCodes(
+        user.id,
+        user.activeUserDepartmentRoleId ?? undefined,
+        isSuperAdmin,
+      ),
+    );
+    const canSeeSales =
+      isSuperAdmin ||
+      ['SALES_REPORT_VIEW', 'SALES_JOB_ORDER_VIEW', 'SALES_ORDER_VIEW'].some((code) => granted.has(code));
+    const status = query.soldStatus;
+    return this.service.listProductLots(
+      {
+        search: query.search,
+        productId: query.productId,
+        dateFrom: /^\d{4}-\d{2}-\d{2}$/.test(query.dateFrom ?? '') ? query.dateFrom : undefined,
+        dateTo: /^\d{4}-\d{2}-\d{2}$/.test(query.dateTo ?? '') ? query.dateTo : undefined,
+        soldStatus: status === 'UNSOLD' || status === 'PARTIAL' || status === 'SOLD' ? status : undefined,
+        page: Math.max(1, Number.parseInt(query.page ?? '1', 10) || 1),
+        limit: Math.min(200, Math.max(1, Number.parseInt(query.limit ?? '20', 10) || 20)),
+      },
+      canSeeSales,
+    );
+  }
+
   @Get('packages/:qrCode/traceability')
   @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
   traceByQrCode(@Param('qrCode') qrCode: string) {

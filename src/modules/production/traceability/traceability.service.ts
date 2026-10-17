@@ -366,6 +366,97 @@ export class TraceabilityService {
     };
   }
 
+  /**
+   * Finished-product lots (FG lots with packed boxes) for the product-lot
+   * report: when produced, how much was packed and sold, first/last sale.
+   * `soldQty` is null when the caller cannot see sales.
+   */
+  async listProductLots(
+    query: {
+      search?: string;
+      productId?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      soldStatus?: 'UNSOLD' | 'PARTIAL' | 'SOLD';
+      page: number;
+      limit: number;
+    },
+    canSeeSales: boolean,
+  ) {
+    const params: unknown[] = [];
+    const where: string[] = [];
+    const add = (value: unknown) => {
+      params.push(value);
+      return `$${params.length}`;
+    };
+    if (query.search?.trim()) {
+      const p = add(`%${query.search.trim()}%`);
+      where.push(`(b.lot_no ILIKE ${p} OR b.product_code ILIKE ${p} OR b.product_name ILIKE ${p} OR b.order_code ILIKE ${p})`);
+    }
+    if (query.productId && /^\d+$/.test(query.productId)) where.push(`b.product_id = ${add(query.productId)}`);
+    if (query.dateFrom) where.push(`b.production_date >= ${add(query.dateFrom)}`);
+    if (query.dateTo) where.push(`b.production_date <= ${add(query.dateTo)}`);
+    if (query.soldStatus === 'UNSOLD') where.push('COALESCE(b.sold_qty, 0) = 0');
+    if (query.soldStatus === 'PARTIAL') where.push('b.sold_qty > 0 AND b.sold_qty < b.packed_qty');
+    if (query.soldStatus === 'SOLD') where.push('b.sold_qty >= b.packed_qty AND b.packed_qty > 0');
+
+    const base = `
+      WITH packed AS (
+        SELECT lot.id AS lot_id, lot.lot_no, lot.production_date, lot.shift_key, lot.production_order_line_id,
+               SUM(p.initial_qty)::float8 AS packed_qty, COUNT(*)::int AS box_count
+        FROM inventory.production_lots lot
+        JOIN inventory.production_packages p ON p.fg_lot_id = lot.id AND p.status <> 'VOID'
+        GROUP BY lot.id
+      ), sold AS (
+        SELECT p.fg_lot_id AS lot_id, SUM(s.qty)::float8 AS sold_qty,
+               MIN(s.issue_date) AS first_sale, MAX(s.issue_date) AS last_sale
+        FROM inventory.sales_shipments s
+        JOIN inventory.production_packages p ON p.id = s.package_id
+        GROUP BY p.fg_lot_id
+      ), b AS (
+        SELECT pk.lot_id, pk.lot_no, pk.production_date, pk.shift_key, pk.packed_qty, pk.box_count,
+               o.code AS order_code, ol.product_id, prod.code AS product_code, prod.name AS product_name,
+               ${canSeeSales ? 'sd.sold_qty, sd.first_sale, sd.last_sale' : 'NULL::float8 AS sold_qty, NULL::date AS first_sale, NULL::date AS last_sale'}
+        FROM packed pk
+        JOIN inventory.production_order_lines ol ON ol.id = pk.production_order_line_id
+        JOIN inventory.production_orders o ON o.id = ol.production_order_id
+        LEFT JOIN master.products prod ON prod.id = ol.product_id
+        LEFT JOIN sold sd ON sd.lot_id = pk.lot_id
+        WHERE ol.product_id IS NOT NULL
+      )`;
+    const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const [summary] = await this.dataSource.query<Array<Record<string, number | null>>>(
+      `${base} SELECT COUNT(*)::int AS lots, COALESCE(SUM(b.box_count), 0)::int AS boxes,
+                COALESCE(SUM(b.packed_qty), 0)::float8 AS packed, ${canSeeSales ? 'COALESCE(SUM(b.sold_qty), 0)::float8' : 'NULL::float8'} AS sold
+         FROM b ${filter}`,
+      params,
+    );
+    const offset = (query.page - 1) * query.limit;
+    const rows = await this.dataSource.query(
+      `${base} SELECT b.lot_id AS "lotId", b.lot_no AS "lotNo", to_char(b.production_date, 'YYYY-MM-DD') AS "productionDate",
+              b.shift_key AS shift, b.order_code AS "orderCode", b.product_code AS "productCode", b.product_name AS "productName",
+              b.packed_qty AS "packedQty", b.box_count AS "boxCount", b.sold_qty AS "soldQty",
+              to_char(b.first_sale, 'YYYY-MM-DD') AS "firstSaleDate", to_char(b.last_sale, 'YYYY-MM-DD') AS "lastSaleDate"
+       FROM b ${filter}
+       ORDER BY b.production_date DESC, b.lot_id DESC
+       LIMIT ${add(query.limit)} OFFSET ${add(offset)}`,
+      params,
+    );
+    const total = Number(summary?.lots ?? 0);
+    return {
+      items: rows,
+      summary: {
+        lots: total,
+        boxes: Number(summary?.boxes ?? 0),
+        packedQty: Number(summary?.packed ?? 0),
+        soldQty: summary?.sold === null || summary?.sold === undefined ? null : Number(summary.sold),
+      },
+      meta: { page: query.page, limit: query.limit, totalItems: total, totalPages: Math.max(1, Math.ceil(total / query.limit)) },
+      access: { sales: canSeeSales },
+    };
+  }
+
   /** Box → FG lot → … → first-step lots → production order. */
   async traceByQrCode(qrCode: string) {
     const rows = await this.dataSource.query<
