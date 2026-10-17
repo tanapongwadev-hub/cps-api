@@ -137,6 +137,15 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('me/departments')
+  async getMyDepartments(@CurrentUser() user: CurrentUserWithAssignment) {
+    return await this.authService.listMyDepartments(
+      user.id,
+      user.activeUserDepartmentRoleId ?? null,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('me/menus')
   async getMyMenus(@CurrentUser() user: CurrentUserWithAssignment) {
     return await this.authService.getMyMenus(user.activeRoleCode as RoleCode);

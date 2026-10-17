@@ -324,6 +324,29 @@ export class AuthService {
     return await this.generateTokens(user, assignment);
   }
 
+  /** The caller's own selectable assignments (for the in-app department switcher). */
+  async listMyDepartments(userId: string, activeAssignmentId: string | null) {
+    const rows = (await this.userDepartmentRoleRepository.manager.query(
+      `SELECT udr.id AS "userDepartmentRoleId", d.id AS "departmentId", d.code AS "departmentCode",
+              d.name_th AS "departmentName", d.name_en AS "departmentNameEn",
+              p.name_th AS "departmentParentName", p.name_en AS "departmentParentNameEn",
+              r.code AS "roleCode", r.name_th AS "roleName"
+       FROM iam.user_department_roles udr
+       JOIN iam.roles r ON r.id = udr.role_id AND r.is_active = true
+       LEFT JOIN iam.departments d ON d.id = udr.department_id
+       LEFT JOIN iam.departments p ON p.id = d.parent_id
+       WHERE udr.user_id = $1 AND udr.is_active = true
+         AND (udr.expired_at IS NULL OR udr.expired_at > now())
+         AND (d.id IS NULL OR d.is_active = true)
+       ORDER BY udr.created_at`,
+      [userId],
+    )) as Array<Record<string, string | null>>;
+    return rows.map((row) => ({
+      ...row,
+      isCurrent: activeAssignmentId !== null && String(row.userDepartmentRoleId) === String(activeAssignmentId),
+    }));
+  }
+
   async switchDepartment(userId: string, userDepartmentRoleId: string) {
     return await this.selectDepartment(userId, userDepartmentRoleId);
   }
