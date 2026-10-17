@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequireAnyPermissions } from '../../common/decorators/require-any-permissions.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -26,13 +27,13 @@ export class ProcessStepsController {
   constructor(private readonly processStepsService: ProcessStepsService) {}
 
   @Get()
-  @RequirePermissions(PROCESS_STEP_PERMISSIONS.VIEW)
+  @RequireAnyPermissions(PROCESS_STEP_PERMISSIONS.VIEW, 'PRODUCT_WORKFLOWS_CREATE', 'PRODUCT_WORKFLOWS_UPDATE', 'MATERIAL_WORKFLOWS_CREATE', 'MATERIAL_WORKFLOWS_UPDATE')
   findAll(@Query() query: ListProcessStepsQueryDto) {
     return this.processStepsService.findAll(query);
   }
 
   @Get(':id')
-  @RequirePermissions(PROCESS_STEP_PERMISSIONS.VIEW)
+  @RequireAnyPermissions(PROCESS_STEP_PERMISSIONS.VIEW, 'PRODUCT_WORKFLOWS_CREATE', 'PRODUCT_WORKFLOWS_UPDATE', 'MATERIAL_WORKFLOWS_CREATE', 'MATERIAL_WORKFLOWS_UPDATE')
   findOne(@Param('id') id: string) {
     return this.processStepsService.findOne(id);
   }
