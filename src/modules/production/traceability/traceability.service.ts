@@ -245,6 +245,127 @@ export class TraceabilityService {
     };
   }
 
+  /**
+   * Resolve a box QR or lot number to the production order line and the FG
+   * boxes it covers: a box QR covers itself, an FG lot covers its boxes, any
+   * other lot covers every box of its order line (`scope = 'ORDER_LINE'`,
+   * because boxes are not tracked per intermediate lot).
+   */
+  private async resolveCommercialScope(code: string) {
+    const q = code.trim();
+    type Row = { line_id: string; order_id: string; package_ids: string[] | null; scope: string };
+    const byBox = await this.dataSource.query<Row[]>(
+      `SELECT p.production_order_line_id AS line_id, p.production_order_id AS order_id,
+              ARRAY[p.id::text] AS package_ids, 'BOX' AS scope
+       FROM inventory.production_packages p WHERE p.qr_code = $1`,
+      [q.toUpperCase()],
+    );
+    if (byBox[0]) return byBox[0];
+    const lots = await this.dataSource.query<Array<{ id: string; line_id: string; order_id: string }>>(
+      `SELECT l.id, l.production_order_line_id AS line_id, ol.production_order_id AS order_id
+       FROM inventory.production_lots l
+       JOIN inventory.production_order_lines ol ON ol.id = l.production_order_line_id
+       WHERE l.lot_no = $1`,
+      [q],
+    );
+    const lot = lots[0];
+    if (!lot) throw new NotFoundException(`ไม่พบ QR หรือ Lot "${code}"`);
+    const fgBoxes = await this.dataSource.query<Array<{ id: string }>>(
+      `SELECT id FROM inventory.production_packages WHERE fg_lot_id = $1 AND status <> 'VOID'`,
+      [lot.id],
+    );
+    if (fgBoxes.length) {
+      return { line_id: lot.line_id, order_id: lot.order_id, package_ids: fgBoxes.map((b) => String(b.id)), scope: 'FG_LOT' };
+    }
+    const lineBoxes = await this.dataSource.query<Array<{ id: string }>>(
+      `SELECT id FROM inventory.production_packages WHERE production_order_line_id = $1 AND status <> 'VOID'`,
+      [lot.line_id],
+    );
+    return { line_id: lot.line_id, order_id: lot.order_id, package_ids: lineBoxes.map((b) => String(b.id)), scope: 'ORDER_LINE' };
+  }
+
+  /**
+   * Where a product lot went (sales shipments per box) and which material
+   * lots were issued to its production plan. Material lots are attributed per
+   * plan (the job order issues to the plan, not per production lot).
+   */
+  async commercialTrace(code: string, access: { sales: boolean; materials: boolean }) {
+    const scope = await this.resolveCommercialScope(code);
+    const ids = scope.package_ids ?? [];
+
+    const production = (
+      await this.dataSource.query<Array<Record<string, string | null>>>(
+        `SELECT o.code AS "orderCode", pl.code AS "planCode", pl.id AS "planId",
+                COALESCE(prod.code, tm.code) AS "productCode", COALESCE(prod.name, tm.name) AS "productName",
+                to_char(o.created_at, 'YYYY-MM-DD') AS "orderedDate"
+         FROM inventory.production_orders o
+         JOIN inventory.production_plans pl ON pl.id = o.production_plan_id
+         JOIN inventory.production_order_lines ol ON ol.production_order_id = o.id AND ol.id = $2
+         LEFT JOIN master.products prod ON prod.id = ol.product_id
+         LEFT JOIN master.materials tm ON tm.id = ol.material_id
+         WHERE o.id = $1`,
+        [scope.order_id, scope.line_id],
+      )
+    )[0];
+
+    const boxes = ids.length
+      ? await this.dataSource.query(
+          `SELECT p.qr_code AS "qrCode", p.box_no AS "boxNo", p.initial_qty AS qty, p.status,
+                  lot.lot_no AS "fgLotNo", to_char(lot.production_date, 'YYYY-MM-DD') AS "productionDate", lot.shift_key AS shift
+           FROM inventory.production_packages p
+           LEFT JOIN inventory.production_lots lot ON lot.id = p.fg_lot_id
+           WHERE p.id = ANY($1::bigint[]) ORDER BY p.box_no`,
+          [ids],
+        )
+      : [];
+
+    const sales = access.sales && ids.length
+      ? await this.dataSource.query(
+          `SELECT s.issue_no AS "issueNo", to_char(s.issue_date, 'YYYY-MM-DD') AS "issueDate", s.qty,
+                  so.code AS "salesOrderCode", c.name_th AS "customerName", p.qr_code AS "qrCode", p.box_no AS "boxNo"
+           FROM inventory.sales_shipments s
+           JOIN inventory.production_packages p ON p.id = s.package_id
+           LEFT JOIN inventory.sales_orders so ON so.id = s.sales_order_id
+           LEFT JOIN master.customers c ON c.id = s.customer_id
+           WHERE s.package_id = ANY($1::bigint[])
+           ORDER BY s.issue_date, s.issue_no, p.box_no`,
+          [ids],
+        )
+      : [];
+
+    const materialLots = access.materials && production?.planId
+      ? await this.dataSource.query(
+          `SELECT m.code AS "materialCode", m.name AS "materialName", r.internal_lot_no AS "internalLotNo",
+                  r.supplier_lot_no AS "supplierLotNo", to_char(r.receive_date, 'YYYY-MM-DD') AS "receiveDate",
+                  sup.name_th AS "supplierName", SUM(res.issued_quantity)::float8 AS "issuedQty",
+                  u.name_th AS "unit", jo.code AS "jobOrderCode",
+                  to_char(MAX(res.picked_at), 'YYYY-MM-DD') AS "pickedDate"
+           FROM inventory.production_plan_reservations res
+           JOIN inventory.production_plan_lines line ON line.id = res.production_plan_line_id
+           JOIN inventory.material_receiving_packages pkg ON pkg.id = res.material_receiving_package_id
+           JOIN inventory.material_receivings r ON r.id = pkg.material_receiving_id
+           JOIN master.materials m ON m.id = r.material_id
+           LEFT JOIN master.suppliers sup ON sup.id = r.supplier_id
+           LEFT JOIN master.units u ON u.id = r.unit_id
+           LEFT JOIN inventory.material_job_orders jo ON jo.production_plan_id = line.production_plan_id
+           WHERE line.production_plan_id = $1 AND res.issued_quantity > 0
+           GROUP BY m.code, m.name, r.internal_lot_no, r.supplier_lot_no, r.receive_date, sup.name_th, u.name_th, jo.code
+           ORDER BY m.code, r.internal_lot_no`,
+          [production.planId],
+        )
+      : [];
+
+    return {
+      query: code.trim(),
+      scope: scope.scope as 'BOX' | 'FG_LOT' | 'ORDER_LINE',
+      production,
+      boxes,
+      sales,
+      materialLots,
+      access,
+    };
+  }
+
   /** Box → FG lot → … → first-step lots → production order. */
   async traceByQrCode(qrCode: string) {
     const rows = await this.dataSource.query<
