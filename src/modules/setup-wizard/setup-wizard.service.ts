@@ -41,6 +41,28 @@ export class SetupWizardService {
     });
   }
 
+  /** Active products and materials that already have at least one BOM and one workflow. */
+  async overview() {
+    const build = (ownerTable: string, bomTable: string, workflowTable: string, col: string) =>
+      this.connection.query(
+        `SELECT o.id, o.code, o.name,
+                (SELECT count(*) FROM master.${bomTable} b WHERE b.${col} = o.id)::int AS "bomCount",
+                (SELECT count(*) FROM master.${bomTable} b WHERE b.${col} = o.id AND b.status = 'ACTIVE')::int AS "bomActive",
+                (SELECT count(*) FROM master.${workflowTable} w WHERE w.${col} = o.id)::int AS "workflowCount",
+                (SELECT count(*) FROM master.${workflowTable} w WHERE w.${col} = o.id AND w.status = 'ACTIVE')::int AS "workflowActive"
+         FROM master.${ownerTable} o
+         WHERE o.is_active = true
+           AND EXISTS (SELECT 1 FROM master.${bomTable} b WHERE b.${col} = o.id)
+           AND EXISTS (SELECT 1 FROM master.${workflowTable} w WHERE w.${col} = o.id)
+         ORDER BY o.code`,
+      ) as Promise<Array<Record<string, unknown>>>;
+    const [products, materials] = await Promise.all([
+      build('products', 'product_boms', 'product_workflows', 'product_id'),
+      build('materials', 'material_boms', 'material_workflows', 'material_id'),
+    ]);
+    return { products, materials };
+  }
+
   async remove(id: string, ownerId: string) {
     const result = await this.connection.getRepository(SetupDraft).delete({ id, ownerId });
     if (!result.affected) throw new NotFoundException('ไม่พบร่างของคุณ');

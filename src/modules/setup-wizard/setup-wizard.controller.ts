@@ -14,6 +14,10 @@ const SETUP_WIZARD_VIEW = 'SETUP_WIZARD_VIEW';
 export class SetupWizardController {
   constructor(private readonly service: SetupWizardService) {}
 
+  @Get('overview')
+  @RequirePermissions(SETUP_WIZARD_VIEW)
+  overview() { return this.service.overview(); }
+
   @Get('drafts')
   @RequirePermissions(SETUP_WIZARD_VIEW)
   list(@CurrentUser('id') userId: string) { return this.service.list(userId); }
