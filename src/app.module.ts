@@ -35,6 +35,7 @@ import { StockBalancesModule } from './modules/stock-balances/stock-balances.mod
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ProductsModule } from './modules/products/products.module';
 import { SetupWizardModule } from './modules/setup-wizard/setup-wizard.module';
+import { BomOverviewModule } from './modules/bom-overview/bom-overview.module';
 import { BomsModule } from './modules/boms/boms.module';
 import { ProductWorkflowsModule } from './modules/product-workflows/product-workflows.module';
 import { ProcessStepsModule } from './modules/process-steps/process-steps.module';
@@ -94,6 +95,7 @@ import { RequestContextService } from './common/request-context.service';
     DashboardModule,
     ProductsModule,
     SetupWizardModule,
+    BomOverviewModule,
     BomsModule,
     MaterialEngineeringModule,
     ProductWorkflowsModule,

@@ -18,6 +18,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
+import { CheckProductCodeDto } from './dto/check-product-code.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { DeleteProductDto } from './dto/delete-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
@@ -45,6 +46,12 @@ export class ProductsController {
   @RequirePermissions(PRODUCTS_PERMISSIONS.VIEW)
   findAll(@Query() query: ListProductsQueryDto) {
     return this.productsService.findAll(query);
+  }
+
+  @Get('code-availability')
+  @RequireAnyPermissions(PRODUCTS_PERMISSIONS.VIEW, PRODUCTS_PERMISSIONS.CREATE, PRODUCTS_PERMISSIONS.UPDATE)
+  checkCode(@Query() query: CheckProductCodeDto) {
+    return this.productsService.checkCodeAvailability(query.code, query.excludeId);
   }
 
   @Get('lookups')

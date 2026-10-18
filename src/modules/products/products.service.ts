@@ -108,6 +108,13 @@ export class ProductsService {
     };
   }
 
+  /** Inactive products still hold their code (unique index), so they count as taken. */
+  async checkCodeAvailability(code: string, excludeId?: string) {
+    const query = this.productRepository.createQueryBuilder('product').where('product.code = :code', { code: code.trim() });
+    if (excludeId) query.andWhere('product.id <> :excludeId', { excludeId });
+    return { available: (await query.getCount()) === 0 };
+  }
+
   async findAll(
     query: ListProductsQueryDto,
   ): Promise<{ items: ProductWithRelations[]; meta: { totalItems: number } }> {
