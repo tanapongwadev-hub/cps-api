@@ -113,7 +113,7 @@ export class MaterialsController {
   @Delete(':id/permanent')
   @RequirePermissions(MATERIAL_PERMISSIONS.DELETE)
   deletePermanently(@Param('id') id: string, @Body() dto: DeleteMaterialDto, @CurrentUser('id') userId: string) {
-    return this.materialsService.deletePermanently(id, dto.confirmationCode, userId);
+    return this.materialsService.deletePermanently(id, dto.confirmationCode, userId, dto.includeBom === true);
   }
 
   @Patch(':id/restore')

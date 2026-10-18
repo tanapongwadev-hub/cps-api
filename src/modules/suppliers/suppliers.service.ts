@@ -160,6 +160,40 @@ export class SuppliersService {
     });
   }
 
+  /**
+   * Hard delete. The supplier↔material mappings go with it; any other record
+   * that points at the supplier (e.g. receivings) blocks it with a Thai 409.
+   */
+  async removePermanently(id: string): Promise<{ id: string; deleted: true }> {
+    return this.dataSource.transaction(async (manager) => {
+      const repository = manager.getRepository(Supplier);
+      const supplier = await repository.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+      if (!supplier) throw new NotFoundException('ไม่พบซัพพลายเออร์');
+      const references: { tableName: string; relation: string; columnName: string }[] = await manager.query(`
+        SELECT c.relname AS "tableName", quote_ident(n.nspname) || '.' || quote_ident(c.relname) AS relation,
+               quote_ident(a.attname) AS "columnName"
+        FROM pg_constraint fk
+        JOIN pg_class c ON c.oid = fk.conrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(fk.conkey)
+        WHERE fk.contype = 'f' AND fk.confrelid = 'master.suppliers'::regclass
+          AND NOT (n.nspname = 'master' AND c.relname = 'supplier_materials')
+      `);
+      const labels: Record<string, string> = { material_receivings: 'รายการรับเข้า' };
+      const blockers = new Set<string>();
+      for (const reference of references) {
+        const rows = await manager.query(`SELECT 1 FROM ${reference.relation} WHERE ${reference.columnName} = $1 LIMIT 1`, [id]);
+        if (rows.length) blockers.add(labels[reference.tableName] ?? 'ข้อมูลที่เชื่อมโยงซัพพลายเออร์');
+      }
+      if (blockers.size > 0) {
+        throw new ConflictException(`ลบถาวรไม่ได้: มี${[...blockers].join(', ')}ที่ใช้ซัพพลายเออร์นี้อยู่ — ใช้ปิดใช้งานแทน`);
+      }
+      await manager.getRepository(SupplierMaterial).delete({ supplierId: id });
+      await repository.delete({ id });
+      return { id, deleted: true as const };
+    });
+  }
+
   async restore(id: string, userId: string): Promise<SupplierResponse> {
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(Supplier);

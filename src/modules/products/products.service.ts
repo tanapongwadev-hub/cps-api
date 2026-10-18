@@ -7,7 +7,8 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
+import { createTraceId, recordAuditEvent } from '../../common/stock-ledger';
 import { Product } from '../../entities/master/product.entity';
 import { ProductStockMovement } from '../../entities/inventory/product-stock-movement.entity';
 import { ProductModel } from '../../entities/master/product-model.entity';
@@ -575,6 +576,81 @@ export class ProductsService {
       await this.getImageStorage().discard(imagePath);
     } catch (error) {
       this.logger.warn(`Failed to discard Product image ${imagePath}`, error);
+    }
+  }
+
+  /**
+   * Permanent deletion. The product's own BOMs and workflows (ON DELETE CASCADE)
+   * are deleted with it. Anything else that references it (plans, orders, lots,
+   * packages, stock movements, sales) is stock/audit evidence and stays a blocker.
+   */
+  private async productDeletionBlockers(manager: EntityManager, id: string): Promise<string[]> {
+    const references: { tableName: string; relation: string; columnName: string }[] = await manager.query(`
+      SELECT c.relname AS "tableName", quote_ident(n.nspname) || '.' || quote_ident(c.relname) AS relation,
+             quote_ident(a.attname) AS "columnName"
+      FROM pg_constraint fk
+      JOIN pg_class c ON c.oid = fk.conrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(fk.conkey)
+      WHERE fk.contype = 'f' AND fk.confrelid = 'master.products'::regclass
+        AND NOT (n.nspname = 'master' AND c.relname IN ('product_boms', 'product_workflows'))
+    `);
+    const labels: Record<string, string> = {
+      production_plan_lines: 'แผนผลิต', production_order_lines: 'ใบสั่งผลิต', production_lots: 'Lot การผลิต',
+      production_packages: 'กล่องสินค้าที่ผลิต', product_stock_movements: 'ประวัติสต็อกสินค้า',
+      sales_order_lines: 'ใบสั่งขาย', sales_shipments: 'ประวัติการจัดส่ง',
+    };
+    const blockers = new Set<string>();
+    for (const reference of references) {
+      const rows = await manager.query(`SELECT 1 FROM ${reference.relation} WHERE ${reference.columnName} = $1 LIMIT 1`, [id]);
+      if (rows.length) blockers.add(labels[reference.tableName] ?? 'ข้อมูลที่เชื่อมโยงสินค้า');
+    }
+    return [...blockers];
+  }
+
+  async deletionCheck(id: string) {
+    if (!/^[1-9]d*$/.test(id)) throw new BadRequestException('Product ID ไม่ถูกต้อง');
+    return this.getDataSource().transaction(async (manager) => {
+      const product = await manager.getRepository(Product).findOne({ where: { id } });
+      if (!product) throw new NotFoundException(`Product with id ${id} not found`);
+      const blockers = await this.productDeletionBlockers(manager, id);
+      const count = async (table: string) => Number((await manager.query(`SELECT COUNT(*)::int AS n FROM master.${table} WHERE product_id = $1`, [id]))[0]?.n ?? 0);
+      return {
+        product: { id: product.id, code: product.code, name: product.name },
+        canDelete: blockers.length === 0, blockers,
+        bomCount: await count('product_boms'), workflowCount: await count('product_workflows'),
+      };
+    });
+  }
+
+  async deletePermanently(id: string, confirmationCode: string, userId: string) {
+    if (!/^[1-9]d*$/.test(id)) throw new BadRequestException('Product ID ไม่ถูกต้อง');
+    let imagePath: string | null = null;
+    try {
+      const before = await this.getDataSource().transaction(async (manager) => {
+        const repo = manager.getRepository(Product);
+        const product = await repo.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
+        if (!product) throw new NotFoundException(`Product with id ${id} not found`);
+        if (confirmationCode !== product.code) throw new BadRequestException('กรุณาพิมพ์รหัสสินค้าให้ตรงกับรายการที่ต้องการลบ');
+        const blockers = await this.productDeletionBlockers(manager, id);
+        if (blockers.length) throw new ConflictException(`ลบไม่ได้: มี${blockers.join(', ')} กรุณาปิดใช้งานแทน`);
+        const counts = {
+          boms: Number((await manager.query('SELECT COUNT(*)::int AS n FROM master.product_boms WHERE product_id = $1', [id]))[0]?.n ?? 0),
+          workflows: Number((await manager.query('SELECT COUNT(*)::int AS n FROM master.product_workflows WHERE product_id = $1', [id]))[0]?.n ?? 0),
+        };
+        imagePath = product.productImagePath;
+        await repo.delete(id); // BOMs/workflows and their lines cascade
+        const snapshot = { id, code: product.code, name: product.name, deletedBoms: counts.boms, deletedWorkflows: counts.workflows };
+        await recordAuditEvent(manager, { traceId: createTraceId(), action: 'DELETE', eventName: 'product.permanently_deleted', targetType: 'PRODUCT', targetId: id, performedBy: userId, before: snapshot });
+        return snapshot;
+      });
+      if (imagePath) await this.discardCommittedImage(imagePath);
+      return before;
+    } catch (error) {
+      if ((error as { driverError?: { code?: string } }).driverError?.code === '23503') {
+        throw new ConflictException('สินค้ามีข้อมูลอ้างอิงเพิ่มเติม กรุณาตรวจสอบอีกครั้งหรือปิดใช้งานแทน');
+      }
+      throw error;
     }
   }
 

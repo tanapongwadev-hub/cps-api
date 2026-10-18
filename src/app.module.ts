@@ -18,6 +18,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { AccessControlModule } from './modules/access-control/access-control.module';
 import { MaterialsModule } from './modules/materials/materials.module';
 import { UnitsModule } from './modules/units/units.module';
+import { MasterPermanentDeleteModule } from './modules/master-permanent-delete/master-permanent-delete.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
 import { MaterialModelsModule } from './modules/material-models/material-models.module';
 import { DeliveryTypesModule } from './modules/delivery-types/delivery-types.module';
@@ -33,6 +34,7 @@ import { MaterialsDisbursementModule } from './modules/materials-disbursement/ma
 import { StockBalancesModule } from './modules/stock-balances/stock-balances.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ProductsModule } from './modules/products/products.module';
+import { SetupWizardModule } from './modules/setup-wizard/setup-wizard.module';
 import { BomsModule } from './modules/boms/boms.module';
 import { ProductWorkflowsModule } from './modules/product-workflows/product-workflows.module';
 import { ProcessStepsModule } from './modules/process-steps/process-steps.module';
@@ -75,6 +77,7 @@ import { RequestContextService } from './common/request-context.service';
     AccessControlModule,
     MaterialsModule,
     UnitsModule,
+    MasterPermanentDeleteModule,
     SuppliersModule,
     MaterialModelsModule,
     DeliveryTypesModule,
@@ -90,6 +93,7 @@ import { RequestContextService } from './common/request-context.service';
     StockBalancesModule,
     DashboardModule,
     ProductsModule,
+    SetupWizardModule,
     BomsModule,
     MaterialEngineeringModule,
     ProductWorkflowsModule,

@@ -19,6 +19,7 @@ import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.gua
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import { CreateProductDto } from './dto/create-product.dto';
+import { DeleteProductDto } from './dto/delete-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import type { ProductImageFile } from './product-image-storage.service';
@@ -104,6 +105,18 @@ export class ProductsController {
     @CurrentUser('id') userId: string,
   ) {
     return this.productsService.update(id, dto, userId);
+  }
+
+  @Get(':id/deletion-check')
+  @RequirePermissions(PRODUCTS_PERMISSIONS.DELETE)
+  deletionCheck(@Param('id') id: string) {
+    return this.productsService.deletionCheck(id);
+  }
+
+  @Delete(':id/permanent')
+  @RequirePermissions(PRODUCTS_PERMISSIONS.DELETE)
+  deletePermanently(@Param('id') id: string, @Body() dto: DeleteProductDto, @CurrentUser('id') userId: string) {
+    return this.productsService.deletePermanently(id, dto.confirmationCode, userId);
   }
 
   @Delete(':id')

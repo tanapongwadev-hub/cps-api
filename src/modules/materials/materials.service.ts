@@ -373,11 +373,20 @@ export class MaterialsService {
       const material = await manager.getRepository(Material).findOne({ where: { id } });
       if (!material) throw new NotFoundException('Material not found');
       const blockers = await this.materialDeletionBlockers(manager, id);
-      return { material: { id: material.id, code: material.code, name: material.name, locationType: material.locationType }, canDelete: blockers.length === 0, blockers };
+      const blockersWithoutBom = await this.materialDeletionBlockers(manager, id, true);
+      const usageCount = Number((await manager.query(
+        'SELECT (SELECT COUNT(*) FROM master.material_bom_items WHERE material_id = $1) + (SELECT COUNT(*) FROM master.product_bom_items WHERE material_id = $1) AS n', [id]))[0]?.n ?? 0);
+      const ownBomCount = Number((await manager.query('SELECT COUNT(*)::int AS n FROM master.material_boms WHERE material_id = $1', [id]))[0]?.n ?? 0);
+      return {
+        material: { id: material.id, code: material.code, name: material.name, locationType: material.locationType },
+        canDelete: blockers.length === 0, blockers,
+        // Blocked only by the material's own BOM: can be deleted together with it.
+        ownBomCount, usageCount, canDeleteWithBom: blockers.length > 0 && blockersWithoutBom.length === 0,
+      };
     });
   }
 
-  private async materialDeletionBlockers(manager: EntityManager, id: string): Promise<string[]> {
+  private async materialDeletionBlockers(manager: EntityManager, id: string, ignoreOwnBom = false): Promise<string[]> {
     // Inspect every incoming FK, including CASCADE/SET NULL links, to protect
     // historical records and new modules without maintaining a partial list.
     const references: { tableName: string; relation: string; columnName: string }[] = await manager.query(`
@@ -403,6 +412,10 @@ export class MaterialsService {
     // Drafts store a material id without an entity relation/FK.
     if (await manager.getRepository(MaterialDraft).count({ where: { materialId: id } })) blockers.add('ร่างวัสดุ');
     for (const reference of references) {
+      // A source material pointing at this one as its processed output is just a
+      // link: it is cleared on delete (see deletePermanently), not a blocker.
+      if (reference.tableName === 'materials' && reference.columnName === 'processing_material_id') continue;
+      if (ignoreOwnBom && ['material_boms', 'material_workflows', 'material_bom_items', 'product_bom_items'].includes(reference.tableName)) continue;
       // Identifiers are quoted by PostgreSQL; the user-provided id stays bound.
       const rows = await manager.query(`SELECT 1 FROM ${reference.relation} WHERE ${reference.columnName} = $1 LIMIT 1`, [id]);
       if (rows.length) blockers.add(labels[reference.tableName] ?? 'ข้อมูลที่เชื่อมโยงวัสดุ');
@@ -410,7 +423,7 @@ export class MaterialsService {
     return [...blockers];
   }
 
-  async deletePermanently(id: string, confirmationCode: string, userId: string) {
+  async deletePermanently(id: string, confirmationCode: string, userId: string, includeBom = false) {
     if (!/^[1-9]\d*$/.test(id)) throw new BadRequestException('Material ID ไม่ถูกต้อง');
     try {
       return await this.getDataSource().transaction(async (manager) => {
@@ -418,9 +431,22 @@ export class MaterialsService {
         const material = await repository.findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
         if (!material) throw new NotFoundException('Material not found');
         if (confirmationCode !== material.code) throw new BadRequestException('กรุณาพิมพ์รหัสวัสดุให้ตรงกับรายการที่ต้องการลบ');
-        const blockers = await this.materialDeletionBlockers(manager, id);
+        const blockers = await this.materialDeletionBlockers(manager, id, includeBom);
         if (blockers.length) throw new ConflictException(`ลบไม่ได้: มี${blockers.join(', ')} กรุณาปิดใช้งานแทน`);
-        const before = { id, code: material.code, name: material.name, locationType: material.locationType };
+        let deletedBoms = 0;
+        if (includeBom) {
+          // Items go with their BOM (ON DELETE CASCADE); plan lines that pinned a BOM are blockers above.
+          // Lines in other BOMs (material and product) that use this material as a component.
+          await manager.query('DELETE FROM master.material_bom_items WHERE material_id = $1', [id]);
+          await manager.query('DELETE FROM master.product_bom_items WHERE material_id = $1', [id]);
+          const removed = await manager.query('DELETE FROM master.material_boms WHERE material_id = $1 RETURNING id', [id]);
+          deletedBoms = removed.length;
+          // The material's own routing (workflow + steps) belongs to the same BOM & Workflow definition.
+          await manager.query('DELETE FROM master.material_workflows WHERE material_id = $1', [id]);
+        }
+        const unlinked: { id: string }[] = await manager.query(
+          'UPDATE master.materials SET processing_material_id = NULL, updated_at = now() WHERE processing_material_id = $1 RETURNING id', [id]);
+        const before = { id, code: material.code, name: material.name, locationType: material.locationType, deletedBoms, unlinkedSourceMaterials: unlinked.map((row) => row.id) };
         await manager.getRepository(SupplierMaterial).delete({ materialId: id });
         await repository.delete(id);
         await recordAuditEvent(manager, { traceId: createTraceId(), action: 'DELETE', eventName: 'material.permanently_deleted', targetType: 'MATERIAL', targetId: id, performedBy: userId, before });

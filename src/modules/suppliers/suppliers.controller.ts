@@ -59,6 +59,13 @@ export class SuppliersController {
     return this.suppliersService.deactivate(id, userId);
   }
 
+  /** Permanent delete — refused (409) while receivings or other records reference the supplier. */
+  @Delete(':id/permanent')
+  @RequirePermissions(SUPPLIER_PERMISSIONS.DELETE)
+  removePermanently(@Param('id') id: string) {
+    return this.suppliersService.removePermanently(id);
+  }
+
   @Patch(':id/restore')
   @RequirePermissions(SUPPLIER_PERMISSIONS.UPDATE)
   restore(@Param('id') id: string, @CurrentUser('id') userId: string) {
