@@ -12,6 +12,7 @@ import { configureAuditRequestContext } from './common/stock-ledger';
 import { getAppConfig } from './config/app.config';
 import { getEnv } from './config/env.utils';
 import { ThaiExceptionFilter } from './common/filters/thai-exception.filter';
+import { getDisbursementAttachmentRoot } from './modules/materials-disbursement/disbursement-attachment-storage.service';
 
 const CONTEXT_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 
@@ -67,6 +68,9 @@ async function bootstrap() {
   });
   app.useStaticAssets(productImageRoot, {
     prefix: '/uploads/products/',
+  });
+  app.useStaticAssets(getDisbursementAttachmentRoot(), {
+    prefix: '/uploads/materials-disbursement/',
   });
 
   // Global validation pipe

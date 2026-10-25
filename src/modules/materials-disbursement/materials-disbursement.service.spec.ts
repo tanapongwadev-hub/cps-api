@@ -236,7 +236,7 @@ describe('MaterialsDisbursementService', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('rejects stock_cut without a reason', async () => {
+    it('rejects stock_cut without an item reason', async () => {
       const { service } = setup();
       await expect(
         service.create({ ...baseDto, disbursementType: 'stock_cut' }, '9'),

@@ -267,9 +267,15 @@ export class MaterialJobOrdersService {
           'ใบจัดงานนี้ถูกแก้ไขโดยผู้อื่นแล้ว กรุณาโหลดข้อมูลใหม่',
         );
       }
-      if (!['READY_TO_ISSUE', 'PARTIALLY_ISSUED'].includes(jobOrder.status)) {
+      // Picking is optional: issuing a box that was not scanned yet marks it picked
+      // in the same transaction, so staff can cut stock straight from the job order.
+      if (
+        !['WAITING_PICKING', 'READY_TO_ISSUE', 'PARTIALLY_ISSUED'].includes(
+          jobOrder.status,
+        )
+      ) {
         throw new ConflictException(
-          'ใบจัดงานนี้ไม่อยู่ในสถานะที่จ่ายออกได้ (ต้องหยิบสินค้าให้ครบก่อน)',
+          'ใบจัดงานนี้ไม่อยู่ในสถานะที่จ่ายออกได้',
         );
       }
 
@@ -310,6 +316,14 @@ export class MaterialJobOrdersService {
       const quantityByReservation = new Map(
         dto.items.map((item) => [item.reservationId, toScaled(item.quantity)]),
       );
+
+      const issuedAt = new Date();
+      for (const reservation of reservations) {
+        if (!reservation.pickedAt) {
+          reservation.pickedAt = issuedAt;
+          reservation.pickedBy = userId;
+        }
+      }
 
       // Lock the receiving packages themselves (id ASC — matches the lock
       // order used by approve()/ordinary disbursement) before mutating

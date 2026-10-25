@@ -89,6 +89,10 @@ export class MaterialsDisbursement {
   })
   attachmentName: string | null;
 
+  /** ไฟล์แนบทั้งหมด [{url, name}] (attachment_url/name เก็บไฟล์แรก) */
+  @Column({ name: 'attachments', type: 'jsonb', default: () => "'[]'" })
+  attachments: Array<{ url: string; name: string }>;
+
   @Column({ type: 'text', nullable: true })
   remark: string | null;
 

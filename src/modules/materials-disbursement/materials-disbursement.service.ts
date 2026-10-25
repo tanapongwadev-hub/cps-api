@@ -43,6 +43,50 @@ const SORT_COLUMNS: Record<DisbursementSortBy, string> = {
   createdAt: 'disbursement.createdAt',
 };
 
+type AttachmentItem = { url: string; name: string };
+
+/** ไฟล์แนบของเอกสาร (jsonb) — ถ้ายังไม่มีใช้คอลัมน์เดิม attachment_url/name */
+function readAttachments(d: {
+  attachments?: AttachmentItem[] | null;
+  attachmentUrl: string | null;
+  attachmentName: string | null;
+}): AttachmentItem[] {
+  if (Array.isArray(d.attachments) && d.attachments.length > 0) {
+    return d.attachments;
+  }
+  return d.attachmentUrl
+    ? [{ url: d.attachmentUrl, name: d.attachmentName ?? 'ไฟล์แนบ' }]
+    : [];
+}
+
+/** ไฟล์แนบใหม่จาก DTO (attachments มาก่อน, รองรับ attachmentUrl เดี่ยว) หรือค่าเดิมถ้าไม่ได้ส่งมา */
+function resolveAttachments(
+  dto: {
+    attachments?: AttachmentItem[];
+    attachmentUrl?: string;
+    attachmentName?: string;
+  },
+  current: AttachmentItem[],
+): AttachmentItem[] {
+  if (dto.attachments !== undefined) {
+    return dto.attachments.filter((a) => a.url?.trim());
+  }
+  if (dto.attachmentUrl !== undefined) {
+    return dto.attachmentUrl.trim()
+      ? [{ url: dto.attachmentUrl, name: dto.attachmentName ?? 'ไฟล์แนบ' }]
+      : [];
+  }
+  return current;
+}
+
+function attachmentColumns(list: AttachmentItem[]) {
+  return {
+    attachments: list,
+    attachmentUrl: list[0]?.url ?? null,
+    attachmentName: list[0]?.name ?? null,
+  };
+}
+
 @Injectable()
 export class MaterialsDisbursementService {
   constructor(
@@ -81,10 +125,16 @@ export class MaterialsDisbursementService {
       );
     }
 
-    // Validate stock_cut requires reason
-    if (dto.disbursementType === 'stock_cut' && !dto.reason?.trim()) {
+    // stock_cut requires a reason on every item ("อื่นๆ" also needs a note)
+    if (dto.disbursementType === 'stock_cut') {
+      this.assertItemReasons(dto.items);
+    }
+    if (
+      dto.disbursementType === 'stock_cut' &&
+      resolveAttachments(dto, []).length === 0
+    ) {
       throw new BadRequestException(
-        'Reason is required for stock_cut disbursement',
+        'Attachment is required for stock_cut disbursement',
       );
     }
 
@@ -131,8 +181,7 @@ export class MaterialsDisbursementService {
         referenceNo: dto.referenceNo?.trim() || null,
         requestedBy: dto.requestedBy?.trim() || null,
         approvedBy: null,
-        attachmentUrl: dto.attachmentUrl ?? null,
-        attachmentName: dto.attachmentName ?? null,
+        ...attachmentColumns(resolveAttachments(dto, [])),
         remark: dto.remark?.trim() ?? null,
         createdBy: userId,
       });
@@ -146,6 +195,8 @@ export class MaterialsDisbursementService {
           materialId: itemDto.materialId,
           requestedQuantity: itemDto.requestedQuantity,
           disbursedQuantity: '0.0000',
+          reason: itemDto.reason?.trim() || null,
+          reasonNote: itemDto.reasonNote?.trim() || null,
           createdBy: userId,
         });
         await itemRepo.save(item);
@@ -203,10 +254,16 @@ export class MaterialsDisbursementService {
       // Validate stock_cut requires reason
       const disbursementType =
         dto.disbursementType ?? disbursement.disbursementType;
-      const reason = dto.reason ?? disbursement.reason;
-      if (disbursementType === 'stock_cut' && !reason?.trim()) {
+      if (disbursementType === 'stock_cut' && dto.items) {
+        this.assertItemReasons(dto.items);
+      }
+      const nextAttachments = resolveAttachments(
+        dto,
+        readAttachments(disbursement),
+      );
+      if (disbursementType === 'stock_cut' && nextAttachments.length === 0) {
         throw new BadRequestException(
-          'Reason is required for stock_cut disbursement',
+          'Attachment is required for stock_cut disbursement',
         );
       }
 
@@ -248,6 +305,8 @@ export class MaterialsDisbursementService {
             materialId: itemDto.materialId,
             requestedQuantity: itemDto.requestedQuantity,
             disbursedQuantity: '0.0000',
+            reason: itemDto.reason?.trim() || null,
+            reasonNote: itemDto.reasonNote?.trim() || null,
             createdBy: userId,
           });
           await itemRepo.save(item);
@@ -276,12 +335,7 @@ export class MaterialsDisbursementService {
       if (dto.requestedBy !== undefined) {
         disbursement.requestedBy = dto.requestedBy?.trim() || null;
       }
-      if (dto.attachmentUrl !== undefined) {
-        disbursement.attachmentUrl = dto.attachmentUrl ?? null;
-      }
-      if (dto.attachmentName !== undefined) {
-        disbursement.attachmentName = dto.attachmentName ?? null;
-      }
+      Object.assign(disbursement, attachmentColumns(nextAttachments));
       if (dto.remark !== undefined) {
         disbursement.remark = dto.remark?.trim() ?? null;
       }
@@ -1074,6 +1128,7 @@ export class MaterialsDisbursementService {
       approvedBy: disbursement.approvedBy,
       attachmentUrl: disbursement.attachmentUrl,
       attachmentName: disbursement.attachmentName,
+      attachments: readAttachments(disbursement),
       remark: disbursement.remark,
       confirmedBy: disbursement.confirmedBy,
       confirmedAt: disbursement.confirmedAt,
@@ -1091,6 +1146,8 @@ export class MaterialsDisbursementService {
             materialId: item.materialId,
             requestedQuantity: item.requestedQuantity,
             disbursedQuantity: item.disbursedQuantity,
+            reason: item.reason,
+            reasonNote: item.reasonNote,
             material: item.material
               ? {
                   id: item.material.id,
@@ -1102,6 +1159,24 @@ export class MaterialsDisbursementService {
           }))
         : [],
     };
+  }
+
+  private assertItemReasons(
+    items: Array<{ reason?: string; reasonNote?: string }>,
+  ): void {
+    for (const item of items) {
+      const reason = item.reason?.trim();
+      if (!reason) {
+        throw new BadRequestException(
+          'Reason is required on every item for stock_cut disbursement',
+        );
+      }
+      if (reason === 'อื่นๆ' && !item.reasonNote?.trim()) {
+        throw new BadRequestException(
+          'Reason note is required when the reason is "อื่นๆ"',
+        );
+      }
+    }
   }
 
   private toDetailResponse(
@@ -1123,6 +1198,7 @@ export class MaterialsDisbursementService {
       approvedBy: disbursement.approvedBy,
       attachmentUrl: disbursement.attachmentUrl,
       attachmentName: disbursement.attachmentName,
+      attachments: readAttachments(disbursement),
       remark: disbursement.remark,
       confirmedBy: disbursement.confirmedBy,
       confirmedAt: disbursement.confirmedAt,
@@ -1139,6 +1215,8 @@ export class MaterialsDisbursementService {
         materialId: item.materialId,
         requestedQuantity: item.requestedQuantity,
         disbursedQuantity: item.disbursedQuantity,
+        reason: item.reason,
+        reasonNote: item.reasonNote,
         material: item.material
           ? {
               id: item.material.id,

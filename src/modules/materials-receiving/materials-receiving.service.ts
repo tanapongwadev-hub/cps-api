@@ -31,7 +31,7 @@ import { buildLotDatePart } from './lot-code.util';
 
 /** Package QR Payload — encoded as pipe-delimited string for scan reliability */
 import { StockBalance } from '../../entities/inventory/stock-balance.entity';
-import { Material } from '../../entities/master/material.entity';
+import { Material, MaterialLocationType } from '../../entities/master/material.entity';
 import { MaterialBom } from '../../entities/master/material-engineering.entity';
 import { MaterialShape } from '../../entities/master/material.entity';
 import { Organization } from '../../entities/master/organization.entity';
@@ -630,14 +630,22 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
   }
 
   /**
-   * A Material that owns a Material BOM (any version) is manufactured, so its
-   * stock may only come from closing production (receiveProductionWithManager),
-   * never from a manual warehouse receipt.
+   * A manufactured Material — one with an internal Location Type, or that owns a
+   * Material BOM (any version) — gets stock only from closing production
+   * (receiveProductionWithManager) into store, never from a manual receipt.
    */
   private async assertManuallyReceivable(
     manager: EntityManager,
     materialId: string,
   ): Promise<void> {
+    const material = await manager
+      .getRepository(Material)
+      .findOne({ where: { id: materialId }, select: { id: true, locationType: true } });
+    if (material?.locationType === MaterialLocationType.INTERNAL) {
+      throw new ConflictException(
+        'วัสดุภายใน (Internal) รับเข้าเองไม่ได้ ต้องรับเข้าจากการผลิตเข้า Store เท่านั้น',
+      );
+    }
     const hasBom = await manager
       .getRepository(MaterialBom)
       .exists({ where: { materialId } });
@@ -1375,6 +1383,9 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         processingMaterialId: m.processingMaterialId ?? null,
         // BOM owners are received only from closing production (see assertManuallyReceivable).
         hasBom: bomOwnerIds.has(String(m.id)),
+        // Internal or BOM-owning Materials are manufactured: stock comes from production only.
+        productionOnly:
+          m.locationType === MaterialLocationType.INTERNAL || bomOwnerIds.has(String(m.id)),
         unitId: m.unitId,
         unit:
           unitsById.get(m.unitId)?.symbol ??

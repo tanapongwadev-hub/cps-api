@@ -8,6 +8,7 @@ import { StockTransaction } from '../../entities/inventory/stock-transaction.ent
 import { Material } from '../../entities/master/material.entity';
 import { Unit } from '../../entities/master/unit.entity';
 import { AccessControlModule } from '../access-control/access-control.module';
+import { DisbursementAttachmentStorageService } from './disbursement-attachment-storage.service';
 import { MaterialsDisbursementController } from './materials-disbursement.controller';
 import { MaterialDisbursementItem } from './material-disbursement-item.entity';
 import { MaterialDisbursementPackage } from './material-disbursement-package.entity';
@@ -31,7 +32,10 @@ import { MaterialsDisbursementService } from './materials-disbursement.service';
     ]),
   ],
   controllers: [MaterialsDisbursementController],
-  providers: [MaterialsDisbursementService],
+  providers: [
+    MaterialsDisbursementService,
+    DisbursementAttachmentStorageService,
+  ],
   exports: [MaterialsDisbursementService],
 })
 export class MaterialsDisbursementModule {}

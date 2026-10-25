@@ -44,6 +44,14 @@ export class MaterialDisbursementItem {
   })
   disbursedQuantity: string;
 
+  /** เหตุผลการตัดสต็อกของรายการนี้ (ตัวเลือก หรือ "อื่นๆ") */
+  @Column({ name: 'reason', type: 'varchar', length: 255, nullable: true })
+  reason: string | null;
+
+  /** ข้อความเหตุผล — จำเป็นเมื่อ reason = "อื่นๆ" */
+  @Column({ name: 'reason_note', type: 'text', nullable: true })
+  reasonNote: string | null;
+
   @Column({ name: 'created_by', type: 'bigint', nullable: true })
   createdBy: string | null;
 

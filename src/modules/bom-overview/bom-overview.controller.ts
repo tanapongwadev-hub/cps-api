@@ -1,5 +1,5 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { RequireAnyPermissions } from '../../common/decorators/require-any-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
@@ -12,7 +12,7 @@ export class BomOverviewController {
   constructor(private readonly service: BomOverviewService) {}
 
   @Get()
-  @RequirePermissions('SETUP_WIZARD_VIEW')
+  @RequireAnyPermissions('SETUP_WIZARD_VIEW')
   overview() {
     return this.service.overview();
   }

@@ -9,8 +9,17 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { RequireAnyPermissions } from '../../common/decorators/require-any-permissions.decorator';
+import {
+  DISBURSEMENT_ATTACHMENT_MAX_SIZE,
+  DisbursementAttachmentStorageService,
+  type DisbursementAttachmentFile,
+} from './disbursement-attachment-storage.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
@@ -29,7 +38,23 @@ import { MaterialsDisbursementService } from './materials-disbursement.service';
 export class MaterialsDisbursementController {
   constructor(
     private readonly disbursementService: MaterialsDisbursementService,
+    private readonly attachmentStorage: DisbursementAttachmentStorageService,
   ) {}
+
+  /** อัปโหลดไฟล์แนบ (รูป JPEG/PNG/WebP หรือ PDF, ≤ 10 MiB) */
+  @Post('attachments')
+  @RequireAnyPermissions(
+    MATERIALS_DISBURSEMENT_PERMISSIONS.CREATE,
+    MATERIALS_DISBURSEMENT_PERMISSIONS.UPDATE,
+  )
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: DISBURSEMENT_ATTACHMENT_MAX_SIZE },
+    }),
+  )
+  uploadAttachment(@UploadedFile() file: DisbursementAttachmentFile) {
+    return this.attachmentStorage.store(file);
+  }
 
   @Get()
   @RequirePermissions(MATERIALS_DISBURSEMENT_PERMISSIONS.VIEW)
