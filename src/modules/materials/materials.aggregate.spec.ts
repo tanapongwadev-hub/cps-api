@@ -478,6 +478,109 @@ describe('MaterialsService aggregate commands', () => {
     expect(materials.save!.mock.calls[0][0].ratio).toBeNull();
   });
 
+  it('gives a new processed output the suppliers of its source material', async () => {
+    // Output is saved first (id 30), then the source (id 29).
+    let nextId = 30;
+    materials.save!.mockImplementation((value: Material) => {
+      value.id ??= String(nextId--);
+      value.updatedAt ??= timestamp;
+      return Promise.resolve(value);
+    });
+    materials
+      .createQueryBuilder!.mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(singleRowBuilder(null))
+      .mockReturnValueOnce(
+        detailBuilder({
+          id: '29',
+          code: 'MAT-001',
+          supplierMaterials: [],
+        } as unknown as Material),
+      );
+
+    await service.create(
+      {
+        ...createDto(),
+        materialType: MaterialShape.PIPE,
+        ratio: 20,
+        processingOutput: {
+          code: 'MAT-001-CUT',
+          name: 'Cut piece',
+          unitId: '1',
+          packingQuantity: 10,
+        },
+      },
+      '7',
+    );
+
+    const outputMappings = savedMappingBatches
+      .flat()
+      .filter((m) => m.materialId === '30');
+    expect(outputMappings).toEqual([
+      expect.objectContaining({
+        supplierId: '10',
+        isActive: true,
+        createdBy: '7',
+      }),
+      expect.objectContaining({
+        supplierId: '11',
+        isActive: true,
+        createdBy: '7',
+      }),
+    ]);
+  });
+
+  it('adds new source suppliers to the processed output without removing its own', async () => {
+    const locked = {
+      id: '20',
+      code: 'MAT-001',
+      name: 'Pipe',
+      unitId: '1',
+      materialType: MaterialShape.PIPE,
+      ratio: 20,
+      processingMaterialId: '30',
+      deliveryTypeId: null,
+      modelId: null,
+      loadingPointId: null,
+      updatedAt: timestamp,
+    } as unknown as Material;
+    const outputOwn = {
+      id: '200',
+      materialId: '30',
+      supplierId: '12',
+      isActive: true,
+      updatedBy: '2',
+    } as SupplierMaterial;
+    materials
+      .findOne!.mockResolvedValueOnce(locked)
+      .mockResolvedValueOnce(null);
+    supplierMaterials.find!.mockImplementation(
+      ({ where }: { where: { materialId: string } }) =>
+        Promise.resolve(where.materialId === '30' ? [outputOwn] : []),
+    );
+    // No code change, so the only query builder is the final detail read.
+    materials.createQueryBuilder!.mockReturnValueOnce(
+      detailBuilder({ ...locked, supplierMaterials: [] }),
+    );
+
+    await service.update(
+      '20',
+      { supplierIds: ['10'], updatedAt: timestamp.toISOString() },
+      '7',
+    );
+
+    const outputMappings = savedMappingBatches
+      .flat()
+      .filter((m) => m.materialId === '30');
+    expect(outputMappings).toEqual([
+      expect.objectContaining({
+        supplierId: '10',
+        isActive: true,
+        createdBy: '7',
+      }),
+    ]);
+    expect(outputOwn).toMatchObject({ isActive: true, updatedBy: '2' });
+  });
+
   it('treats percent and underscore in a code as literals, not wildcards', async () => {
     const codeBuilder = singleRowBuilder(null);
     const returned = {

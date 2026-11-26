@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   IsEmail,
   MinLength,
+  MaxLength,
   IsOptional,
   ArrayNotEmpty,
 } from 'class-validator';
@@ -45,6 +46,11 @@ export class CreateUserDto {
   @IsString()
   @IsOptional()
   telephone?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(30)
+  employeeCode?: string;
 
   @ArrayNotEmpty()
   assignments: CreateAssignmentDto[];

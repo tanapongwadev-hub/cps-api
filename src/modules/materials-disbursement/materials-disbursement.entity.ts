@@ -93,6 +93,10 @@ export class MaterialsDisbursement {
   @Column({ name: 'attachments', type: 'jsonb', default: () => "'[]'" })
   attachments: Array<{ url: string; name: string }>;
 
+  /** รายการแจ้งปัญหาที่เป็นเหตุของการตัดสต็อก */
+  @Column({ name: 'issue_report_id', type: 'bigint', nullable: true })
+  issueReportId: string | null;
+
   @Column({ type: 'text', nullable: true })
   remark: string | null;
 

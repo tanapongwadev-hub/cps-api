@@ -33,6 +33,9 @@ export interface PackageView {
   initialQty: number;
   currentQty: number;
   status: string;
+  /** Who packed the box (name) and their employee code, when known. */
+  packedBy: string | null;
+  packedByCode: string | null;
   origins: Array<{ lotNo: string; productionDate: string; qty: number }>;
 }
 
@@ -267,6 +270,23 @@ export class PackageService {
       production_date: string;
       qty: number;
     }>;
+    const creatorIds = [
+      ...new Set(packages.map((p) => p.createdBy).filter((v): v is string => !!v)),
+    ];
+    const creators = creatorIds.length
+      ? ((await manager.query(
+          `SELECT id, employee_code, username,
+                  NULLIF(TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')), '') AS full_name
+           FROM iam.users WHERE id = ANY($1::bigint[])`,
+          [creatorIds],
+        )) as unknown as Array<{
+          id: string;
+          employee_code: string | null;
+          username: string;
+          full_name: string | null;
+        }>)
+      : [];
+    const creatorById = new Map(creators.map((u) => [String(u.id), u]));
     return Promise.all(
       packages.map(async (p) => ({
         id: p.id,
@@ -277,6 +297,14 @@ export class PackageService {
         initialQty: p.initialQty,
         currentQty: p.currentQty,
         status: p.status,
+        packedBy: p.createdBy
+          ? (creatorById.get(String(p.createdBy))?.full_name ??
+            creatorById.get(String(p.createdBy))?.username ??
+            null)
+          : null,
+        packedByCode: p.createdBy
+          ? (creatorById.get(String(p.createdBy))?.employee_code ?? null)
+          : null,
         origins: sources
           .filter((s) => String(s.package_id) === String(p.id))
           .map((s) => ({

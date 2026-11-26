@@ -195,6 +195,10 @@ function setup() {
   const auditLogRepo = makeRepo();
   const materialBomRepo = makeRepo();
   (materialBomRepo as unknown as { exists: jest.Mock }).exists = jest.fn(() => Promise.resolve(false));
+  // exists() on materials answers "is this a processed output of another material?"
+  (materialRepo as unknown as { exists: jest.Mock }).exists = jest.fn(() =>
+    Promise.resolve(false),
+  );
 
   // Default: findOne ด้วย createQueryBuilder ใช้สำหรับ findOne(id)
   const defaultReceiving = makeReceiving();
@@ -278,7 +282,7 @@ function setup() {
       stockTransactionRepo,
       lotCounterRepo,
       supplierRepo,
-      materialRepo,
+      materialRepo: materialRepo as RepoMock & { exists: jest.Mock },
       unitRepo,
       supplierMaterialRepo,
       organizationRepo,
@@ -640,6 +644,47 @@ describe('MaterialsReceivingService', () => {
       repos.receivingRepo.findOne.mockResolvedValue(makeReceiving({ status: 'draft' } as Partial<MaterialReceiving>));
       repos.materialBomRepo.exists.mockResolvedValue(true);
       await expect(service.confirm('10', 'user')).rejects.toThrow(ConflictException);
+      expect(repos.stockBalanceRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processed output materials', () => {
+    const dto = {
+      materialId: '3',
+      supplierId: '2',
+      receiveQuantity: '2',
+      supplierProductionDate: '2026-08-01',
+      receiveDate: TODAY,
+    };
+    const asOutput = (repos: ReturnType<typeof setup>['repos']) => {
+      repos.materialRepo.findOne.mockResolvedValue(makeMaterial());
+      repos.materialRepo.exists.mockImplementation(
+        ({ where }: { where: { processingMaterialId?: string } }) =>
+          Promise.resolve(where.processingMaterialId === '3'),
+      );
+    };
+
+    it('refuses a manual receipt or draft for a material made by processing', async () => {
+      const { service, repos } = setup();
+      asOutput(repos);
+      await expect(service.receive(dto, 'user')).rejects.toThrow(
+        'ต้องรับเข้าจากการแปรรูปเท่านั้น',
+      );
+      await expect(service.create(dto, 'user')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(repos.receivingRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses to confirm a manual draft of a material made by processing', async () => {
+      const { service, repos } = setup();
+      repos.receivingRepo.findOne.mockResolvedValue(
+        makeReceiving({ status: 'draft' } as Partial<MaterialReceiving>),
+      );
+      asOutput(repos);
+      await expect(service.confirm('10', 'user')).rejects.toThrow(
+        'ต้องรับเข้าจากการแปรรูปเท่านั้น',
+      );
       expect(repos.stockBalanceRepo.save).not.toHaveBeenCalled();
     });
   });

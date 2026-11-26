@@ -36,11 +36,12 @@ export class CreateIssueReportDto {
   @IsIn(ISSUE_DOCUMENT_TYPES)
   documentType!: (typeof ISSUE_DOCUMENT_TYPES)[number];
 
+  /** Optional: an issue raised while the document is still being created has no number yet. */
+  @IsOptional()
   @Transform(trim)
   @IsString()
-  @IsNotEmpty()
   @MaxLength(100)
-  documentNo!: string;
+  documentNo?: string;
 
   @Transform(trim)
   @IsString()
@@ -68,6 +69,17 @@ export class UpdateIssueReportDto {
   @IsString()
   @MaxLength(4000)
   resolution?: string;
+}
+
+export class ListIssueDocumentsQueryDto {
+  @IsIn(ISSUE_DOCUMENT_TYPES)
+  documentType: (typeof ISSUE_DOCUMENT_TYPES)[number];
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }
 
 export class ListIssueReportsQueryDto {

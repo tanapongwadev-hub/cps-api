@@ -9,12 +9,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequireAnyPermissions } from '../../common/decorators/require-any-permissions.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../../common/guards/permission.guard';
 import {
   CreateIssueReportDto,
+  ListIssueDocumentsQueryDto,
   ListIssueReportsQueryDto,
   UpdateIssueReportDto,
 } from './dto/issue-report.dto';
@@ -30,6 +32,13 @@ export class IssueReportsController {
   @RequirePermissions(P.VIEW)
   list(@Query() query: ListIssueReportsQueryDto) {
     return this.service.list(query);
+  }
+
+  /** Document numbers of one type, for the create dialog's select box. */
+  @Get('documents')
+  @RequireAnyPermissions(P.VIEW, P.CREATE)
+  documents(@Query() query: ListIssueDocumentsQueryDto) {
+    return this.service.listDocuments(query);
   }
 
   @Post()

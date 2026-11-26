@@ -67,6 +67,8 @@ export interface PacketTimelineEvent {
   toStepIndex: number;
   performedAt: Date;
   performedBy: string | null;
+  /** Employee code of the performer (users.employee_code), when set. */
+  performedByCode: string | null;
 }
 
 @Injectable()
@@ -757,7 +759,7 @@ export class ProductionOrdersService {
       `SELECT e.production_order_packet_id AS packet_id,
               e.from_step_index, e.to_step_index, e.performed_at,
               NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS full_name,
-              u.username
+              u.username, u.employee_code
        FROM inventory.production_order_packet_events e
        LEFT JOIN iam.users u ON u.id = e.performed_by
        WHERE ${where}
@@ -770,6 +772,7 @@ export class ProductionOrdersService {
       performed_at: Date;
       full_name: string | null;
       username: string | null;
+      employee_code: string | null;
     }>;
     const byPacket = new Map<string, PacketTimelineEvent[]>();
     for (const row of rows) {
@@ -779,6 +782,7 @@ export class ProductionOrdersService {
         toStepIndex: row.to_step_index,
         performedAt: row.performed_at,
         performedBy: row.full_name ?? row.username ?? null,
+        performedByCode: row.employee_code ?? null,
       });
       byPacket.set(String(row.packet_id), list);
     }

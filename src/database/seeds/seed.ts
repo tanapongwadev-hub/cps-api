@@ -257,6 +257,14 @@ export async function seed(dataSource: DataSource) {
         sort_order: 1,
       },
       {
+        code: 'SCAN_TRACE',
+        name_th: 'สแกน QR ติดตามสถานะ',
+        name_en: 'Scan QR Status',
+        path: '/scan',
+        icon: 'scan-line',
+        sort_order: 2,
+      },
+      {
         code: 'USER_MANUALS',
         name_th: 'คู่มือการใช้งาน',
         name_en: 'User Manuals',

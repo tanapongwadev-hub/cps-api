@@ -156,6 +156,10 @@ export const MENU_PERMISSION_REGISTRY: Readonly<
   MENU_HUB: {
     READ: 'MENU_HUB_VIEW',
   },
+  // /scan — scan any QR for its current status, open to every role with READ (see migration 1790600000063).
+  SCAN_TRACE: {
+    READ: 'SCAN_TRACE_VIEW',
+  },
   // Report menus — read-only (VIEW only)
   MATERIALS_RECEIVING_REPORT: {
     READ: `${MATERIALS_RECEIVING_PERMISSIONS.VIEW}`,
@@ -206,6 +210,7 @@ export const MENU_ACTION_CODES: Readonly<Record<string, readonly string[]>> = {
   PRODUCTION_TRACEABILITY: ['READ'],
   USER_MANUALS: ['READ'],
   MENU_HUB: ['READ'],
+  SCAN_TRACE: ['READ'],
   MATERIALS_RECEIVING: MATERIALS_RECEIVING_ACTION_CODES,
   MATERIALS_DISBURSEMENT: MATERIALS_DISBURSEMENT_ACTION_CODES,
   // Report menus — read-only

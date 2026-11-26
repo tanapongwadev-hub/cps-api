@@ -44,6 +44,14 @@ const SORT_COLUMNS: Record<DisbursementSortBy, string> = {
 };
 
 type AttachmentItem = { url: string; name: string };
+type IssueReportRef = {
+  id: string;
+  reportNo: string;
+  documentType: string;
+  documentNo: string | null;
+  title: string;
+  status: string;
+};
 
 /** ไฟล์แนบของเอกสาร (jsonb) — ถ้ายังไม่มีใช้คอลัมน์เดิม attachment_url/name */
 function readAttachments(d: {
@@ -125,17 +133,13 @@ export class MaterialsDisbursementService {
       );
     }
 
-    // stock_cut requires a reason on every item ("อื่นๆ" also needs a note)
     if (dto.disbursementType === 'stock_cut') {
-      this.assertItemReasons(dto.items);
-    }
-    if (
-      dto.disbursementType === 'stock_cut' &&
-      resolveAttachments(dto, []).length === 0
-    ) {
-      throw new BadRequestException(
-        'Attachment is required for stock_cut disbursement',
-      );
+      if (!dto.issueReportId) {
+        throw new BadRequestException(
+          'Issue report is required for stock_cut disbursement',
+        );
+      }
+      await this.assertIssueReportExists(dto.issueReportId);
     }
 
     // Validate disbursement date not in future
@@ -182,10 +186,16 @@ export class MaterialsDisbursementService {
         requestedBy: dto.requestedBy?.trim() || null,
         approvedBy: null,
         ...attachmentColumns(resolveAttachments(dto, [])),
+        issueReportId: dto.issueReportId ?? null,
         remark: dto.remark?.trim() ?? null,
         createdBy: userId,
       });
       const savedDisbursement = await disbursementRepo.save(disbursement);
+      await this.fillIssueReportDocumentNo(
+        manager,
+        savedDisbursement.issueReportId,
+        savedDisbursement.disbursementNo,
+      );
 
       // 4) Save items (disbursedQuantity = 0 until confirmed)
       const itemRepo = manager.getRepository(MaterialDisbursementItem);
@@ -251,20 +261,26 @@ export class MaterialsDisbursementService {
         remark: disbursement.remark,
       };
 
-      // Validate stock_cut requires reason
+      // stock_cut is justified by its issue report (per-item reasons are optional)
       const disbursementType =
         dto.disbursementType ?? disbursement.disbursementType;
-      if (disbursementType === 'stock_cut' && dto.items) {
-        this.assertItemReasons(dto.items);
-      }
       const nextAttachments = resolveAttachments(
         dto,
         readAttachments(disbursement),
       );
-      if (disbursementType === 'stock_cut' && nextAttachments.length === 0) {
-        throw new BadRequestException(
-          'Attachment is required for stock_cut disbursement',
-        );
+      const nextIssueReportId =
+        dto.issueReportId !== undefined
+          ? dto.issueReportId || null
+          : disbursement.issueReportId;
+      if (disbursementType === 'stock_cut') {
+        if (!nextIssueReportId) {
+          throw new BadRequestException(
+            'Issue report is required for stock_cut disbursement',
+          );
+        }
+        if (nextIssueReportId !== disbursement.issueReportId) {
+          await this.assertIssueReportExists(nextIssueReportId);
+        }
       }
 
       // Validate quantities if updating items
@@ -336,6 +352,12 @@ export class MaterialsDisbursementService {
         disbursement.requestedBy = dto.requestedBy?.trim() || null;
       }
       Object.assign(disbursement, attachmentColumns(nextAttachments));
+      disbursement.issueReportId = nextIssueReportId;
+      await this.fillIssueReportDocumentNo(
+        manager,
+        nextIssueReportId,
+        disbursement.disbursementNo,
+      );
       if (dto.remark !== undefined) {
         disbursement.remark = dto.remark?.trim() ?? null;
       }
@@ -554,8 +576,9 @@ export class MaterialsDisbursementService {
       .take(limit)
       .getManyAndCount();
 
+    const issueReports = await this.loadIssueReports(disbursements);
     return {
-      items: disbursements.map((d) => this.toListResponse(d)),
+      items: disbursements.map((d) => this.toListResponse(d, issueReports)),
       meta: {
         page,
         limit,
@@ -715,7 +738,8 @@ export class MaterialsDisbursementService {
       packagesByItem.get(pkg.disbursementItemId)!.push(pkg);
     }
 
-    return this.toDetailResponse(disbursement, packagesByItem);
+    const issueReports = await this.loadIssueReports([disbursement]);
+    return this.toDetailResponse(disbursement, packagesByItem, issueReports);
   }
 
   async getLookups() {
@@ -737,7 +761,18 @@ export class MaterialsDisbursementService {
       balances.map((b) => [b.materialId, b.quantity]),
     );
 
+    // รายการแจ้งปัญหาที่ยังไม่ปิด สำหรับเลือกอ้างอิงตอนตัดสต็อก
+    const issueReports = (await this.dataSource.query(
+      `SELECT id::text AS id, report_no AS "reportNo", document_type AS "documentType",
+              document_no AS "documentNo", title, status
+         FROM inventory.issue_reports
+        WHERE status <> 'CLOSED'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 300`,
+    )) as IssueReportRef[];
+
     return {
+      issueReports,
       disbursementTypes: [
         { value: 'stock_cut', label: 'Stock Cut (ตัดสต็อก)' },
         { value: 'production', label: 'Production (เบิกเพื่อผลิต)' },
@@ -1112,7 +1147,60 @@ export class MaterialsDisbursementService {
     return material;
   }
 
-  private toListResponse(disbursement: MaterialsDisbursement) {
+  /**
+   * An issue report raised from the create form has no document number yet
+   * (the disbursement did not exist). Once saved, link it to this document.
+   */
+  private async fillIssueReportDocumentNo(
+    manager: EntityManager,
+    issueReportId: string | null,
+    disbursementNo: string,
+  ): Promise<void> {
+    if (!issueReportId) return;
+    await manager.query(
+      `UPDATE inventory.issue_reports
+          SET document_no = $2, document_type = 'MATERIAL_DISBURSEMENT', updated_at = now()
+        WHERE id = $1 AND document_no IS NULL`,
+      [issueReportId, disbursementNo],
+    );
+  }
+
+  private async assertIssueReportExists(id: string): Promise<void> {
+    const rows = (await this.dataSource.query(
+      `SELECT 1 FROM inventory.issue_reports WHERE id = $1`,
+      [id],
+    )) as unknown[];
+    if (rows.length === 0) {
+      throw new BadRequestException('Issue report not found');
+    }
+  }
+
+  private async loadIssueReports(
+    disbursements: Array<{ issueReportId: string | null }>,
+  ): Promise<Map<string, IssueReportRef>> {
+    const ids = [
+      ...new Set(
+        disbursements
+          .map((d) => d.issueReportId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const map = new Map<string, IssueReportRef>();
+    if (ids.length === 0) return map;
+    const rows = (await this.dataSource.query(
+      `SELECT id::text AS id, report_no AS "reportNo", document_type AS "documentType",
+              document_no AS "documentNo", title, status
+         FROM inventory.issue_reports WHERE id = ANY($1::bigint[])`,
+      [ids],
+    )) as IssueReportRef[];
+    for (const row of rows) map.set(row.id, row);
+    return map;
+  }
+
+  private toListResponse(
+    disbursement: MaterialsDisbursement,
+    issueReports: Map<string, IssueReportRef>,
+  ) {
     return {
       id: disbursement.id,
       traceId: disbursement.traceId,
@@ -1129,6 +1217,8 @@ export class MaterialsDisbursementService {
       attachmentUrl: disbursement.attachmentUrl,
       attachmentName: disbursement.attachmentName,
       attachments: readAttachments(disbursement),
+      issueReportId: disbursement.issueReportId,
+      issueReport: issueReports.get(disbursement.issueReportId ?? '') ?? null,
       remark: disbursement.remark,
       confirmedBy: disbursement.confirmedBy,
       confirmedAt: disbursement.confirmedAt,
@@ -1161,27 +1251,10 @@ export class MaterialsDisbursementService {
     };
   }
 
-  private assertItemReasons(
-    items: Array<{ reason?: string; reasonNote?: string }>,
-  ): void {
-    for (const item of items) {
-      const reason = item.reason?.trim();
-      if (!reason) {
-        throw new BadRequestException(
-          'Reason is required on every item for stock_cut disbursement',
-        );
-      }
-      if (reason === 'อื่นๆ' && !item.reasonNote?.trim()) {
-        throw new BadRequestException(
-          'Reason note is required when the reason is "อื่นๆ"',
-        );
-      }
-    }
-  }
-
   private toDetailResponse(
     disbursement: MaterialsDisbursement,
     packagesByItem: Map<string, MaterialDisbursementPackage[]>,
+    issueReports: Map<string, IssueReportRef>,
   ) {
     return {
       id: disbursement.id,
@@ -1199,6 +1272,8 @@ export class MaterialsDisbursementService {
       attachmentUrl: disbursement.attachmentUrl,
       attachmentName: disbursement.attachmentName,
       attachments: readAttachments(disbursement),
+      issueReportId: disbursement.issueReportId,
+      issueReport: issueReports.get(disbursement.issueReportId ?? '') ?? null,
       remark: disbursement.remark,
       confirmedBy: disbursement.confirmedBy,
       confirmedAt: disbursement.confirmedAt,

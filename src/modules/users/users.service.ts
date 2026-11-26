@@ -42,6 +42,7 @@ export class UsersService {
         'user.email',
         'user.firstName',
         'user.lastName',
+        'user.employeeCode',
         'user.isActive',
         'user.isLocked',
         'user.createdAt',
@@ -104,6 +105,7 @@ export class UsersService {
         'firstName',
         'lastName',
         'telephone',
+        'employeeCode',
         'isActive',
         'isLocked',
         'failedLoginAttempts',
@@ -161,6 +163,7 @@ export class UsersService {
       lastName: userData.lastName,
       email: userData.email?.toLowerCase(),
       telephone: userData.telephone,
+      employeeCode: userData.employeeCode?.trim() || null,
       isActive: true,
       isLocked: false,
       failedLoginAttempts: 0,
@@ -205,6 +208,11 @@ export class UsersService {
 
   async update(id: string, updateUserDto: UpdateUserDto) {
     const { assignments, ...profileData } = updateUserDto;
+    if (profileData.employeeCode !== undefined) {
+      // Blank clears the code; stored as NULL so the unique index ignores it.
+      (profileData as { employeeCode?: string | null }).employeeCode =
+        profileData.employeeCode.trim() || null;
+    }
 
     if (assignments === undefined) {
       const user = await this.findOne(id);

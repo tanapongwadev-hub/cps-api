@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -40,6 +41,11 @@ export class UpdateUserDto {
   @IsString()
   @IsOptional()
   telephone?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(30)
+  employeeCode?: string;
 
   @IsArray()
   @ArrayNotEmpty()

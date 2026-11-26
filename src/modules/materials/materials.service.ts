@@ -192,6 +192,14 @@ export class MaterialsService {
             mappings,
           );
         }
+        if (savedMaterial.processingMaterialId) {
+          await this.addSuppliersToOutput(
+            supplierMaterialRepository,
+            savedMaterial.processingMaterialId,
+            dto.supplierIds ?? [],
+            userId,
+          );
+        }
 
         if (draft) {
           committedDraftImage = draft.imagePath;
@@ -336,6 +344,14 @@ export class MaterialsService {
             dto.supplierIds,
             userId,
           );
+          if (material.processingMaterialId) {
+            await this.addSuppliersToOutput(
+              supplierMaterialRepository,
+              material.processingMaterialId,
+              dto.supplierIds,
+              userId,
+            );
+          }
         }
         if (draft) {
           committedDraftImage = draft.imagePath;
@@ -1079,6 +1095,46 @@ export class MaterialsService {
       }
     }
     material.updatedBy = userId;
+  }
+
+  /**
+   * A processed output (PCS made from a PIPE/SHEET/COIL source) comes from the
+   * source's suppliers, so it gets them too. Only adds or reactivates: a
+   * supplier added to the output directly is never removed from here.
+   */
+  private async addSuppliersToOutput(
+    repository: Repository<SupplierMaterial>,
+    outputId: string,
+    supplierIds: string[],
+    userId: string,
+  ): Promise<void> {
+    if (supplierIds.length === 0) return;
+    const existing = await repository.find({ where: { materialId: outputId } });
+    const bySupplier = new Map(
+      existing.map((mapping) => [mapping.supplierId, mapping]),
+    );
+    const changed: SupplierMaterial[] = [];
+    for (const supplierId of supplierIds) {
+      const mapping = bySupplier.get(supplierId);
+      if (!mapping) {
+        changed.push(
+          repository.create({
+            materialId: outputId,
+            supplierId,
+            isActive: true,
+            createdBy: userId,
+            updatedBy: userId,
+          }),
+        );
+      } else if (!mapping.isActive) {
+        mapping.isActive = true;
+        mapping.updatedBy = userId;
+        changed.push(mapping);
+      }
+    }
+    if (changed.length > 0) {
+      await this.saveSupplierMaterials(repository, changed);
+    }
   }
 
   private async synchronizeSuppliers(

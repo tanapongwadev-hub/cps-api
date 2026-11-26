@@ -412,6 +412,11 @@ export class MaterialTraceabilityService {
         confirmedAt: receiving.confirmedAt,
         createdBy: receiving.createdBy,
         createdAt: receiving.createdAt,
+        attachments: this.documentAttachments(
+          [],
+          receiving.attachmentUrl,
+          receiving.attachmentName,
+        ),
       },
       packages: packages.map((p) => ({
         id: p.id,
@@ -521,6 +526,31 @@ export class MaterialTraceabilityService {
     }));
   }
 
+  /**
+   * A document's files as [{url, name}]: the jsonb list when present, else the
+   * older single attachment_url/name columns.
+   */
+  private documentAttachments(
+    list: Array<{ url: string; name: string }> | null | undefined,
+    url: string | null | undefined,
+    name: string | null | undefined,
+  ): Array<{ url: string; name: string }> {
+    const files = (list ?? []).filter((file) => file?.url);
+    if (files.length > 0) return files;
+    return url ? [{ url, name: name || 'ไฟล์แนบ' }] : [];
+  }
+
+  private async issueReportSummary(id: string | null | undefined) {
+    if (!id) return null;
+    const rows: Array<{ id: string; reportNo: string; title: string }> =
+      await this.dataSource.query(
+        `SELECT id::text AS id, report_no AS "reportNo", title
+           FROM inventory.issue_reports WHERE id = $1`,
+        [id],
+      );
+    return rows[0] ?? null;
+  }
+
   // ------------------------------------------------------- document traces
 
   async traceReceiving(id: string) {
@@ -577,6 +607,12 @@ export class MaterialTraceabilityService {
         cancelledBy: disbursement.cancelledBy,
         cancelledAt: disbursement.cancelledAt,
         cancelReason: disbursement.cancelReason,
+        attachments: this.documentAttachments(
+          disbursement.attachments,
+          disbursement.attachmentUrl,
+          disbursement.attachmentName,
+        ),
+        issueReport: await this.issueReportSummary(disbursement.issueReportId),
       },
       items: disbursement.items.map((item) => ({
         id: item.id,

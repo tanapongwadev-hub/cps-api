@@ -633,6 +633,7 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
    * A manufactured Material — one with an internal Location Type, or that owns a
    * Material BOM (any version) — gets stock only from closing production
    * (receiveProductionWithManager) into store, never from a manual receipt.
+   * A processed output gets stock only from processing.
    */
   private async assertManuallyReceivable(
     manager: EntityManager,
@@ -652,6 +653,16 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
     if (hasBom) {
       throw new ConflictException(
         'วัสดุนี้มี BOM จึงรับเข้าเองไม่ได้ ต้องรับเข้าจากการปิดการผลิตเท่านั้น',
+      );
+    }
+    // A processed output (PCS made from a PIPE/SHEET/COIL source) gets stock
+    // only from processing (receiveProcessedWithManager), never by hand.
+    const isProcessedOutput = await manager
+      .getRepository(Material)
+      .exists({ where: { processingMaterialId: materialId } });
+    if (isProcessedOutput) {
+      throw new ConflictException(
+        'วัสดุนี้ได้จากการแปรรูป จึงรับเข้าเองไม่ได้ ต้องรับเข้าจากการแปรรูปเท่านั้น',
       );
     }
   }
@@ -1370,6 +1381,16 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         .getRawMany<{ materialId: string }>(),
     ]);
     const bomOwnerIds = new Set(bomOwners.map((row) => String(row.materialId)));
+    // Outputs of processing (any source, active or not) get stock from processing only.
+    const processedOutputs = await this.dataSource
+      .getRepository(Material)
+      .createQueryBuilder('material')
+      .select('material.processingMaterialId', 'outputId')
+      .where('material.processingMaterialId IS NOT NULL')
+      .getRawMany<{ outputId: string }>();
+    const processedOutputIds = new Set(
+      processedOutputs.map((row) => String(row.outputId)),
+    );
     const unitsById = new Map(units.map((unit) => [unit.id, unit]));
     return {
       suppliers: suppliers.map((s) => this.toLookup(s)),
@@ -1383,9 +1404,12 @@ export class MaterialsReceivingService implements OnApplicationBootstrap {
         processingMaterialId: m.processingMaterialId ?? null,
         // BOM owners are received only from closing production (see assertManuallyReceivable).
         hasBom: bomOwnerIds.has(String(m.id)),
-        // Internal or BOM-owning Materials are manufactured: stock comes from production only.
+        processedOutput: processedOutputIds.has(String(m.id)),
+        // Internal, BOM-owning or processed-output Materials are never received by hand.
         productionOnly:
-          m.locationType === MaterialLocationType.INTERNAL || bomOwnerIds.has(String(m.id)),
+          m.locationType === MaterialLocationType.INTERNAL ||
+          bomOwnerIds.has(String(m.id)) ||
+          processedOutputIds.has(String(m.id)),
         unitId: m.unitId,
         unit:
           unitsById.get(m.unitId)?.symbol ??

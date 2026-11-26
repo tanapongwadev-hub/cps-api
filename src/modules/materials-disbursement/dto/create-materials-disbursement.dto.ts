@@ -7,6 +7,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 
@@ -69,6 +70,11 @@ export class CreateMaterialsDisbursementDto {
   @IsOptional()
   @IsString()
   requestedBy?: string;
+
+  /** รายการแจ้งปัญหา (id) — จำเป็นเมื่อเป็น stock_cut */
+  @IsOptional()
+  @Matches(/^[1-9]d*$/)
+  issueReportId?: string;
 
   @IsOptional()
   @IsString()

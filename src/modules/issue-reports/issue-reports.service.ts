@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
   CreateIssueReportDto,
+  ListIssueDocumentsQueryDto,
   ListIssueReportsQueryDto,
   UpdateIssueReportDto,
 } from './dto/issue-report.dto';
@@ -18,6 +19,18 @@ const SELECT = `
   FROM inventory.issue_reports r
   LEFT JOIN iam.users rb ON rb.id = r.reported_by
   LEFT JOIN iam.users rs ON rs.id = r.resolved_by`;
+
+// Where each document type's number lives (table + number column).
+const DOCUMENT_SOURCES: Record<string, { table: string; column: string } | undefined> = {
+  MATERIAL_RECEIVING: { table: 'inventory.material_receivings', column: 'internal_lot_no' },
+  MATERIAL_DISBURSEMENT: { table: 'inventory.materials_disbursements', column: 'disbursement_no' },
+  MATERIAL_JOB_ORDER: { table: 'inventory.material_job_orders', column: 'code' },
+  MATERIAL_PROCESSING: { table: 'inventory.material_processings', column: 'code' },
+  PRODUCTION_PLAN: { table: 'inventory.production_plans', column: 'code' },
+  PRODUCTION_ORDER: { table: 'inventory.production_orders', column: 'code' },
+  SALES_ORDER: { table: 'inventory.sales_orders', column: 'code' },
+  SALES_JOB_ORDER: { table: 'inventory.sales_job_orders', column: 'code' },
+};
 
 @Injectable()
 export class IssueReportsService {
@@ -70,6 +83,25 @@ export class IssueReportsService {
     };
   }
 
+  async listDocuments(query: ListIssueDocumentsQueryDto) {
+    const source = DOCUMENT_SOURCES[query.documentType];
+    if (!source) return [];
+    const params: unknown[] = [];
+    let where = '';
+    if (query.search) {
+      params.push(`%${query.search}%`);
+      where = `WHERE ${source.column} ILIKE $1`;
+    }
+    const rows = (await this.dataSource.query(
+      `SELECT ${source.column} AS "documentNo", created_at AS "createdAt"
+         FROM ${source.table} ${where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 200`,
+      params,
+    )) as Array<{ documentNo: string; createdAt: string }>;
+    return rows.filter((row) => !!row.documentNo);
+  }
+
   async create(dto: CreateIssueReportDto, userId: string) {
     return this.dataSource.transaction(async (manager) => {
       const seq = (await manager.query(
@@ -86,7 +118,7 @@ export class IssueReportsService {
           id,
           reportNo,
           dto.documentType,
-          dto.documentNo,
+          dto.documentNo || null,
           dto.title,
           dto.description || null,
           dto.severity ?? 'MEDIUM',
