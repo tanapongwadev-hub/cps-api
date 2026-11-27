@@ -62,6 +62,44 @@ export class BoardService {
   }
 
   /**
+   * Every box (one QR each) sent into a step, in FIFO order: batches by
+   * arrival, boxes by number — the same order as fifoBoxes(). `pending` marks
+   * the boxes still to be worked here; taken in list order they always pass
+   * the produce scan check. No QR image (the list is text only).
+   */
+  async stepBoxes(lineId: string, stepIndex: number) {
+    const rows = await this.dataSource.query<
+      Array<{ id: string; status: string }>
+    >(
+      `SELECT id, status FROM inventory.process_wip
+       WHERE production_order_line_id = $1 AND step_index = $2
+         AND qr_code IS NOT NULL
+       ORDER BY received_at, id`,
+      [lineId, stepIndex],
+    );
+    const byWip = await loadWipBoxes(
+      this.dataSource.manager,
+      rows.map((r) => String(r.id)),
+    );
+    return rows.flatMap((r) =>
+      (byWip.get(String(r.id)) ?? []).map((box) => ({
+        qrCode: box.qrCode,
+        baseCode: box.baseCode,
+        revision: box.revision,
+        sourceLotNo: box.sourceLotNo,
+        boxNo: box.boxNo,
+        boxCount: box.boxCount,
+        qty: box.qty,
+        doneQty: box.doneQty,
+        left: box.left,
+        status: box.status,
+        origins: box.origins,
+        pending: r.status === 'OPEN' && box.left > 0 && box.status !== 'CLOSED',
+      })),
+    );
+  }
+
+  /**
    * A scanned box at a step: checks it is here, still holds pieces, and is the
    * next one in FIFO order after the `scanned` ones — the produce dialog adds
    * it to the boxes being worked.

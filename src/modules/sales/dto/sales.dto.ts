@@ -52,6 +52,44 @@ export class SalesOrderLineDto {
   @MaxLength(500)
   @Transform(trimOrNull)
   remark?: string | null;
+
+  // Per-line delivery data from the customer's "ใบแจ้งยอดส่งสินค้า".
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Transform(trimOrNull)
+  customerPo?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Transform(trimOrNull)
+  deliveryTime?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  @Transform(trimOrNull)
+  deliveryPoint?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  @Transform(trimOrNull)
+  customerLine?: string | null;
+}
+
+export const SALES_ORDER_MAX_LINES = 500;
+export const SALES_ORDER_IMPORT_MAX_SIZE = 5 * 1024 * 1024;
+
+export class ImportSalesOrderDto {
+  @Matches(ID_PATTERN)
+  customerId: string;
+
+  /** "true" = only parse and match, create nothing. */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  dryRun?: 'true' | 'false';
 }
 
 export class CreateSalesOrderDto {
@@ -79,7 +117,7 @@ export class CreateSalesOrderDto {
 
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(200)
+  @ArrayMaxSize(500)
   @ValidateNested({ each: true })
   @Type(() => SalesOrderLineDto)
   lines: SalesOrderLineDto[];

@@ -22,6 +22,8 @@ import { TransferDto } from './dto/transfer.dto';
 import { CloseService } from './close.service';
 import { CloseRemainingDto } from './dto/close-remaining.dto';
 import { ReverseDto } from './dto/reverse.dto';
+import { AmendDto } from './dto/amend.dto';
+import { AmendService } from './amend.service';
 import { HistoryService } from './history.service';
 import { ProcessService } from './process.service';
 import { ReconciliationService } from './reconciliation.service';
@@ -50,6 +52,7 @@ export class ProcessController {
     private readonly reconciliation: ReconciliationService,
     private readonly closes: CloseService,
     private readonly histories: HistoryService,
+    private readonly amends: AmendService,
   ) {}
 
   /** Transfer tags (QR) of the work sent into a step — for reprinting. */
@@ -73,6 +76,16 @@ export class ProcessController {
   ) {
     if (!code?.trim()) throw new BadRequestException('ไม่มีรหัส QR กล่อง');
     return this.boards.boxAt(lineId, stepIndex, code, splitCodes(scanned));
+  }
+
+  /** Every box QR at a step in FIFO order, with what is still to be worked. */
+  @Get('lines/:lineId/steps/:stepIndex/boxes/queue')
+  @RequirePermissions(PRODUCTION_ORDER_PERMISSIONS.VIEW)
+  stepBoxes(
+    @Param('lineId') lineId: string,
+    @Param('stepIndex', ParseIntPipe) stepIndex: number,
+  ) {
+    return this.boards.stepBoxes(lineId, stepIndex);
   }
 
   /** The next box to work at a step in FIFO order (after the `scanned` ones). */
@@ -151,6 +164,21 @@ export class ProcessController {
     @CurrentUser('id') userId: string,
   ) {
     return this.reversals.reverse(lineId, requestId, dto, userId);
+  }
+
+  /** Edit a produce/receive request before its pieces move on (reverse + record again). */
+  @Post('lines/:lineId/requests/:requestId/amend')
+  @RequirePermissions(
+    PRODUCTION_ORDER_PERMISSIONS.REVERSE,
+    PRODUCTION_ORDER_PERMISSIONS.ADVANCE,
+  )
+  amend(
+    @Param('lineId') lineId: string,
+    @Param('requestId', new ParseUUIDPipe()) requestId: string,
+    @Body() dto: AmendDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.amends.amend(lineId, requestId, dto, userId);
   }
 
   /** Every produce/receive/transfer/close request of the line, newest first. */

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
+import { Workbook } from 'exceljs';
 import { DataSource, EntityManager } from 'typeorm';
 import { getBangkokDate } from '../../common/business-date';
 import { postProductStockMovement } from '../../common/product-stock-ledger';
@@ -12,6 +13,7 @@ import { recordAuditEvent } from '../../common/stock-ledger';
 import {
   CancelSalesOrderDto,
   CreateSalesOrderDto,
+  ImportSalesOrderDto,
   IssueSalesJobOrderDto,
   ListSalesJobOrdersQueryDto,
   ListSalesOrdersQueryDto,
@@ -19,8 +21,19 @@ import {
   SalesJobOrderStatus,
   SalesOrderStatus,
   SalesReportQueryDto,
+  SALES_ORDER_MAX_LINES,
   UpdateSalesOrderDto,
 } from './dto/sales.dto';
+import {
+  allocateFromBoxes,
+  cellToPrimitive,
+  parseDeliveryStatement,
+} from './sales-order-import';
+
+export interface SalesOrderImportFile {
+  buffer: Buffer;
+  originalname?: string;
+}
 
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -141,6 +154,8 @@ export class SalesService {
     const lines = (await manager.query(
       `SELECT l.id, l.line_no AS "lineNo", l.product_id AS "productId", l.quantity,
               l.shipped_quantity AS "shippedQuantity", l.remark,
+              l.customer_po AS "customerPo", l.delivery_time AS "deliveryTime",
+              l.delivery_point AS "deliveryPoint", l.customer_line AS "customerLine",
               json_build_object('id', p.id, 'code', p.code, 'name', p.name,
                                 'unitName', COALESCE(u.symbol, u.name_th)) AS product
        FROM inventory.sales_order_lines l
@@ -179,6 +194,104 @@ export class SalesService {
       });
       return this.findOrder(order.id, m);
     });
+  }
+
+  /**
+   * Customer "ใบแจ้งยอดส่งสินค้า" Excel → one draft order (all rows or none).
+   * dryRun only parses and matches PartNo to active product codes.
+   */
+  async importOrder(
+    file: SalesOrderImportFile | undefined,
+    dto: ImportSalesOrderDto,
+    userId: string,
+  ) {
+    if (!file?.buffer?.length) throw new BadRequestException('กรุณาเลือกไฟล์ Excel');
+    const workbook = new Workbook();
+    try {
+      await workbook.xlsx.load(Uint8Array.from(file.buffer).buffer);
+    } catch {
+      throw new BadRequestException('อ่านไฟล์ Excel ไม่ได้ (รองรับเฉพาะ .xlsx)');
+    }
+    const sheet = workbook.worksheets[0];
+    if (!sheet) throw new BadRequestException('ไฟล์ Excel ไม่มีแผ่นงาน');
+    const rows: unknown[][] = [];
+    for (let r = 1; r <= sheet.rowCount; r += 1) {
+      const row = sheet.getRow(r);
+      const values: unknown[] = [];
+      for (let c = 1; c <= Math.max(row.cellCount, sheet.columnCount); c += 1) {
+        values.push(cellToPrimitive(row.getCell(c).value));
+      }
+      rows.push(values);
+    }
+    const parsed = parseDeliveryStatement(rows);
+
+    const codes = [...new Set(parsed.lines.map((l) => l.partNo.toUpperCase()))];
+    const products = (await this.dataSource.query(
+      `SELECT id, code, name FROM master.products
+       WHERE is_active = true AND upper(code) = ANY($1::text[]) ORDER BY id`,
+      [codes],
+    )) as Row[];
+    const byCode = new Map<string, Row>();
+    for (const p of products) {
+      const key = String(p.code).toUpperCase();
+      if (!byCode.has(key)) byCode.set(key, p);
+    }
+    const lines = parsed.lines.map((line) => {
+      const product = byCode.get(line.partNo.toUpperCase());
+      return {
+        ...line,
+        product: product ? { id: String(product.id), code: product.code, name: product.name } : null,
+      };
+    });
+    const unmatched = lines
+      .filter((l) => !l.product)
+      .map((l) => ({ row: l.row, partNo: l.partNo }));
+    const orderDate = parsed.orderDate ?? getBangkokDate();
+    const preview = {
+      orderDate,
+      lot: parsed.lot,
+      lineCount: lines.length,
+      totalQuantity: lines.reduce((sum, l) => sum + l.quantity, 0),
+      unmatched,
+      lines,
+    };
+    if (dto.dryRun === 'true') return { preview, order: null };
+
+    if (unmatched.length) {
+      throw new BadRequestException(
+        `หา PartNo ไม่พบในรหัสสินค้า ${unmatched.length} แถว (เช่น แถว ${unmatched[0].row}: ${unmatched[0].partNo})`,
+      );
+    }
+    if (lines.length > SALES_ORDER_MAX_LINES) {
+      throw new BadRequestException(`ออเดอร์หนึ่งใบมีได้ไม่เกิน ${SALES_ORDER_MAX_LINES} รายการ`);
+    }
+    const remark = [
+      file.originalname ? `นำเข้าจาก ${file.originalname}` : 'นำเข้าจาก Excel',
+      parsed.lot ? `LOT ${parsed.lot}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 1000);
+    const order = await this.createOrder(
+      {
+        customerId: dto.customerId,
+        orderDate,
+        dueDate: null,
+        customerPo: null,
+        remark,
+        lines: lines.map((l) => ({
+          productId: l.product!.id,
+          quantity: l.quantity,
+          remark: null,
+          customerPo: l.customerPo,
+          deliveryTime: l.deliveryTime,
+          deliveryPoint: l.deliveryPoint,
+          customerLine: l.customerLine,
+        })),
+      },
+      userId,
+    );
+    return { preview, order };
   }
 
   async updateOrder(id: string, dto: UpdateSalesOrderDto, userId: string) {
@@ -247,13 +360,16 @@ export class SalesService {
       const lines = (await m.query(
         `SELECT l.id, l.product_id, l.quantity, p.code, p.name, p.is_active
          FROM inventory.sales_order_lines l JOIN master.products p ON p.id = l.product_id
-         WHERE l.sales_order_id = $1 ORDER BY l.product_id::bigint`,
+         WHERE l.sales_order_id = $1 ORDER BY l.product_id::bigint, l.line_no`,
         [id],
       )) as Row[];
       if (!lines.length) throw new ConflictException('ออเดอร์ต้องมีอย่างน้อย 1 รายการ');
 
       const plan: Array<{ lineId: string; packageId: string; qty: number }> = [];
-      const shortfalls: Row[] = [];
+      // One shortfall per product, summed over its lines (a product may repeat).
+      const shortfallByProduct = new Map<string, Row>();
+      // Quantity earlier lines of this order already took, per package.
+      const planned = new Map<string, number>();
       for (const line of lines) {
         // Lock in id order (deadlock-safe with issue), allocate oldest first.
         const boxes = (await m.query(
@@ -275,28 +391,32 @@ export class SalesService {
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime() ||
             Number(a.id) - Number(b.id),
         );
-        let need = Number(line.quantity);
-        let available = 0;
-        for (const box of boxes) {
-          const free = Number(box.current_qty) - (reserved.get(String(box.id)) ?? 0);
-          if (free <= 0) continue;
-          available += free;
-          if (need <= 0) continue;
-          const take = Math.min(free, need);
-          plan.push({ lineId: line.id, packageId: box.id, qty: take });
-          need -= take;
+        const result = allocateFromBoxes(
+          boxes.map((b) => ({ id: String(b.id), currentQty: Number(b.current_qty) })),
+          reserved,
+          planned,
+          Number(line.quantity),
+        );
+        for (const take of result.takes) {
+          plan.push({ lineId: line.id, packageId: take.packageId, qty: take.qty });
         }
-        if (need > 0) {
-          shortfalls.push({
+        const key = String(line.product_id);
+        const entry = shortfallByProduct.get(key);
+        if (entry) {
+          entry.required += Number(line.quantity);
+          entry.shortfall += result.shortfall;
+        } else {
+          shortfallByProduct.set(key, {
             productId: line.product_id,
             productCode: line.code,
             productName: line.name,
             required: Number(line.quantity),
-            available,
-            shortfall: need,
+            available: result.available,
+            shortfall: result.shortfall,
           });
         }
       }
+      const shortfalls = [...shortfallByProduct.values()].filter((s) => s.shortfall > 0);
       if (shortfalls.length) {
         throw new ConflictException({
           message: 'สินค้าสำเร็จรูป (กล่อง FG) ไม่พอสำหรับยืนยันออเดอร์',
@@ -886,10 +1006,8 @@ export class SalesService {
     if (!customer.length || !customer[0].is_active) {
       throw new BadRequestException('ไม่พบลูกค้าหรือลูกค้าถูกปิดใช้งาน');
     }
-    const ids = dto.lines.map((l) => l.productId);
-    if (new Set(ids).size !== ids.length) {
-      throw new BadRequestException('สินค้าซ้ำในออเดอร์เดียวกัน — รวมจำนวนไว้ในรายการเดียว');
-    }
+    // The same product may repeat on several lines (different PO / delivery round).
+    const ids = [...new Set(dto.lines.map((l) => l.productId))];
     const products = (await m.query(
       `SELECT id FROM master.products WHERE id = ANY($1::bigint[]) AND is_active = true`,
       [ids],
@@ -904,9 +1022,21 @@ export class SalesService {
     for (const line of dto.lines) {
       lineNo += 1;
       await m.query(
-        `INSERT INTO inventory.sales_order_lines (sales_order_id, line_no, product_id, quantity, remark)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [orderId, lineNo, line.productId, line.quantity, line.remark ?? null],
+        `INSERT INTO inventory.sales_order_lines
+           (sales_order_id, line_no, product_id, quantity, remark,
+            customer_po, delivery_time, delivery_point, customer_line)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          orderId,
+          lineNo,
+          line.productId,
+          line.quantity,
+          line.remark ?? null,
+          line.customerPo ?? null,
+          line.deliveryTime ?? null,
+          line.deliveryPoint ?? null,
+          line.customerLine ?? null,
+        ],
       );
     }
   }

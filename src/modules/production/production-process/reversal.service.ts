@@ -69,8 +69,10 @@ export class ReversalService {
     targetRequestId: string,
     dto: ReverseDto,
     userId: string,
+    /** Runs inside this transaction instead of its own (used by amend). */
+    outer?: EntityManager,
   ): Promise<ReverseResult> {
-    return this.dataSource.transaction(async (manager) => {
+    const run = async (manager: EntityManager): Promise<ReverseResult> => {
       // A completed order may still have its last boxes voided (reopens it).
       const { line, order } = await lockLotModelLine(manager, lineId, true);
       const txRepo = manager.getRepository(ProductionTransaction);
@@ -278,7 +280,8 @@ export class ReversalService {
       });
 
       return this.summary(manager, targetRequestId, originals, false);
-    });
+    };
+    return outer ? run(outer) : this.dataSource.transaction(run);
   }
 
   /**

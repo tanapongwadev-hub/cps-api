@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { loadWipBoxes } from './wip-boxes';
 
 export type HistoryKind = 'PRODUCE' | 'RECEIVE' | 'TRANSFER' | 'CLOSE' | 'PACK';
 
@@ -26,6 +27,15 @@ export interface HistoryEntry {
   reversed: boolean;
   /** Best-effort: the server re-checks (per origin) when it is actually reversed. */
   reversible: boolean;
+  /** PRODUCE/RECEIVE: rejects per reason, to prefill an edit. */
+  rejects: Array<{ reasonId: string; qty: number }>;
+  /** PRODUCE/RECEIVE: current QR of the boxes it drew from (an edit reuses them). */
+  boxes: string[];
+  /**
+   * PRODUCE/RECEIVE: most pieces (good + rejects) an edit can record — what
+   * it recorded plus what is still left in its boxes (or at the step).
+   */
+  maxQty: number;
 }
 
 interface Row {
@@ -34,6 +44,7 @@ interface Row {
   step_code: string;
   type: string;
   qty: number;
+  reject_reason_id: string | null;
   source_lot: string | null;
   target_lot: string | null;
   target_lot_remaining: number | null;
@@ -66,7 +77,7 @@ export class HistoryService {
     }
     const rows = await this.dataSource.query<Row[]>(
       `SELECT t.request_id::text, t.step_index, ps.code AS step_code,
-              t.transaction_type AS type, t.qty,
+              t.transaction_type AS type, t.qty, t.reject_reason_id::text,
               sl.lot_no AS source_lot, tl.lot_no AS target_lot,
               tl.remaining_qty AS target_lot_remaining,
               (tw.id IS NOT NULL AND tw.qty_remaining = tw.qty_in AND tw.qty_used = 0
@@ -96,6 +107,35 @@ export class HistoryService {
       list.push(r);
       groups.set(r.request_id, list);
     }
+
+    // For edits: the boxes each produce request drew from, their current QR
+    // and what is left in them, plus what still waits at each step.
+    const boxRows = await this.dataSource.query<
+      Array<{ request_id: string; wip_id: string; box_no: number }>
+    >(
+      `SELECT DISTINCT t.request_id::text, b.wip_id::text, b.box_no
+       FROM inventory.production_transaction_boxes b
+       JOIN inventory.production_transactions t ON t.id = b.transaction_id
+       WHERE t.production_order_line_id = $1 AND b.qty > 0
+         AND t.transaction_type IN ('PROCESS_OUTPUT','FG_RECEIVE','REJECT')`,
+      [lineId],
+    );
+    const boxState = await loadWipBoxes(this.dataSource.manager, [
+      ...new Set(boxRows.map((b) => b.wip_id)),
+    ]);
+    const boxOf = (wipId: string, boxNo: number) =>
+      boxState.get(wipId)?.find((b) => b.boxNo === Number(boxNo));
+    const waiting = new Map(
+      (
+        await this.dataSource.query<Array<{ step_index: number; qty: number }>>(
+          `SELECT step_index, COALESCE(SUM(qty_remaining), 0)::int AS qty
+           FROM inventory.process_wip
+           WHERE production_order_line_id = $1 AND status = 'OPEN'
+           GROUP BY step_index`,
+          [lineId],
+        )
+      ).map((r) => [Number(r.step_index), Number(r.qty)]),
+    );
     const entries: HistoryEntry[] = [];
     for (const [requestId, list] of groups) {
       const first = list[0];
@@ -138,6 +178,26 @@ export class HistoryService {
             ? list.every((r) => r.target_wip_untouched === true)
             : [...perLot.values()].every((l) => l.remaining >= l.qty));
 
+      const rejectsByReason = new Map<string, number>();
+      for (const r of list) {
+        if (r.type === 'REJECT' && r.reject_reason_id) {
+          rejectsByReason.set(
+            r.reject_reason_id,
+            (rejectsByReason.get(r.reject_reason_id) ?? 0) + Number(r.qty),
+          );
+        }
+      }
+      const used = boxRows
+        .filter((b) => b.request_id === requestId)
+        .map((b) => boxOf(b.wip_id, b.box_no))
+        .filter((b): b is NonNullable<typeof b> => !!b);
+      const recorded = sum(['PROCESS_OUTPUT', 'FG_RECEIVE', 'REJECT']);
+      const maxQty =
+        recorded +
+        (used.length
+          ? used.reduce((s, b) => s + b.left, 0)
+          : (waiting.get(Number(first.step_index)) ?? 0));
+
       entries.push({
         requestId,
         kind,
@@ -163,6 +223,12 @@ export class HistoryService {
         createdAt: first.created_at,
         reversed,
         reversible,
+        rejects: [...rejectsByReason].map(([reasonId, qty]) => ({
+          reasonId,
+          qty,
+        })),
+        boxes: used.map((b) => b.qrCode),
+        maxQty,
       });
     }
     return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

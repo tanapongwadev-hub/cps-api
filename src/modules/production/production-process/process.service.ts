@@ -104,6 +104,8 @@ export class ProcessService {
     stepIndex: number,
     dto: ProduceDto,
     userId: string,
+    /** Runs inside this transaction instead of its own (used by amend). */
+    outer?: EntityManager,
   ): Promise<ProduceResult> {
     const rejects = (dto.rejects ?? []).filter((r) => r.qty > 0);
     const rejectTotal = rejects.reduce((sum, r) => sum + r.qty, 0);
@@ -146,7 +148,7 @@ export class ProcessService {
       );
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    const run = async (manager: EntityManager): Promise<ProduceResult> => {
       const { line, order, steps } = await lockLotModelLine(manager, lineId);
       const step = stepAt(steps, stepIndex);
 
@@ -425,7 +427,8 @@ export class ProcessService {
         );
       }
       return { ...result, splits };
-    });
+    };
+    return outer ? run(outer) : this.dataSource.transaction(run);
   }
 
   private async assertRejectReasons(

@@ -7,8 +7,11 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ActiveAssignmentGuard } from '../../common/guards/active-assignment.guard';
@@ -17,16 +20,19 @@ import { PermissionGuard } from '../../common/guards/permission.guard';
 import {
   CancelSalesOrderDto,
   CreateSalesOrderDto,
+  ImportSalesOrderDto,
   IssueSalesJobOrderDto,
   ListSalesJobOrdersQueryDto,
   ListSalesOrdersQueryDto,
   PickSalesJobOrderDto,
+  SALES_ORDER_IMPORT_MAX_SIZE,
   SalesReportQueryDto,
   UpdateSalesOrderDto,
   VersionDto,
 } from './dto/sales.dto';
 import { SALES_PERMISSIONS as P } from './sales-permissions';
 import { SalesService } from './sales.service';
+import type { SalesOrderImportFile } from './sales.service';
 
 @Controller('sales-orders')
 @UseGuards(JwtAuthGuard, ActiveAssignmentGuard, PermissionGuard)
@@ -55,6 +61,22 @@ export class SalesOrdersController {
   @RequirePermissions(P.ORDER_CREATE)
   create(@Body() dto: CreateSalesOrderDto, @CurrentUser('id') userId: string) {
     return this.service.createOrder(dto, userId);
+  }
+
+  /** Customer delivery statement (.xlsx) → one draft order; dryRun=true previews. */
+  @Post('import')
+  @RequirePermissions(P.ORDER_CREATE)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: SALES_ORDER_IMPORT_MAX_SIZE },
+    }),
+  )
+  importExcel(
+    @UploadedFile() file: SalesOrderImportFile,
+    @Body() dto: ImportSalesOrderDto,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.service.importOrder(file, dto, userId);
   }
 
   @Patch(':id')

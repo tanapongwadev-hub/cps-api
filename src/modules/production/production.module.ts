@@ -18,6 +18,7 @@ import { PackageService } from './production-package/package.service';
 import { BoardService } from './production-process/board.service';
 import { CloseService } from './production-process/close.service';
 import { HistoryService } from './production-process/history.service';
+import { AmendService } from './production-process/amend.service';
 import { ProcessService } from './production-process/process.service';
 import { ReconciliationService } from './production-process/reconciliation.service';
 import { ReversalService } from './production-process/reversal.service';
@@ -87,6 +88,7 @@ export const PRODUCTION_TRACE_ENTITIES = [
     ReconciliationService,
     CloseService,
     HistoryService,
+    AmendService,
     PackageService,
     TraceabilityService,
   ],
