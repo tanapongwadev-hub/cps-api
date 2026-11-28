@@ -15,6 +15,18 @@ const LAST_RECEIVED_SQL = `(
   WHERE receiving.material_id = material.id
     AND receiving.status = 'confirmed'
 )`;
+// Person who received the latest confirmed receipt: the confirmer, else the
+// creator (the one-step receive sets both). Full name, falling back to username.
+const LAST_RECEIVED_BY_SQL = `(
+  SELECT COALESCE(NULLIF(TRIM(CONCAT_WS(' ', receiver.first_name, receiver.last_name)), ''), receiver.username)
+  FROM inventory.material_receivings receiving
+  JOIN iam.users receiver
+    ON receiver.id = COALESCE(receiving.confirmed_by, receiving.created_by)
+  WHERE receiving.material_id = material.id
+    AND receiving.status = 'confirmed'
+  ORDER BY receiving.receive_date DESC, receiving.confirmed_at DESC NULLS LAST, receiving.id DESC
+  LIMIT 1
+)`;
 
 export function classifyMaterialStock(
   currentStock: number,
@@ -94,6 +106,7 @@ export class StockBalancesService {
       .addSelect(CURRENT_STOCK_SQL, 'currentStock')
       .addSelect('stock.lastMovementAt', 'lastMovementAt')
       .addSelect(LAST_RECEIVED_SQL, 'lastReceivedAt')
+      .addSelect(LAST_RECEIVED_BY_SQL, 'lastReceivedBy')
       .orderBy(
         sortExpressions[query.sortBy ?? 'code'],
         query.sortOrder === 'desc' ? 'DESC' : 'ASC',
@@ -107,6 +120,7 @@ export class StockBalancesService {
         currentStock: string;
         lastMovementAt: Date | string | null;
         lastReceivedAt: string | null;
+        lastReceivedBy: string | null;
       }>();
 
     const ids = rows.map((row) => row.materialId);
@@ -145,6 +159,7 @@ export class StockBalancesService {
               ? new Date(row.lastMovementAt).toISOString()
               : null,
             lastReceivedAt: row.lastReceivedAt ?? null,
+            lastReceivedBy: row.lastReceivedBy ?? null,
           },
         ];
       }),
